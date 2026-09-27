@@ -52,7 +52,7 @@ except crx.CrxError as e:
 | `withdraw(amount)` | Signs and arms a withdraw. Paid after the next fold and crank. |
 | `balance()` | Collateral, free, margin, withdraw state. |
 | `positions()` | Open positions. |
-| `trades()` | Your event tape. |
+| `trades()` | Your event tape. `market=True` adds every open RFQ a maker seat receives (no owner named). |
 
 `quote()` also takes `expiry=` (datetime, timedelta or unix ms), `im_bps=` and `wait=` (seconds).
 

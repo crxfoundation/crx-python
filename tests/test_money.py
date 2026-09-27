@@ -185,6 +185,21 @@ def test_trades_pages(make_client, session):
     assert [c["query"]["since"] for c in session.calls if c["path"] == "/trades"] == [["0"], ["1000"]]
 
 
+def test_trades_own_by_default(make_client, session):
+    tape = {"seq": 6, "trades": [
+        {"type": "rfq.opened", "seq": 1, "ts": 1, "data": {"rfq_id": "0xa", "pair": "USDMXN"}},
+        {"type": "rfq.opened", "seq": 2, "ts": 1, "data": {"rfq_id": "0xb", "pair": "USDBRL"}},
+        {"type": "rfq.quoted", "seq": 3, "ts": 2, "data": {"rfq_id": "0xa", "rate": "18.7"}},
+        {"type": "margin.notice", "seq": 4, "ts": 3, "data": {}},
+        {"type": "trade.opened", "seq": 5, "ts": 4, "data": {"rfq_id": "0xa", "trade_id": "0xt"}},
+        {"type": "rfq.opened", "seq": 6, "ts": 5, "data": {"rfq_id": "0xc", "pair": "USDPHP"}},
+    ]}
+    session.routes[("GET", "/trades")] = tape
+    c = make_client()
+    assert [e.seq for e in c.trades()] == [1, 3, 4, 5]
+    assert [e.seq for e in c.trades(market=True)] == [1, 2, 3, 4, 5, 6]
+
+
 def test_markets_parse(make_client):
     ms = {m.pair: m for m in make_client(key=False).markets()}
     for live in ("USD/MXN", "USD/BRL", "USD/PHP"):
