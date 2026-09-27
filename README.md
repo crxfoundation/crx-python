@@ -53,8 +53,32 @@ except crx.CrxError as e:
 | `balance()` | Collateral, free, margin, withdraw state. |
 | `positions()` | Open positions. |
 | `trades()` | Your event tape. `market=True` adds every open RFQ a maker seat receives (no owner named). |
+| `add_viewer(addr)` | Lets another wallet read your seat. Up to 5. |
+| `remove_viewer(addr)` | Takes that access back. |
+| `viewers()` | Wallets that can read your seat. |
 
 `quote()` also takes `expiry=` (datetime, timedelta or unix ms), `im_bps=` and `wait=` (seconds).
+
+## Read another wallet (viewer)
+
+The owner grants read access. The viewer reads with its own key and `account=`.
+
+```python
+import crx
+
+owner = crx.Client(network="testnet")  # owner key in CRX_WALLET_PK
+owner.add_viewer("0x5b38da6a701c568545dcfcb03fcb875f56beddc4")
+print([v.address for v in owner.viewers()])
+# ['0x5b38da6a701c568545dcfcb03fcb875f56beddc4']
+
+viewer = crx.Client(key_file="viewer.key", network="testnet", account=owner.address)
+print(viewer.balance().free)
+# 900.000000
+print(len(viewer.positions()))
+# 2
+```
+
+A viewer reads `balance()`, `positions()` and `trades()` only. Other calls raise `config`.
 
 ## Errors
 
@@ -71,6 +95,7 @@ Every error is a `crx.CrxError`. Branch on `.code`.
 | `not_whitelisted` | Onboard the seat first. |
 | `seat_not_ready` | Onboarding not finished. Wait. |
 | `conflict` | A withdraw is already live or unpaid. Wait for the crank. |
+| `viewer_cap` | 5 viewers already. Remove one first. |
 | `insufficient_collateral` | Deposit more. |
 | `refused_to_sign` | The gateway served something unexpected. Nothing signed. |
 | `trade_unknown` | The arm may be on chain. Do not trade again. Read `positions()` after the next fold. |

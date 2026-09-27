@@ -6,13 +6,13 @@ from .errors import (
     MarketClosed, MarketPaused, NetworkError, NoQuotes, NotWhitelisted, OwnRoundOpen, QuoteExpired,
     RateLimited, RefusedToSign, Rejected, SeatNotReady, ServerError, TradeUnknown, TxFailed,
 )
-from .models import Balance, Deposit, Event, Market, Position, Quote, Trade, Withdraw
+from .models import Balance, Deposit, Event, Market, Position, Quote, Trade, Viewer, Withdraw
 
 __version__ = "0.1.0"
 
 __all__ = [
     "Client", "NETWORKS", "__version__",
-    "Balance", "Deposit", "Event", "Market", "Position", "Quote", "Trade", "Withdraw",
+    "Balance", "Deposit", "Event", "Market", "Position", "Quote", "Trade", "Viewer", "Withdraw",
     "CrxError", "AboveMax", "AuthError", "BadAnswer", "BadRequest", "BelowMin", "ConfigError",
     "InsufficientCollateral", "MarketClosed", "MarketPaused", "NetworkError", "NoQuotes",
     "NotWhitelisted", "OwnRoundOpen", "QuoteExpired", "RateLimited", "RefusedToSign", "Rejected",

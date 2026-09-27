@@ -134,10 +134,10 @@ def session(health, markets):
 
 @pytest.fixture
 def make_client(session, tmp_path, account):
-    def make(key=True, clock=None):
+    def make(key=True, clock=None, **kw):
         c = crx.Client(
             key=account.key.hex() if key else None, base_url=BASE, rpc_url=RPC,
-            state_dir=tmp_path / "state", session=session,
+            state_dir=tmp_path / "state", session=session, **kw,
         )
         if clock is not None:
             c._clock, c._sleep = clock, clock.sleep

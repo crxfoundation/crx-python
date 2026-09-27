@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import requests
-from eth_utils import keccak, to_checksum_address
+from eth_utils import is_checksum_address, is_hex_address, keccak, to_checksum_address
 
 from . import _eip712 as e7
 from ._bind import Binder
@@ -24,7 +24,7 @@ from .errors import (
     MarketPaused, NoQuotes, RefusedToSign, clean,
 )
 from .models import (
-    Balance, Deposit, Event, Market, Position, Quote, Trade, Withdraw, dec, ms_to_dt, side_word,
+    Balance, Deposit, Event, Market, Position, Quote, Trade, Viewer, Withdraw, dec, ms_to_dt, side_word,
 )
 
 log = logging.getLogger("crx")
@@ -51,6 +51,22 @@ def _amount(value: Any, what: str = "amount") -> Decimal:
     if d.scaleb(6) != d.scaleb(6).to_integral_value():
         raise BadRequest(f"{what} has more than 6 decimals")
     return d
+
+
+def _address(value: Any, what: str, err: type[CrxError] = BadRequest) -> str:
+    """A 0x wallet address, lower case. A bad checksum or the zero address is refused."""
+    s = value.strip() if isinstance(value, str) else ""
+    body = s[2:]
+    mixed = body not in (body.lower(), body.upper())
+    if not (s[:2] == "0x" and is_hex_address(s)) or (mixed and not is_checksum_address(s)) or int(s, 16) == 0:
+        raise err(f"{what} is not a wallet address")
+    return s.lower()
+
+
+def _viewer(v: dict) -> Viewer:
+    by = v.get("granted_by")
+    return Viewer(address=str(v.get("viewer") or "").lower(), granted_by=by.lower() if isinstance(by, str) else None,
+                  granted_at=ms_to_dt(v.get("granted_at")), raw=v)
 
 
 def _plain(d: Decimal) -> str:
@@ -88,6 +104,9 @@ class Client:
     ``key`` is the seat wallet's private key. Without it, only ``health`` and
     ``markets`` work. The key is read from ``key``, ``key_file``,
     ``CRX_WALLET_PK`` or ``CRX_WALLET_PK_FILE``, in that order.
+
+    ``account`` is another seat this key may read (see ``add_viewer``). With it,
+    ``balance``, ``positions`` and ``trades`` read that seat; every other call is refused.
     """
 
     def __init__(
@@ -101,8 +120,10 @@ class Client:
         state_dir: str | os.PathLike | None = None,
         timeout: float = 10.0,
         session: requests.Session | None = None,
+        account: str | None = None,
     ) -> None:
         self._account = None
+        self._custody = None
         name = _ALIASES.get(network, network)
         net = NETWORKS.get(name)
         if net is None:
@@ -117,6 +138,11 @@ class Client:
             key = None
             raise
         self._rpc = Rpc(rpc_url or os.environ.get("CRX_RPC") or net["rpc_url"], self._session, max(timeout, 20.0))
+        try:
+            custody = None if account is None else _address(account, "account", ConfigError)
+        except ConfigError:
+            key = None
+            raise
         # The key leaves this frame's locals as soon as it is loaded, or fails to load.
         try:
             self._account = load_account(key, key_file)
@@ -125,6 +151,8 @@ class Client:
             raise
         key = None
         self._gw._account = self._account
+        if self._account is not None and custody != self.address:
+            self._custody = self._gw.custody = custody
         self._state_dir = Path(state_dir or os.environ.get("CRX_STATE_DIR") or DEFAULT_STATE_DIR).expanduser()
         self._chain: dict | None = None
         self._sep: bytes | None = None
@@ -140,15 +168,26 @@ class Client:
 
     @property
     def address(self) -> str | None:
-        """The seat address, lower case. None without a key."""
+        """The key's address, lower case. None without a key."""
         account = getattr(self, "_account", None)
         return account.address.lower() if account is not None else None
+
+    @property
+    def account(self) -> str | None:
+        """The seat this client reads: ``account=`` when set, else ``address``."""
+        return getattr(self, "_custody", None) or self.address
 
     # ---------- setup checks ----------
 
     def _need_key(self) -> None:
         if self._account is None:
             raise ConfigError("this call needs the seat key: set CRX_WALLET_PK or pass key=")
+
+    def _need_seat(self) -> None:
+        """The key, acting for its own seat."""
+        self._need_key()
+        if self._custody is not None:
+            raise ConfigError("a viewer (account=) only reads: balance, positions, trades")
 
     def _chain_info(self) -> dict:
         """This network's chain from /health, with its domain checked against the core."""
@@ -228,15 +267,15 @@ class Client:
     # ---------- seat reads ----------
 
     def balance(self) -> Balance:
-        """Your own collateral, margin and withdraw state, as of the last fold."""
+        """Collateral, margin and withdraw state, as of the last fold."""
         self._need_key()
         b = self._gw.request("GET", "/balance", query={"chain": self.chain_key})
-        if str(b.get("account") or "").lower() != self.address:
+        if str(b.get("account") or "").lower() != self.account:
             raise BadAnswer("/balance answered for another account")
         w = b.get("withdraw") if isinstance(b.get("withdraw"), dict) else {}
         nonce = w.get("nonce")
         return Balance(
-            account=self.address, state=b.get("state"), collateral=dec(b.get("collateral")), free=dec(b.get("free")),
+            account=self.account, state=b.get("state"), collateral=dec(b.get("collateral")), free=dec(b.get("free")),
             equity=dec(b.get("equity")), im=dec(b.get("im")), mm=dec(b.get("mm")),
             pending_deposit=dec(b.get("pending_deposit")),
             open_legs=b.get("open_legs") if isinstance(b.get("open_legs"), int) else None,
@@ -317,7 +356,7 @@ class Client:
         instant: a datetime, a timedelta from now, or unix ms. Default: one
         month out, off the weekend.
         """
-        self._need_key()
+        self._need_seat()
         slash, compact = _pair(pair)
         side = _side(side)
         amount = _amount(notional, "notional")
@@ -396,7 +435,7 @@ class Client:
 
         Returns once the arm is on chain. The next hourly fold opens the position.
         """
-        self._need_key()
+        self._need_seat()
         if not isinstance(quote, Quote):
             raise BadRequest("trade() takes the Quote that quote() returned")
         b = self._binder()
@@ -439,7 +478,7 @@ class Client:
         On a testnet, ``mint=True`` first mints the test USDC the wallet lacks.
         The deposit is pending until the next fold, then counts as collateral.
         """
-        self._need_key()
+        self._need_seat()
         amount = _amount(amount)
         c = self._chain_ready()
         r = self._gw.request("POST", "/deposit", body={"chain": self.chain_key, "amount": _plain(amount)})
@@ -481,7 +520,7 @@ class Client:
 
         The next fold serves it; the crank after that pays it.
         """
-        self._need_key()
+        self._need_seat()
         amount = _amount(amount)
         c = self._chain_ready()
         nonce = self.balance().withdraw_nonce
@@ -506,6 +545,26 @@ class Client:
         tx = self._send("armWithdrawIntent", c["core"], data)
         log.info("withdraw %s armed, nonce %s", _plain(amount), nonce)
         return Withdraw(amount=amount, nonce=nonce, tx=tx)
+
+    # ---------- viewers ----------
+
+    def add_viewer(self, viewer: str) -> Viewer:
+        """Let ``viewer`` read your balance, positions and trades. At most 5 viewers. A repeat is a no-op."""
+        self._need_seat()
+        return _viewer(self._gw.request("PUT", f"/viewers/{_address(viewer, 'viewer')}", ok=(200, 201)))
+
+    def remove_viewer(self, viewer: str) -> None:
+        """Take back ``viewer``'s read access. No error when it had none."""
+        self._need_seat()
+        self._gw.request("DELETE", f"/viewers/{_address(viewer, 'viewer')}", ok=(200, 204))
+
+    def viewers(self) -> list[Viewer]:
+        """The wallets that may read your seat."""
+        self._need_seat()
+        rows = self._gw.request("GET", "/viewers").get("viewers")
+        if not isinstance(rows, list):
+            raise BadAnswer("/viewers lists no viewers")
+        return [_viewer(v) for v in rows if isinstance(v, dict)]
 
     def _send(self, what: str, to: str, data: str) -> str:
         tx = send_tx(self._rpc, self._account, self._chain_ready()["chain_id"], what, to, data, sleep=self._sleep)

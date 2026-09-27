@@ -40,6 +40,7 @@ class Gateway:
             raise ConfigError("the gateway URL must not carry credentials")
         self.base_url = base_url.rstrip("/")
         self._account = account
+        self.custody: str | None = None  # the account read as a viewer; None = the signer's own seat
         self._session = session
         self._timeout = timeout
 
@@ -54,15 +55,19 @@ class Gateway:
         return host_of(self.base_url)
 
     def headers(self, method: str, path: str, raw: bytes = b"") -> dict[str, str]:
-        """Signed headers. The last line of the message is keccak256 of the exact body bytes sent."""
+        """Signed headers. The last line of the message is keccak256 of the exact body bytes sent.
+
+        Custody is ``custody`` when set, else the signer.
+        """
         if self._account is None:
             raise ConfigError("this call needs the seat key: set CRX_WALLET_PK or pass key=")
-        seat = self._account.address.lower()
+        signer = self._account.address.lower()
+        custody = self.custody or signer
         ts, nonce = int(time.time() * 1000), uuid.uuid4().hex
-        msg = rest_message(method, path, seat, seat, ts, nonce, raw)
+        msg = rest_message(method, path, custody, signer, ts, nonce, raw)
         sig = self._account.sign_message(encode_defunct(text=msg)).signature
         return {
-            "x-crx-address": seat, "x-crx-signer": seat, "x-crx-ts": str(ts),
+            "x-crx-address": custody, "x-crx-signer": signer, "x-crx-ts": str(ts),
             "x-crx-nonce": nonce, "x-crx-sig": "0x" + bytes(sig).hex(),
         }
 
@@ -87,9 +92,10 @@ class Gateway:
         raise NetworkError(f"{self.host} did not answer ({failed})")
 
     def request(
-        self, method: str, path: str, *, body: Any = None, query: dict | None = None, auth: bool = True
+        self, method: str, path: str, *, body: Any = None, query: dict | None = None, auth: bool = True,
+        ok: tuple[int, ...] = (200,),
     ) -> dict:
-        return self.parse(self.raw_request(method, path, body=body, query=query, auth=auth))
+        return self.parse(self.raw_request(method, path, body=body, query=query, auth=auth), ok)
 
     @staticmethod
     def body_of(r: requests.Response) -> Any:
@@ -98,10 +104,13 @@ class Gateway:
         except ValueError:
             return None
 
-    def parse(self, r: requests.Response) -> dict:
+    def parse(self, r: requests.Response, ok: tuple[int, ...] = (200,)) -> dict:
+        """The JSON object of an ``ok`` answer; ``{}`` for a 204. Any other status raises."""
         body = self.body_of(r)
-        if r.status_code != 200:
+        if r.status_code not in ok:
             raise from_gateway(r.status_code, body, "" if isinstance(body, dict) else (r.text or "")[:300])
+        if r.status_code == 204:
+            return {}
         if not isinstance(body, dict):
             raise BadAnswer(f"{self.host} sent an answer that is not a JSON object", status=r.status_code)
         return body

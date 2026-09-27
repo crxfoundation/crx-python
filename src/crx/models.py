@@ -108,6 +108,16 @@ class Position:
 
 
 @dataclass(frozen=True)
+class Viewer:
+    """A wallet that may read your seat: ``address``, granted by ``granted_by`` at ``granted_at``."""
+
+    address: str
+    granted_by: str | None
+    granted_at: datetime | None
+    raw: dict = field(repr=False, compare=False)
+
+
+@dataclass(frozen=True)
 class Event:
     type: str
     seq: int | None
