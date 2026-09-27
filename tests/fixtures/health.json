@@ -1,0 +1,36 @@
+{
+ "status": "ok",
+ "healthy": true,
+ "chains": [
+  {
+   "base_token": "0xa52c60e6e14190dad2739f4b401aa3264ae68cb8",
+   "chain_id": 43113,
+   "core": "0x893ed03f61e2d3f3e24ea610d66fa91d5ecd3645",
+   "domain": "0x00e979544609704ae484baac3e967eff197ca4204c78f49d17724a9f70a6b790",
+   "domain_verified": true,
+   "enabled": true,
+   "key": "avax-fuji",
+   "lens": "0xa6de4e081b2ec6448a6f522061dc985096cf8781"
+  },
+  {
+   "base_token": "0x8c4aaa8996251c9276a24c63e875c63e5e4f3acd",
+   "chain_id": 11142220,
+   "core": "0x616b7c41256e634a656b3bfcd3fe4fed169e0385",
+   "domain": "0xca886ada0a3a3aac291d9bc7229fec587c6af71708ac60f44340a65b6251ffde",
+   "domain_verified": true,
+   "enabled": true,
+   "key": "celo",
+   "lens": "0xd533b190a33a5b71f7c142f9ab0c5b537fe6e31e"
+  },
+  {
+   "base_token": "0x9e81d1c552447626a142a4517d54afa6fb17d717",
+   "chain_id": 84532,
+   "core": "0xa0348021742d7141c76b4c861f5bedb482b358a2",
+   "domain": "0x2cacbf71bfaa9160b455b7d09651bbd14cb424675ac2a2f7cb6fbf613eac5bcc",
+   "domain_verified": true,
+   "enabled": true,
+   "key": "base",
+   "lens": "0xaad149ee40084de3d651a237b2c40999b359f838"
+  }
+ ]
+}
