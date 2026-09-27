@@ -8,7 +8,7 @@ import sys
 import crx
 
 action, amount = sys.argv[1], sys.argv[2]
-c = crx.Client(network="fuji")
+c = crx.Client(network="testnet")
 if action == "deposit":
     d = c.deposit(amount)
     print("deposit txs", d.txs, "- collateral after the next fold")

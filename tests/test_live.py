@@ -20,7 +20,7 @@ pytestmark = [
 
 @pytest.fixture
 def client():
-    return crx.Client(key=Account.create().key.hex(), network="fuji")
+    return crx.Client(key=Account.create().key.hex(), network="testnet")
 
 
 def test_health(client):

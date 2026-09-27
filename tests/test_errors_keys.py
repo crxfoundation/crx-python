@@ -142,8 +142,17 @@ def test_both_key_and_file_refused(tmp_path, account):
 
 
 def test_unknown_network():
-    with pytest.raises(crx.ConfigError):
+    with pytest.raises(crx.ConfigError) as ei:
         crx.Client(network="mainnet")
+    assert "known: testnet" in str(ei.value) and "fuji" not in str(ei.value)
+
+
+@pytest.mark.parametrize("kw", [{}, {"network": "testnet"}, {"network": "fuji"}])
+def test_testnet_and_fuji_alias(kw, account):
+    c = crx.Client(key=account.key.hex(), **kw)
+    assert c.network == "testnet" and c.chain_key == "avax-fuji"
+    assert "network='testnet'" in repr(c)
+    assert list(crx.NETWORKS) == ["testnet"]
 
 
 def test_rpc_url_never_in_errors(make_client, session):

@@ -30,12 +30,13 @@ from .models import (
 log = logging.getLogger("crx")
 
 NETWORKS = {
-    "fuji": {
+    "testnet": {
         "chain": "avax-fuji",
         "base_url": "https://api.crxfx.com",
         "rpc_url": "https://api.avax-test.network/ext/bc/C/rpc",
     },
 }
+_ALIASES = {"fuji": "testnet"}
 TESTNET_CHAIN_IDS = {43113, 84532, 11142220}
 DEFAULT_STATE_DIR = "~/.crx-quickstart"  # shared with the CRX quickstart scripts: one Side nonce floor per seat
 
@@ -94,7 +95,7 @@ class Client:
         key: str | bytes | None = None,
         *,
         key_file: str | os.PathLike | None = None,
-        network: str = "fuji",
+        network: str = "testnet",
         base_url: str | None = None,
         rpc_url: str | None = None,
         state_dir: str | os.PathLike | None = None,
@@ -102,11 +103,12 @@ class Client:
         session: requests.Session | None = None,
     ) -> None:
         self._account = None
-        net = NETWORKS.get(network)
+        name = _ALIASES.get(network, network)
+        net = NETWORKS.get(name)
         if net is None:
             key = None
             raise ConfigError(f"unknown network {clean(network, 20)!r}; known: {', '.join(NETWORKS)}")
-        self.network = network
+        self.network = name
         self.chain_key = net["chain"]
         self._session = session or requests.Session()
         try:

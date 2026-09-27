@@ -1,7 +1,7 @@
 """Markets, then one quote. Accepts nothing. Needs CRX_WALLET_PK."""
 import crx
 
-c = crx.Client(network="fuji")
+c = crx.Client(network="testnet")
 for m in c.markets():
     if not m.paused:
         print(m.pair, "open" if m.open else f"closed, opens {m.next_open}", "min", m.min_notional)

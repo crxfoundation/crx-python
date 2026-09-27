@@ -26,7 +26,7 @@ The SDK never prints or logs the key.
 ```python
 import crx
 
-c = crx.Client(network="fuji")
+c = crx.Client(network="testnet")
 
 try:
     print(c.balance().free)

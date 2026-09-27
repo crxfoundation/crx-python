@@ -1,7 +1,7 @@
 """Balance, one quote, one trade. Needs CRX_WALLET_PK."""
 import crx
 
-c = crx.Client(network="fuji")
+c = crx.Client(network="testnet")
 
 try:
     print("free", c.balance().free)
