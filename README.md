@@ -95,3 +95,7 @@ pip install -e '.[test]'
 pytest                      # unit tests, no network
 CRX_LIVE=1 pytest -m live   # live, read-only, no transaction
 ```
+
+## License
+
+Use only to access CRX services. See [LICENSE](LICENSE).

@@ -7,6 +7,7 @@ name = "crx-python"
 version = "0.1.0"
 description = "Python SDK for the CRX FX forwards venue"
 readme = "README.md"
+license = { text = "LicenseRef-CRX-Proprietary" }
 requires-python = ">=3.10"
 dependencies = [
     "requests>=2.28",
@@ -15,6 +16,7 @@ dependencies = [
     "eth-utils>=4",
 ]
 classifiers = [
+    "License :: Other/Proprietary License",
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
 ]
