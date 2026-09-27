@@ -265,8 +265,8 @@ class Client:
         ``since`` is a seq: pass the last ``Event.seq`` to read only newer events.
         A maker seat also receives every open RFQ on the venue (``rfq.opened``, no
         owner named). By default an ``rfq.opened`` is kept only when another event
-        on your tape names the same RFQ (a quote, fill, trade or expiry).
-        ``market=True`` keeps them all.
+        on your tape names the same RFQ, so your own RFQs show once they are quoted,
+        filled or expired. ``market=True`` keeps them all.
         """
         self._need_key()
         rows: list = []
