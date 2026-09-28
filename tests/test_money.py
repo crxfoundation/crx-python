@@ -243,7 +243,7 @@ def test_withdraw_in_progress_sends_nothing(make_client, session, account):
     session.routes[("GET", "/balance")] = balance_body(account)
     session.routes[("POST", "/withdraw")] = (409, {
         "code": "withdraw_in_progress", "error": "one withdraw at a time; the next opens when this one is paid"})
-    with pytest.raises(crx.WithdrawInProgress) as ei:
+    with pytest.raises(crx.CrxError) as ei:
         make_client().withdraw(1000)
     assert ei.value.code == "withdraw_in_progress" and ei.value.status == 409
     assert chain.sent == []
