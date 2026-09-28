@@ -333,9 +333,10 @@ class Client:
 
         ``since`` is a seq: pass the last ``Event.seq`` to read only newer events.
         A maker seat also receives every open RFQ on the venue (``rfq.opened``, no
-        owner named). By default an ``rfq.opened`` is kept only when another event
-        on your tape names the same RFQ, so your own RFQs show once they are quoted,
-        filled or expired. ``market=True`` keeps them all.
+        owner named). By default an ``rfq.opened`` is kept only when it carries a
+        ``client_rfq_id``: the gateway serves that field to the RFQ's taker alone.
+        ``quote()`` always sends one; an RFQ opened elsewhere without one shows
+        its other events only. ``market=True`` keeps every ``rfq.opened``.
         """
         self._need_key()
         rows: list = []
@@ -353,11 +354,11 @@ class Client:
             since = seq
         rows = [r for r in rows if isinstance(r, dict)]
         if not market:
-            def rfq_of(r: dict) -> Any:
+            def own_rfq(r: dict) -> bool:
                 d = r.get("data")
-                return d.get("rfq_id") if isinstance(d, dict) else None
-            mine = {rfq_of(r) for r in rows if r.get("type") != "rfq.opened"} - {None}
-            rows = [r for r in rows if r.get("type") != "rfq.opened" or rfq_of(r) in mine]
+                cid = d.get("client_rfq_id") if isinstance(d, dict) else None
+                return isinstance(cid, str) and cid != ""
+            rows = [r for r in rows if r.get("type") != "rfq.opened" or own_rfq(r)]
         return [
             Event(type=str(r.get("type")), seq=r.get("seq") if isinstance(r.get("seq"), int) else None,
                   ts=ms_to_dt(r.get("ts")),

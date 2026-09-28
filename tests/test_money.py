@@ -186,18 +186,23 @@ def test_trades_pages(make_client, session):
 
 
 def test_trades_own_by_default(make_client, session):
-    tape = {"seq": 6, "trades": [
-        {"type": "rfq.opened", "seq": 1, "ts": 1, "data": {"rfq_id": "0xa", "pair": "USDMXN"}},
+    # A seat that takes and makes: the gateway serves client_rfq_id to the RFQ's taker only.
+    tape = {"seq": 9, "trades": [
+        {"type": "rfq.opened", "seq": 1, "ts": 1, "data": {"rfq_id": "0xa", "pair": "USDMXN", "client_rfq_id": "sdk-1"}},
         {"type": "rfq.opened", "seq": 2, "ts": 1, "data": {"rfq_id": "0xb", "pair": "USDBRL"}},
         {"type": "rfq.quoted", "seq": 3, "ts": 2, "data": {"rfq_id": "0xa", "rate": "18.7"}},
         {"type": "margin.notice", "seq": 4, "ts": 3, "data": {}},
         {"type": "trade.opened", "seq": 5, "ts": 4, "data": {"rfq_id": "0xa", "trade_id": "0xt"}},
         {"type": "rfq.opened", "seq": 6, "ts": 5, "data": {"rfq_id": "0xc", "pair": "USDPHP"}},
+        {"type": "rfq.quoted", "seq": 7, "ts": 6, "data": {"rfq_id": "0xc", "rate": "58.1"}},
+        {"type": "trade.opened", "seq": 8, "ts": 7, "data": {"rfq_id": "0xc", "trade_id": "0xu"}},
+        {"type": "rfq.opened", "seq": 9, "ts": 8, "data": {"rfq_id": "0xd", "pair": "USDMXN", "client_rfq_id": ""}},
     ]}
     session.routes[("GET", "/trades")] = tape
     c = make_client()
-    assert [e.seq for e in c.trades()] == [1, 3, 4, 5]
-    assert [e.seq for e in c.trades(market=True)] == [1, 2, 3, 4, 5, 6]
+    # Another seat's RFQ this seat quoted and filled (0xc) keeps its quote and fill, not its rfq.opened.
+    assert [e.seq for e in c.trades()] == [1, 3, 4, 5, 7, 8]
+    assert [e.seq for e in c.trades(market=True)] == [1, 2, 3, 4, 5, 6, 7, 8, 9]
 
 
 def test_markets_parse(make_client):
