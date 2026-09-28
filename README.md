@@ -108,6 +108,7 @@ Every error is a `crx.CrxError`. Branch on `.code`.
 | `own_round_open` | Your last round is still open. |
 | `not_whitelisted` | Onboard the seat first. |
 | `seat_not_ready` | Onboarding not finished. Wait. |
+| `conflict` | The venue cannot take this now. Retry later. |
 | `withdraw_in_progress` | One withdraw at a time. The next opens when this one is paid. |
 | `viewer_cap` | 5 viewers already. Remove one first. |
 | `insufficient_collateral` | Deposit more. |
