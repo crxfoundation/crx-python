@@ -11,7 +11,7 @@ from eth_utils import to_checksum_address
 import crx
 from crx import _eip712 as e7
 
-from .conftest import CHAIN_ID
+from .conftest import CHAIN_ID, Clock
 
 TOKEN = "0xa52c60e6e14190dad2739f4b401aa3264ae68cb8"
 
@@ -44,6 +44,28 @@ class Chain:
         return "0x" + f"{len(self.sent):064x}"
 
 
+def balance_body(account, nonce="3", deposit=None, withdraw=None):
+    return {"account": account.address.lower(), "chain": "avax-fuji", "state": "live",
+            "collateral": "1111.000000", "free": "900.000000", "equity": "1000.000000", "im": "100.000000",
+            "mm": "20.000000", "open_legs": 2, "as_of": 1_790_000_000_000, "as_of_block": 52_000_123,
+            "withdrawing": "0.000000", "deposit": {"last": deposit},
+            "withdraw": {"live": False, "nonce": nonce, "last": withdraw}}
+
+
+def money_view(session, account, chain, key, status="credited", tx=None, **last):
+    """GET /balance: ``<key>.last`` names ``tx`` (default: the newest sent tx) with ``status``."""
+    def view(req):
+        if not chain.sent:
+            return balance_body(account)
+        h = tx or "0x" + f"{len(chain.sent):064x}"
+        return balance_body(account, **{key: {"tx": h, "status": status, **last}})
+    session.routes[("GET", "/balance")] = view
+
+
+def polls(session, path):
+    return sum(1 for c in session.calls if c["path"] == path and c["method"] == "GET")
+
+
 def deposit_route(session, health, account, amount_raw, approve=True, data_edit=None):
     core = core_of(health)
     txs = [{"to": core, "chain_id": CHAIN_ID, "data": e7.calldata("deposit(uint256)", ["uint256"], [amount_raw])}]
@@ -58,8 +80,10 @@ def deposit_route(session, health, account, amount_raw, approve=True, data_edit=
 def test_deposit_mints_approves_deposits(make_client, session, health, account):
     chain = Chain(session, held=400 * 10**6)
     deposit_route(session, health, account, 1000 * 10**6)
-    d = make_client().deposit(1000)
+    money_view(session, account, chain, "deposit")
+    d = make_client(clock=Clock(time.time())).deposit(1000)
     assert d.amount == Decimal(1000) and len(d.txs) == 3 and len(chain.sent) == 3
+    assert d.status == "credited" and d.txs[-1] == "0x" + f"{3:064x}"
     assert all(Account.recover_transaction(r) == account.address for r in chain.sent)
     body = next(c for c in session.calls if c["path"] == "/deposit")["body"]
     assert body == {"chain": "avax-fuji", "amount": "1000"}
@@ -68,7 +92,47 @@ def test_deposit_mints_approves_deposits(make_client, session, health, account):
 def test_deposit_no_mint(make_client, session, health, account):
     chain = Chain(session, held=0)
     deposit_route(session, health, account, 1000 * 10**6, approve=False)
-    assert len(make_client().deposit(1000, mint=False).txs) == 1 and len(chain.sent) == 1
+    money_view(session, account, chain, "deposit")
+    assert len(make_client(clock=Clock(time.time())).deposit(1000, mint=False).txs) == 1 and len(chain.sent) == 1
+
+
+@pytest.mark.parametrize("word", ["credited", "failed"])
+def test_deposit_polls_until_its_own_tx_is_final(make_client, session, health, account, word):
+    chain = Chain(session, held=10**12)
+    deposit_route(session, health, account, 1000 * 10**6)
+    views = [balance_body(account, deposit={"tx": "0x" + "ee" * 32, "status": "credited", "amount": "5.000000"})]
+    views += [balance_body(account, deposit={"tx": "0x" + f"{2:064x}", "status": "pending", "amount": "1000.000000"})] * 2
+    views += [balance_body(account, deposit={"tx": "0x" + f"{2:064x}", "status": word, "amount": "1000.000000"})]
+    session.routes[("GET", "/balance")] = views
+    clock = Clock(time.time())
+    t0 = clock()
+    d = make_client(clock=clock).deposit(1000)
+    assert d.status == word and polls(session, "/balance") == 4 and clock() - t0 == 3
+
+
+def test_deposit_pending_after_30_s(make_client, session, health, account):
+    chain = Chain(session, held=10**12)
+    deposit_route(session, health, account, 1000 * 10**6)
+    money_view(session, account, chain, "deposit", status="pending")
+    clock = Clock(time.time())
+    t0 = clock()
+    assert make_client(clock=clock).deposit(1000).status == "pending"
+    assert 30 <= clock() - t0 <= 31 and polls(session, "/balance") == 31
+
+
+def test_deposit_other_tx_is_no_match(make_client, session, health, account):
+    chain = Chain(session, held=10**12)
+    deposit_route(session, health, account, 1000 * 10**6)
+    money_view(session, account, chain, "deposit", tx="0x" + "ee" * 32)
+    assert make_client(clock=Clock(time.time())).deposit(1000).status == "pending"
+
+
+def test_deposit_poll_rides_out_gateway_errors(make_client, session, health, account):
+    chain = Chain(session, held=10**12)
+    deposit_route(session, health, account, 1000 * 10**6)
+    done = balance_body(account, deposit={"tx": "0x" + f"{2:064x}", "status": "credited"})
+    session.routes[("GET", "/balance")] = [(503, {"code": "upstream", "error": "down"}), "not json", done]
+    assert make_client(clock=Clock(time.time())).deposit(1000).status == "credited"
 
 
 def test_deposit_foreign_tx_sends_nothing(make_client, session, health, account):
@@ -100,13 +164,6 @@ def test_deposit_revert_names_error(make_client, session, health, account):
     assert chain.sent == []
 
 
-def balance_body(account, nonce="3"):
-    return {"account": account.address.lower(), "chain": "avax-fuji", "state": "live",
-            "collateral": "1111.000000", "free": "900.000000", "equity": "1000.000000", "im": "100.000000",
-            "mm": "20.000000", "pending_deposit": "0.000000", "open_legs": 2, "as_of": 1_790_000_000_000,
-            "as_of_fold": 42, "withdraw": {"live": False, "nonce": nonce, "last": None}}
-
-
 def withdraw_route(session, health, account, amount=1000, edit=None, digest=None):
     core = core_of(health)
     w = {"account": account.address.lower(), "amount": str(amount * 10**6), "recipient": account.address.lower(),
@@ -120,10 +177,11 @@ def withdraw_route(session, health, account, amount=1000, edit=None, digest=None
 
 def test_withdraw_signs_and_arms(make_client, session, health, account):
     chain = Chain(session)
-    session.routes[("GET", "/balance")] = balance_body(account)
+    money_view(session, account, chain, "withdraw", status="accepted", nonce="3")
     w, sep = withdraw_route(session, health, account)
-    out = make_client().withdraw(1000)
+    out = make_client(clock=Clock(time.time())).withdraw(1000)
     assert out.nonce == 3 and len(chain.sent) == 1
+    assert (out.status, out.tx) == ("accepted", "0x" + f"{1:064x}")
     # The armed envelope carries this seat's signature over the served intent.
     call = next(p for m, p in session.rpc_calls if m == "eth_estimateGas")[0]
     assert call["to"].lower() == core_of(health)
@@ -145,6 +203,52 @@ def test_withdraw_refuses_foreign_intent(make_client, session, health, account, 
     assert chain.sent == []
 
 
+@pytest.mark.parametrize("word", ["accepted", "refused", "paid"])
+def test_withdraw_polls_until_its_own_tx_is_final(make_client, session, health, account, word):
+    chain = Chain(session)
+    old = {"tx": "0x" + "ee" * 32, "status": "paid", "nonce": "2"}
+    session.routes[("GET", "/balance")] = [
+        balance_body(account, withdraw=old),  # the nonce read
+        balance_body(account, withdraw=old),
+        balance_body(account, withdraw={"tx": "0x" + f"{1:064x}", "status": "pending", "nonce": "3"}),
+        balance_body(account, withdraw={"tx": "0x" + f"{1:064x}", "status": word, "nonce": "3"}),
+    ]
+    withdraw_route(session, health, account)
+    clock = Clock(time.time())
+    t0 = clock()
+    assert make_client(clock=clock).withdraw(1000).status == word
+    assert polls(session, "/balance") == 4 and clock() - t0 == 2
+
+
+def test_withdraw_pending_after_30_s(make_client, session, health, account):
+    chain = Chain(session)
+    money_view(session, account, chain, "withdraw", status="pending")
+    withdraw_route(session, health, account)
+    clock = Clock(time.time())
+    t0 = clock()
+    assert make_client(clock=clock).withdraw(1000).status == "pending"
+    assert 30 <= clock() - t0 <= 31 and len(chain.sent) == 1
+
+
+def test_withdraw_other_tx_is_no_match(make_client, session, health, account):
+    # A refused intent keeps the nonce: only the tx names this withdraw.
+    chain = Chain(session)
+    money_view(session, account, chain, "withdraw", status="refused", tx="0x" + "ee" * 32, nonce="3")
+    withdraw_route(session, health, account)
+    assert make_client(clock=Clock(time.time())).withdraw(1000).status == "pending"
+
+
+def test_withdraw_in_progress_sends_nothing(make_client, session, account):
+    chain = Chain(session)
+    session.routes[("GET", "/balance")] = balance_body(account)
+    session.routes[("POST", "/withdraw")] = (409, {
+        "code": "withdraw_in_progress", "error": "one withdraw at a time; the next opens when this one is paid"})
+    with pytest.raises(crx.WithdrawInProgress) as ei:
+        make_client().withdraw(1000)
+    assert ei.value.code == "withdraw_in_progress" and ei.value.status == 409
+    assert chain.sent == []
+
+
 def test_withdraw_refuses_served_digest_mismatch(make_client, session, health, account):
     chain = Chain(session)
     session.routes[("GET", "/balance")] = balance_body(account)
@@ -158,6 +262,8 @@ def test_balance(make_client, session, account):
     session.routes[("GET", "/balance")] = balance_body(account)
     b = make_client().balance()
     assert (b.free, b.collateral, b.open_legs, b.withdraw_nonce) == (Decimal("900"), Decimal("1111"), 2, 3)
+    assert b.as_of_block == 52_000_123
+    assert not hasattr(b, "pending_deposit") and not hasattr(b, "as_of_fold")
     call = next(c for c in session.calls if c["path"] == "/balance")
     assert call["query"] == {"chain": ["avax-fuji"]}
 
@@ -171,9 +277,9 @@ def test_balance_for_other_account_refused(make_client, session, account):
 def test_positions(make_client, session):
     session.routes[("GET", "/positions")] = {"positions": [
         {"trade_id": "0x01", "rfq_id": "0x02", "pair": "USDMXN", "side": -1, "notional": "25000.000000",
-         "rate": "18.700000", "status": "opened"}]}
+         "rate": "18.700000", "status": "pending"}]}
     (p,) = make_client().positions()
-    assert (p.side, p.notional, p.rate) == ("sell", Decimal("25000"), Decimal("18.7"))
+    assert (p.side, p.notional, p.rate, p.status) == ("sell", Decimal("25000"), Decimal("18.7"), "pending")
 
 
 def test_trades_pages(make_client, session):

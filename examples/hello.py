@@ -3,13 +3,8 @@ import crx
 
 c = crx.Client(network="testnet")
 
-try:
-    print("free", c.balance().free)
-    q = c.quote("USD/MXN", "buy", 25_000)
-    print("quote", q.rate)
-    t = c.trade(q)
-    print(t.status, t.tx)
-except crx.MarketClosed as e:
-    print("closed, opens at", e.details.get("opens_at"))
-except crx.CrxError as e:
-    print(e.code, e)
+print(c.balance().free)  # 20000.000000
+q = c.quote("USD/BRL", "buy", 100_000)
+print(q.pair, q.rate)  # USD/BRL 5.435
+t = c.trade(q)
+print(t.status, t.tx)  # open 0x9a4e…8a0c

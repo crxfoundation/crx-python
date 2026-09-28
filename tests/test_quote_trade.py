@@ -11,6 +11,7 @@ from eth_utils import keccak
 
 import crx
 from crx import _eip712 as e7
+from crx._bind import utc
 
 from .conftest import CHAIN_ID, Clock, open_market
 
@@ -41,6 +42,7 @@ class Venue:
         self.row_edit = {}
         self.template_edit = {}
         self.tx_edit = {}
+        self.trade_status = "open"
         session.routes[("GET", "/markets")] = open_market(markets, pair)
         session.routes[("POST", "/rfqs")] = self.open_rfq
         session.routes[("GET", f"/rfqs/{RFQ}")] = [{"quote": None, "quotes": []}, self.view]
@@ -70,7 +72,10 @@ class Venue:
         return r
 
     def view(self, req):
-        return {"quote": self.row(), "quotes": [self.row()]}
+        v = {"quote": self.row(), "quotes": [self.row()]}
+        if self.accept_body is not None:
+            v["trade_status"] = self.trade_status if self.sent_raw else "pending"
+        return v
 
     def accept(self, req):
         self.accept_body = leg = req["body"]["leg"]
@@ -131,7 +136,7 @@ def test_quote_then_trade_binds(make_client, venue, session, clock, account):
     assert "/rfqs/" + RFQ + "/accept" not in session.paths()  # quote() never accepts
 
     t = c.trade(q)
-    assert (t.status, t.tx) == ("bound", TXH)
+    assert (t.status, t.tx) == ("open", TXH)
     leg = venue.accept_body
     assert leg["seat"] == account.address.lower() and leg["leg_id"] == LEG and leg["join_ref"] == JOIN
     body = next(x for x in session.calls if x["path"].endswith("/accept"))["body"]
@@ -140,6 +145,53 @@ def test_quote_then_trade_binds(make_client, venue, session, clock, account):
     assert Account.recover_transaction(venue.sent_raw) == account.address
     floor = (c._state_dir / f"side-nonce-{account.address.lower()}").read_text()
     assert floor == venue.template["own_nonce"]
+
+
+def trade_polls(session):
+    return [x for x in session.calls if x["method"] == "GET" and x["path"] == f"/rfqs/{RFQ}"]
+
+
+@pytest.mark.parametrize("word", ["open", "refused"])
+def test_trade_polls_until_final(make_client, venue, session, clock, word):
+    c = make_client(clock=clock)
+    q = c.quote("USD/MXN", "buy", 25_000)
+    before = len(trade_polls(session))
+    words = iter(["pending", "pending", word])
+    session.routes[("GET", f"/rfqs/{RFQ}")] = lambda req: dict(venue.view(req), trade_status=next(words))
+    t0 = clock()
+    assert c.trade(q).status == word
+    assert len(trade_polls(session)) - before == 3 and clock() - t0 >= 2
+
+
+def test_trade_pending_after_30_s(make_client, venue, session, clock):
+    venue.trade_status = "pending"
+    c = make_client(clock=clock)
+    q = c.quote("USD/MXN", "buy", 25_000)
+    before = len(trade_polls(session))
+    t = c.trade(q)
+    assert (t.status, t.tx) == ("pending", TXH)
+    assert len(trade_polls(session)) - before == 31
+
+
+@pytest.mark.parametrize("view", [
+    lambda v, req: {k: x for k, x in v.view(req).items() if k != "trade_status"},  # no trade_status yet
+    lambda v, req: (503, {"code": "upstream", "error": "down"}),
+    lambda v, req: dict(v.view(req), trade_status=None),
+])
+def test_trade_no_status_is_pending(make_client, venue, session, clock, view):
+    c = make_client(clock=clock)
+    q = c.quote("USD/MXN", "buy", 25_000)
+    session.routes[("GET", f"/rfqs/{RFQ}")] = lambda req: view(venue, req)
+    assert c.trade(q).status == "pending"
+
+
+def test_accept_without_side_template_sends_nothing(make_client, venue, session, clock):
+    session.routes[("POST", f"/rfqs/{RFQ}/accept")] = {"status": "accepted"}
+    c = make_client(clock=clock)
+    with pytest.raises(crx.RefusedToSign, match="Side template"):
+        c.trade(c.quote("USD/MXN", "buy", 25_000))
+    assert f"/rfqs/{RFQ}/side" not in session.paths("POST")
+    assert "eth_sendRawTransaction" not in session.rpc_methods()
 
 
 def test_every_signed_call_carries_valid_headers(make_client, venue, session, clock, account):
@@ -181,9 +233,10 @@ def test_foreign_arm_tx_is_not_sent(make_client, venue, session, clock, edit):
     # The Side is already signed: the maker may still land the arm, so the answer is TradeUnknown.
     venue.tx_edit = edit
     c = make_client(clock=clock)
-    with pytest.raises(crx.TradeUnknown, match="armOpenPair"):
+    with pytest.raises(crx.TradeUnknown, match="armOpenPair") as ei:
         c.trade(c.quote("USD/MXN", "buy", 25_000))
     assert "eth_sendRawTransaction" not in session.rpc_methods()
+    assert str(ei.value).endswith(f"read positions() after {utc(int(venue.template['quote_expiry']) + 120)}")
 
 
 def test_sent_arm_is_the_checked_bytes(make_client, venue, session, clock):

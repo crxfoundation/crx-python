@@ -30,11 +30,15 @@ KIND_OPEN_PAIR = "0x" + encode(["uint8"], [9]).hex()
 ARM_OPEN_PAIR = e7.selector("armOpenPair(uint8,bytes)")
 SIDE_WINDOW = 630  # s: the core takes a Side quote_expiry at most 600 s past its block time, plus 30 s of clock slack
 NEW_QUOTE = "no bind; request a new quote"
-UNCONFIRMED = "an arm for this pair landed but is not confirmed; do not trade again; read positions() after the next fold"
 
 
 def utc(ts: float) -> str:
     return datetime.fromtimestamp(ts, timezone.utc).strftime("%H:%M:%S UTC")
+
+
+def read_later(qe: int) -> str:
+    """The core takes no arm at or after the Side quote_expiry; positions() shows a landed arm within a minute."""
+    return f"do not trade again; read positions() after {utc(qe + 120)}"
 
 
 def status_code(r: Any) -> tuple[int, str]:
@@ -318,7 +322,7 @@ class Binder:
             why = type(e).__name__
         raise TradeUnknown(
             f"stopped after the Side was signed ({clean(why, 200)}); the maker may still land the arm; "
-            "do not trade again; read positions() after the next fold", details={"rfq_id": rfq_id})
+            + read_later(int(t["quote_expiry"])), details={"rfq_id": rfq_id})
 
     def _after_sig(self, rfq_id: str, t: dict, sig: str, since: int, maker_by: float, log: Callable[[str], None]) -> str:
         qe, told, mine = int(t["quote_expiry"]), set(), set()
@@ -374,11 +378,11 @@ class Binder:
                 if word and word[1] and not seen and not live:
                     raise QuoteExpired(NEW_QUOTE)
                 if seen and (shut or end):
-                    raise TradeUnknown(UNCONFIRMED, details={"rfq_id": rfq_id})
+                    raise TradeUnknown(f"an arm for this pair landed but is not confirmed; {read_later(qe)}",
+                                       details={"rfq_id": rfq_id})
             if end:
-                raise TradeUnknown(
-                    f"no verdict from the RPC by {utc(qe + 90)}; do not trade again; read positions() after the next fold",
-                    details={"rfq_id": rfq_id})
+                raise TradeUnknown(f"no verdict from the RPC by {utc(qe + 90)}; {read_later(qe)}",
+                                   details={"rfq_id": rfq_id})
             self.sleep(2 if own else min(3 << errs, 30))
 
     def accept(self, rfq_id: str, expires_at_ms: Any, body: dict) -> tuple[dict, float]:

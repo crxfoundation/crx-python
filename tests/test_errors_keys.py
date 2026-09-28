@@ -1,6 +1,8 @@
 import copy
 import os
 import pickle
+import re
+from pathlib import Path
 
 import pytest
 from eth_account import Account
@@ -24,6 +26,8 @@ from .conftest import BASE, RPC
         (403, {"code": "not_whitelisted", "error": "no"}, crx.NotWhitelisted, "not_whitelisted"),
         (400, {"code": "seat_not_ready", "error": "no"}, crx.SeatNotReady, "seat_not_ready"),
         (422, {"code": "insufficient_collateral", "error": "no"}, crx.InsufficientCollateral, "insufficient_collateral"),
+        (409, {"code": "withdraw_in_progress", "error": "one withdraw at a time"}, crx.WithdrawInProgress,
+         "withdraw_in_progress"),
         (410, {"code": "quote_expired", "error": "gone"}, crx.QuoteExpired, "quote_expired"),
         (410, {"error": "gone"}, crx.QuoteExpired, "quote_expired"),
         (429, {"code": "rate_limited", "error": "slow", "details": {"retry_after_secs": 2}}, crx.RateLimited, "rate_limited"),
@@ -41,6 +45,14 @@ def test_gateway_codes_map_to_typed_errors(status, body, cls, code):
     assert e.code == code
     assert e.status == status
     assert isinstance(e, crx.CrxError)
+
+
+def test_no_fold_or_crank_words():
+    root = Path(__file__).parent.parent
+    files = [root / "README.md", *(root / "examples").glob("*.py"), *(root / "src" / "crx").glob("*.py")]
+    hits = [f"{f.name}:{i}" for f in files for i, line in enumerate(f.read_text().splitlines(), 1)
+            if re.search(r"\b(fold|folds|crank)\b", line, re.I)]
+    assert hits == []
 
 
 def test_unknown_code_passes_through():

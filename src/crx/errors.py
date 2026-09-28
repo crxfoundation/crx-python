@@ -121,6 +121,12 @@ class InsufficientCollateral(CrxError):
     code = "insufficient_collateral"
 
 
+class WithdrawInProgress(CrxError):
+    """One withdraw at a time. The next opens when this one is paid."""
+
+    code = "withdraw_in_progress"
+
+
 class RateLimited(CrxError):
     code = "rate_limited"
 
@@ -142,7 +148,7 @@ class TxFailed(CrxError):
 
 
 class TradeUnknown(CrxError):
-    """The trade may be on chain. Do not trade again: read ``positions()`` after the next fold."""
+    """The trade may be on chain. Do not trade again: read ``positions()`` after the time the message names."""
 
     code = "trade_unknown"
 
@@ -160,6 +166,7 @@ _BY_GATEWAY_CODE: dict[str, type[CrxError]] = {
     "unauthorized": AuthError,
     "invalid_signature": AuthError,
     "insufficient_collateral": InsufficientCollateral,
+    "withdraw_in_progress": WithdrawInProgress,
     "rejected": Rejected,
     "own_round_open": OwnRoundOpen,
     "quote_expired": QuoteExpired,

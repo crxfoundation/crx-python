@@ -63,8 +63,8 @@ class Quote:
 
 @dataclass(frozen=True)
 class Trade:
-    """``status`` is ``bound`` (arm on chain; the next fold opens the position)
-    or ``accepted`` (the relay binds off chain)."""
+    """``status`` is ``open`` (the trade counts now), ``pending`` (not final yet;
+    ``trade.confirmed`` or ``trade.refused`` follows) or ``refused``."""
 
     status: str
     rfq_id: str
@@ -86,12 +86,11 @@ class Balance:
     equity: Decimal | None
     im: Decimal | None
     mm: Decimal | None
-    pending_deposit: Decimal | None
     open_legs: int | None
     withdraw_live: bool | None
     withdraw_nonce: int | None
     as_of: datetime | None
-    as_of_fold: Any
+    as_of_block: int | None
     raw: dict = field(repr=False, compare=False)
 
 
@@ -128,12 +127,18 @@ class Event:
 
 @dataclass(frozen=True)
 class Deposit:
+    """``status`` is ``credited``, ``pending`` or ``failed``."""
+
     amount: Decimal
     txs: list[str]
+    status: str
 
 
 @dataclass(frozen=True)
 class Withdraw:
+    """``status`` is ``accepted``, ``pending``, ``paid``, ``partial``, ``refused`` or ``returned``."""
+
     amount: Decimal
     nonce: int
     tx: str
+    status: str

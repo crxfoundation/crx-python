@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import requests
 from eth_utils import is_checksum_address, is_hex_address, keccak, to_checksum_address
@@ -46,6 +46,7 @@ _ALIASES = {"fuji": "testnet"}
 TESTNET_CHAIN_IDS = {43113, 84532, 11142220}
 MAINNET_CHAIN_IDS = {1}
 DEFAULT_STATE_DIR = "~/.crx-quickstart"  # shared with the CRX quickstart scripts: one Side nonce floor per seat
+SETTLE_WAIT = 30.0  # s: trade(), deposit() and withdraw() poll their own status at most this long
 
 
 def _amount(value: Any, what: str = "amount") -> Decimal:
@@ -74,6 +75,13 @@ def _viewer(v: dict) -> Viewer:
     by = v.get("granted_by")
     return Viewer(address=str(v.get("viewer") or "").lower(), granted_by=by.lower() if isinstance(by, str) else None,
                   granted_at=ms_to_dt(v.get("granted_at")), raw=v)
+
+
+def _last(b: dict, key: str) -> dict:
+    """``/balance`` ``<key>.last``, or ``{}``."""
+    d = b.get(key)
+    last = d.get("last") if isinstance(d, dict) else None
+    return last if isinstance(last, dict) else {}
 
 
 def _plain(d: Decimal) -> str:
@@ -295,7 +303,7 @@ class Client:
     # ---------- seat reads ----------
 
     def balance(self) -> Balance:
-        """Collateral, margin and withdraw state, as of the last fold."""
+        """Collateral, margin and withdraw state."""
         self._need_key()
         b = self._gw.request("GET", "/balance", query={"chain": self.chain_key})
         if str(b.get("account") or "").lower() != self.account:
@@ -305,11 +313,11 @@ class Client:
         return Balance(
             account=self.account, state=b.get("state"), collateral=dec(b.get("collateral")), free=dec(b.get("free")),
             equity=dec(b.get("equity")), im=dec(b.get("im")), mm=dec(b.get("mm")),
-            pending_deposit=dec(b.get("pending_deposit")),
             open_legs=b.get("open_legs") if isinstance(b.get("open_legs"), int) else None,
             withdraw_live=w.get("live") if isinstance(w.get("live"), bool) else None,
             withdraw_nonce=int(nonce) if isinstance(nonce, (str, int)) and str(nonce).isdigit() else None,
-            as_of=ms_to_dt(b.get("as_of")), as_of_fold=b.get("as_of_fold"), raw=b,
+            as_of=ms_to_dt(b.get("as_of")),
+            as_of_block=b["as_of_block"] if type(b.get("as_of_block")) is int else None, raw=b,
         )
 
     def positions(self) -> list[Position]:
@@ -462,7 +470,8 @@ class Client:
     def trade(self, quote: Quote) -> Trade:
         """Accept a quote and bind it: sign your Side and send the arm tx (you pay gas).
 
-        Returns once the arm is on chain. The next hourly fold opens the position.
+        Returns once the trade is ``open`` or ``refused``; ``pending`` when neither
+        shows within 30 s.
         """
         self._need_seat()
         if not isinstance(quote, Quote):
@@ -487,8 +496,6 @@ class Client:
         base = dict(rfq_id=rfq_id, quote_id=quote.quote_id, pair=quote.pair, side=quote.side,
                     notional=quote.notional, rate=quote.rate)
         side = r.get("side")
-        if not isinstance(side, dict):
-            return Trade(status="accepted", tx=None, raw=r, **base)
         try:
             opened = min(int(side["own_nonce"]) / 1000, answered)
         except (KeyError, TypeError, ValueError):
@@ -496,8 +503,32 @@ class Client:
         exp = quote.raw.get("expires_at")
         maker_by = min((exp if isinstance(exp, int) else 10**13) / 1000, opened + 120) + 5
         tx = b.bind(rfq_id, arm, side, maker_by, log.info)
-        log.info("rfq %s bound: arm %s", rfq_id, tx)
-        return Trade(status="bound", tx=tx, raw=r, **base)
+        status = self._settle(lambda: self._gw.request("GET", f"/rfqs/{rfq_id}").get("trade_status"))
+        log.info("rfq %s %s: arm %s", rfq_id, status, tx)
+        return Trade(status=status, tx=tx, raw=r, **base)
+
+    def _settle(self, read: Callable[[], Any]) -> str:
+        """Poll ``read()`` for a status other than ``pending``, at most ``SETTLE_WAIT`` s.
+
+        ``read`` returns the status, or None when the gateway does not show it yet.
+        A gateway error counts as None.
+        """
+        deadline = self._clock() + SETTLE_WAIT
+        while True:
+            try:
+                word = read()
+            except CrxError:
+                word = None
+            if isinstance(word, str) and word not in ("", "pending"):
+                return clean(word, 40)
+            if self._clock() >= deadline:
+                return "pending"
+            self._sleep(1.0)
+
+    def _money_status(self, key: str, tx: str) -> str | None:
+        """``/balance`` ``<key>.last.status`` when ``<key>.last.tx`` is ``tx``."""
+        last = _last(self.balance().raw, key)
+        return last.get("status") if str(last.get("tx") or "").lower() == tx.lower() else None
 
     # ---------- money ----------
 
@@ -505,7 +536,8 @@ class Client:
         """Deposit USDC to the core: approve (when short), then deposit. You pay gas.
 
         On a testnet, ``mint=True`` first mints the test USDC the wallet lacks.
-        The deposit is pending until the next fold, then counts as collateral.
+        Returns once the deposit is ``credited`` or ``failed``; ``pending`` when
+        neither shows within 30 s.
         """
         self._need_seat()
         amount = _amount(amount)
@@ -541,13 +573,16 @@ class Client:
                     "mint(address,uint256)", ["address", "uint256"], [to_checksum_address(self.address), raw - held])))
         for (to, data), name in zip(want, ["approve", "deposit"][-len(want):]):
             hashes.append(self._send(name, to, data))
-        log.info("deposited %s: pending until the next fold", _plain(amount))
-        return Deposit(amount=amount, txs=hashes)
+        status = self._settle(lambda: self._money_status("deposit", hashes[-1]))
+        log.info("deposit %s %s", _plain(amount), status)
+        return Deposit(amount=amount, txs=hashes, status=status)
 
     def withdraw(self, amount: Any) -> Withdraw:
         """Withdraw USDC to your own wallet. Sign the intent, arm it on the core. You pay gas.
 
-        The next fold serves it; the crank after that pays it.
+        Returns once the withdraw shows a status other than ``pending``; ``pending``
+        when none shows within 30 s. ``accepted`` leaves the balance at once; the
+        payout follows.
         """
         self._need_seat()
         amount = _amount(amount)
@@ -572,8 +607,9 @@ class Client:
         sig = bytes(self._account.unsafe_sign_hash(digest).signature)
         data = e7.calldata("armWithdrawIntent(uint8,bytes)", ["uint8", "bytes"], [5, e7.withdraw_envelope(w, sig)])
         tx = self._send("armWithdrawIntent", c["core"], data)
-        log.info("withdraw %s armed, nonce %s", _plain(amount), nonce)
-        return Withdraw(amount=amount, nonce=nonce, tx=tx)
+        status = self._settle(lambda: self._money_status("withdraw", tx))
+        log.info("withdraw %s %s, nonce %s", _plain(amount), status, nonce)
+        return Withdraw(amount=amount, nonce=nonce, tx=tx, status=status)
 
     # ---------- viewers ----------
 
