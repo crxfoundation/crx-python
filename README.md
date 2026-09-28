@@ -105,13 +105,13 @@ Every error is a `crx.CrxError`. Branch on `.code`.
 ## Safety
 
 - The SDK rebuilds every digest and transaction before it signs. A mismatch raises `refused_to_sign`.
-- Testnets only for now.
+- Testnet by default. `network="mainnet"` (Ethereum, chain 1) is off until you pass `allow_mainnet=True` or set `CRX_ALLOW_MAINNET=1`. It has no default URLs.
 - Keep DEBUG logging off in production: urllib3 then logs request paths, and an RPC key can sit in the path.
 - A Side nonce floor lives in `~/.crx-quickstart/`, shared with the quickstart scripts. `CRX_STATE_DIR` moves it.
 
 ## Settings
 
-`CRX_BASE` (gateway URL), `CRX_RPC` (chain RPC URL), `CRX_STATE_DIR`.
+`CRX_BASE` (gateway URL), `CRX_RPC` (chain RPC URL), `CRX_STATE_DIR`, `CRX_ALLOW_MAINNET`.
 
 ## Tests
 

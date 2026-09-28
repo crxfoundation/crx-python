@@ -35,9 +35,16 @@ NETWORKS = {
         "base_url": "https://api.crxfx.com",
         "rpc_url": "https://api.avax-test.network/ext/bc/C/rpc",
     },
+    # Ethereum mainnet. Off unless the caller opts in; no default URLs.
+    "mainnet": {
+        "chain": "ethereum",
+        "base_url": None,
+        "rpc_url": None,
+    },
 }
 _ALIASES = {"fuji": "testnet"}
 TESTNET_CHAIN_IDS = {43113, 84532, 11142220}
+MAINNET_CHAIN_IDS = {1}
 DEFAULT_STATE_DIR = "~/.crx-quickstart"  # shared with the CRX quickstart scripts: one Side nonce floor per seat
 
 
@@ -107,6 +114,10 @@ class Client:
 
     ``account`` is another seat this key may read (see ``add_viewer``). With it,
     ``balance``, ``positions`` and ``trades`` read that seat; every other call is refused.
+
+    ``network="mainnet"`` (Ethereum, chain 1) is off unless ``allow_mainnet=True``
+    or ``CRX_ALLOW_MAINNET=1``. It has no default URLs: pass ``base_url`` and
+    ``rpc_url``, or set ``CRX_BASE`` and ``CRX_RPC``.
     """
 
     def __init__(
@@ -121,6 +132,7 @@ class Client:
         timeout: float = 10.0,
         session: requests.Session | None = None,
         account: str | None = None,
+        allow_mainnet: bool = False,
     ) -> None:
         self._account = None
         self._custody = None
@@ -131,13 +143,26 @@ class Client:
             raise ConfigError(f"unknown network {clean(network, 20)!r}; known: {', '.join(NETWORKS)}")
         self.network = name
         self.chain_key = net["chain"]
+        gw_url = base_url or os.environ.get("CRX_BASE") or net["base_url"]
+        rpc = rpc_url or os.environ.get("CRX_RPC") or net["rpc_url"]
+        if name == "mainnet":
+            refusal = None
+            if not (allow_mainnet is True or os.environ.get("CRX_ALLOW_MAINNET") == "1"):
+                refusal = "mainnet is off: pass allow_mainnet=True or set CRX_ALLOW_MAINNET=1"
+            elif not gw_url:
+                refusal = "mainnet has no default gateway: pass base_url= or set CRX_BASE"
+            elif not rpc:
+                refusal = "mainnet has no default RPC: pass rpc_url= or set CRX_RPC"
+            if refusal:
+                key = None
+                raise ConfigError(refusal)
         self._session = session or requests.Session()
         try:
-            self._gw = Gateway(base_url or os.environ.get("CRX_BASE") or net["base_url"], None, self._session, timeout)
+            self._gw = Gateway(gw_url, None, self._session, timeout)
         except ConfigError:
             key = None
             raise
-        self._rpc = Rpc(rpc_url or os.environ.get("CRX_RPC") or net["rpc_url"], self._session, max(timeout, 20.0))
+        self._rpc = Rpc(rpc, self._session, max(timeout, 20.0))
         try:
             custody = None if account is None else _address(account, "account", ConfigError)
         except ConfigError:
@@ -203,7 +228,10 @@ class Client:
             chain_id, core, domain = int(c["chain_id"]), str(c["core"]), str(c["domain"]).lower()
         except (KeyError, TypeError, ValueError):
             raise BadAnswer("/health sent a chain this SDK cannot read") from None
-        if chain_id not in TESTNET_CHAIN_IDS:
+        if self.network == "mainnet":
+            if chain_id not in MAINNET_CHAIN_IDS:
+                raise ConfigError(f"{self.chain_key} is chain {chain_id}, not Ethereum mainnet (chain 1)")
+        elif chain_id not in TESTNET_CHAIN_IDS:
             raise ConfigError(f"{self.chain_key} is chain {chain_id}, not a testnet; this SDK runs on testnets only")
         sep = e7.domain_separator(chain_id, core)
         if e7.h0x(sep) != domain:
