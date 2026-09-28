@@ -10,6 +10,6 @@ try:
     t = c.trade(q)
     print(t.status, t.tx)
 except crx.MarketClosed as e:
-    print("closed, opens at", e.details["opens_at"])
+    print("closed, opens at", e.details.get("opens_at"))
 except crx.CrxError as e:
     print(e.code, e)

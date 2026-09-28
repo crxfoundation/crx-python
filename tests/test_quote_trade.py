@@ -247,12 +247,29 @@ def test_best_live_quote_when_no_pick(make_client, venue, session, clock):
     assert c.quote("USD/MXN", "buy", 25_000, wait=3).quote_id == QID
 
 
-def test_market_closed_sends_nothing(make_client, session):
-    c = make_client()  # recorded /markets: weekend, every session closed
+def test_closed_market_still_opens_the_rfq(make_client, venue, session, markets, clock):
+    session.routes[("GET", "/markets")] = markets  # recorded /markets: weekend, every session closed
+    c = make_client(clock=clock)
+    q = c.quote("USD/MXN", "buy", 25_000)
+    assert q.quote_id == QID
+    assert session.paths("POST") == ["/rfqs"]
+
+
+def test_closed_market_gateway_refusal_is_market_closed(make_client, session, markets):
+    session.routes[("POST", "/rfqs")] = (409, {"code": "market_closed", "error": "USD/MXN is closed",
+                                               "details": {"opens_at": 1790200000000}})
     with pytest.raises(crx.MarketClosed) as ei:
-        c.quote("USD/MXN", "buy", 25_000)
-    assert ei.value.code == "market_closed" and isinstance(ei.value.details["opens_at"], int)
-    assert session.paths("POST") == []
+        make_client().quote("USD/MXN", "buy", 25_000)
+    assert ei.value.code == "market_closed" and ei.value.details["opens_at"] == 1790200000000
+    assert session.paths("POST") == ["/rfqs"]
+
+
+def test_closed_market_no_maker_is_no_quotes(make_client, venue, session, markets, clock):
+    session.routes[("GET", "/markets")] = markets
+    session.routes[("GET", f"/rfqs/{RFQ}")] = {"quote": None, "quotes": []}
+    c = make_client(clock=clock)
+    with pytest.raises(crx.NoQuotes):
+        c.quote("USD/MXN", "buy", 25_000, wait=3)
 
 
 def test_paused_pair(make_client, session):

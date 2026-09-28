@@ -20,7 +20,7 @@ from ._chain import Rpc, send_tx
 from ._http import Gateway
 from ._keys import load_account
 from .errors import (
-    AboveMax, BadAnswer, BadRequest, BelowMin, ConfigError, CrxError, MarketClosed,
+    AboveMax, BadAnswer, BadRequest, BelowMin, ConfigError, CrxError,
     MarketPaused, NoQuotes, RefusedToSign, clean,
 )
 from .models import (
@@ -383,6 +383,10 @@ class Client:
         ``side`` is your side in the base currency. ``expiry`` is the settlement
         instant: a datetime, a timedelta from now, or unix ms. Default: one
         month out, off the weekend.
+
+        A closed market still takes the RFQ: the gateway decides. Its refusal
+        raises the matching error (``MarketClosed`` for ``market_closed``);
+        no quote before ``wait`` ends raises ``NoQuotes``.
         """
         self._need_seat()
         slash, compact = _pair(pair)
@@ -391,10 +395,6 @@ class Client:
         m = self.market(slash)
         if m.paused:
             raise MarketPaused(f"{slash} is paused", details={"pair": slash})
-        if not m.open:
-            opens = int(m.next_open.timestamp() * 1000) if m.next_open else None
-            when = f"; opens {m.next_open:%Y-%m-%d %H:%M} UTC" if m.next_open else ""
-            raise MarketClosed(f"{slash} is closed{when}", details={"pair": slash, "opens_at": opens})
         if m.min_notional is not None and amount < m.min_notional:
             raise BelowMin(f"minimum notional on {slash} is {m.min_notional}", details={"min": str(m.min_notional)})
         if m.max_notional is not None and amount > m.max_notional:

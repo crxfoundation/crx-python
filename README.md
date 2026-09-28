@@ -35,7 +35,7 @@ try:
     t = c.trade(q)                         # accepts, signs, sends the arm tx
     print(t.status, t.tx)
 except crx.MarketClosed as e:
-    print("closed, opens at", e.details["opens_at"])
+    print("closed, opens at", e.details.get("opens_at"))
 except crx.CrxError as e:
     print(e.code, e)
 ```
@@ -86,7 +86,7 @@ Every error is a `crx.CrxError`. Branch on `.code`.
 
 | Code | Meaning |
 |---|---|
-| `market_closed` | Session closed. `details["opens_at"]` is unix ms. |
+| `market_closed` | The gateway refused: session closed. `details["opens_at"]` is unix ms, when sent. |
 | `market_paused` | Pair not live. |
 | `below_min`, `above_max` | Notional out of range. |
 | `no_quotes` | No maker quoted in time. |

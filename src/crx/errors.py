@@ -78,7 +78,7 @@ class MarketPaused(CrxError):
 
 
 class MarketClosed(CrxError):
-    """The pair's session is closed. ``details['opens_at']`` is unix ms, when known."""
+    """The gateway refused: the pair's session is closed. ``details['opens_at']`` is unix ms, when sent."""
 
     code = "market_closed"
 
@@ -149,6 +149,7 @@ class TradeUnknown(CrxError):
 
 _BY_GATEWAY_CODE: dict[str, type[CrxError]] = {
     "market_paused": MarketPaused,
+    "market_closed": MarketClosed,
     "notional_below_minimum": BelowMin,
     "pool_min_notional": BelowMin,
     "notional_above_maximum": AboveMax,
