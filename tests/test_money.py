@@ -1,5 +1,6 @@
 """deposit(), withdraw() and the seat reads against a scripted gateway and chain."""
 
+import json
 import time
 from decimal import Decimal
 
@@ -207,8 +208,8 @@ def test_withdraw_posts_the_sig_sends_no_tx(make_client, session, health, accoun
     assert chain.sent == [] and set(session.rpc_methods()) <= {"eth_chainId", "eth_getCode"}
     body = next(c for c in session.calls if c["path"] == "/withdraw/sig")["body"]
     assert body["chain"] == "avax-fuji"
-    assert body["intent"] == {"account": account.address.lower(), "amount": "1000.000000",
-                              "recipient": account.address.lower(), "nonce": "3", "deadline": w["deadline"]}
+    served = next(c for c in session.calls if c["path"] == "/withdraw/sig")["raw"]
+    assert body["intent"] == w and served.count(json.dumps(w, separators=(",", ":")).encode()) == 1  # byte for byte
     assert Account._recover_hash(e7.withdraw_digest(sep, w), signature=body["sig"]) == account.address
 
 

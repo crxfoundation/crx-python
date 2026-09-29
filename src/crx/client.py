@@ -621,9 +621,7 @@ class Client:
         except (KeyError, TypeError, ValueError, AttributeError):
             raise RefusedToSign("the gateway served an intent this SDK cannot read; nothing signed") from None
         sig = "0x" + bytes(self._account.unsafe_sign_hash(digest).signature).hex()
-        intent = {"account": self.address, "amount": f"{amount:.6f}", "recipient": self.address,
-                  "nonce": str(nonce), "deadline": int(w["deadline"])}
-        r = self._gw.request("POST", "/withdraw/sig", body={"chain": self.chain_key, "intent": intent, "sig": sig},
+        r = self._gw.request("POST", "/withdraw/sig", body={"chain": self.chain_key, "intent": w, "sig": sig},
                              ok=(200, 202))
         item = _word(r.get("item"))
         if item is None:
