@@ -61,7 +61,7 @@ print(w.status)  # accepted
 | `health()` | Gateway status. No key needed. |
 | `markets()` | Pairs, sessions, limits. No key needed. |
 | `quote(pair, side, notional)` | Opens an RFQ. Returns the best firm quote. Accepts nothing. |
-| `trade(quote)` | Accepts and binds. CRX sends the tx and pays gas. `status`: `sending`, `open`, `pending` or `refused`. |
+| `trade(quote)` | Accepts and opens. CRX sends the tx and pays gas. `status`: `sending`, `open`, `pending` or `refused`. |
 | `deposit(amount)` | Approve, then deposit USDC. On testnet, mints the test USDC you lack. `status`: `credited`, `pending` or `failed`. |
 | `withdraw(amount)` | Signs a withdraw. CRX sends the tx and pays gas. `status`: `sending`, `accepted`, `pending`, `paid`, `partial`, `refused` or `returned`. In your wallet within about 2 hours. |
 | `balance()` | Collateral, free, margin, withdraw state. |

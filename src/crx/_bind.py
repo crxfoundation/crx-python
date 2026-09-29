@@ -21,7 +21,7 @@ from .errors import (
 )
 
 SIDE_WINDOW = 630  # s: the core takes a Side quote_expiry at most 600 s past its block time, plus 30 s of clock slack
-NEW_QUOTE = "no bind; request a new quote"
+NEW_QUOTE = "not opened; request a new quote"
 
 
 def utc(ts: float) -> str:
@@ -199,7 +199,7 @@ class Binder:
             if k == (409, "own_round_open"):
                 d = obj(r).get("details") or {}
                 raise OwnRoundOpen(
-                    "your previous round is still open; no new bind before it ends",
+                    "your previous round is still open; no new trade before it ends",
                     status=409, gateway_code="own_round_open", details=d if isinstance(d, dict) else {})
             if k == (409, "rejected") and self.now() + 3 < until:
                 self.sleep(3)

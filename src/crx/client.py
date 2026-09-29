@@ -478,7 +478,7 @@ class Client:
             self._sleep(1.0)
 
     def trade(self, quote: Quote) -> Trade:
-        """Accept a quote and bind it: you sign your Side. CRX sends the tx and pays gas.
+        """Accept a quote and open the trade: you sign your Side. CRX sends the tx and pays gas.
 
         Returns once the trade is ``open`` or ``refused``. When neither shows within
         30 s (testnet) or 90 s (mainnet), returns ``sending`` or ``pending``.
