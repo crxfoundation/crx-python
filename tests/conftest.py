@@ -9,6 +9,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from eth_account import Account
+from requests.structures import CaseInsensitiveDict
 
 import crx
 
@@ -23,10 +24,12 @@ def fixture(name: str):
 
 
 class Resp:
-    def __init__(self, status: int, body):
+    def __init__(self, status: int, body, headers=None, url: str = BASE):
         self.status_code = status
         self._body = body
         self.text = body if isinstance(body, str) else json.dumps(body)
+        self.headers = CaseInsensitiveDict(headers or {})
+        self.url = url
 
     def json(self):
         if isinstance(self._body, str):
@@ -37,7 +40,7 @@ class Resp:
 class FakeSession:
     """Routes gateway calls to ``routes[(METHOD, path)]`` and RPC calls to ``rpc[method]``.
 
-    A route is a response body (200), a (status, body) tuple, a list of either
+    A route is a response body (200), a (status, body[, headers]) tuple, a list of either
     (served in order, the last one repeats), or a callable(req) -> one of those.
     """
 
@@ -54,7 +57,7 @@ class FakeSession:
         if callable(spec):
             return self._serve(spec(req), req)
         if isinstance(spec, tuple):
-            return Resp(spec[0], spec[1])
+            return Resp(*spec)
         return Resp(200, spec)
 
     def request(self, method, url, headers=None, data=None, timeout=None, allow_redirects=True):
@@ -68,8 +71,10 @@ class FakeSession:
         self.calls.append(req)
         key = (method, u.path)
         if key not in self.routes:
-            return Resp(404, {"code": "not_found", "error": f"no route {method} {u.path}"})
-        return self._serve(self.routes[key], req)
+            return Resp(404, {"code": "not_found", "error": f"no route {method} {u.path}"}, url=url)
+        r = self._serve(self.routes[key], req)
+        r.url = url
+        return r
 
     def post(self, url, json=None, timeout=None):
         assert url == RPC
