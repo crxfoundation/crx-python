@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import html
+import math
+import re
+import time
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 
@@ -177,12 +182,50 @@ _BY_GATEWAY_CODE: dict[str, type[CrxError]] = {
 }
 
 
-def from_gateway(status: int, body: Any, text: str = "") -> CrxError:
-    """Map one gateway refusal to a typed error."""
-    body = body if isinstance(body, dict) else {}
-    gw = clean(body.get("code") or "", 64) or None
-    msg = clean(body.get("error") or body.get("detail") or text or f"HTTP {status}")
-    details = body.get("details") if isinstance(body.get("details"), dict) else {}
+_NOT_TEXT = re.compile(r"<(script|style)\b.*?</\1\s*>|<!--.*?-->|<[^>]*>", re.I | re.S)
+
+
+def first_line(text: str, limit: int = 200) -> str:
+    """The first non-blank line of a text or HTML body, tags removed, at most ``limit`` characters."""
+    if text.lstrip().startswith("<"):
+        text = html.unescape(_NOT_TEXT.sub("\n", text))
+    for line in text.splitlines():
+        line = clean(line, 10_000).strip()
+        if line:
+            return line[:limit]
+    return ""
+
+
+def retry_after_secs(value: Any) -> int | None:
+    """Seconds from a Retry-After header: delta-seconds or an HTTP date. None when absent or unreadable."""
+    v = str(value or "").strip()
+    if v.isdigit():
+        return int(v)
+    try:
+        return max(0, math.ceil(parsedate_to_datetime(v).timestamp() - time.time()))
+    except (TypeError, ValueError, IndexError, OverflowError):
+        return None
+
+
+def from_gateway(status: int, body: Any, text: str = "", *, host: str = "", retry_after: Any = None) -> CrxError:
+    """Map one gateway refusal to a typed error.
+
+    A body that is not a JSON object gives the message ``HTTP <status> from <host>``;
+    its first text line goes to ``details['body']``. A Retry-After header fills
+    ``details['retry_after_secs']`` when the body has none.
+    """
+    if isinstance(body, dict):
+        gw = clean(body.get("code") or "", 64) or None
+        msg = clean(body.get("error") or body.get("detail") or f"HTTP {status}")
+        details = dict(body["details"]) if isinstance(body.get("details"), dict) else {}
+    else:
+        gw = None
+        msg = f"HTTP {status} from {clean(host, 100)}" if host else f"HTTP {status}"
+        line = first_line(text or "")
+        details = {"body": line} if line else {}
+    secs = retry_after_secs(retry_after)
+    if secs is not None:
+        details.setdefault("retry_after_secs", secs)
     kw = {"status": status, "details": details, "gateway_code": gw}
     cls = _BY_GATEWAY_CODE.get(gw or "")
     if cls is not None:
