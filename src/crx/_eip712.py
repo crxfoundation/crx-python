@@ -121,11 +121,6 @@ def withdraw_digest(separator: bytes, w: dict) -> bytes:
     return keccak(b"\x19\x01" + separator + struct)
 
 
-def withdraw_envelope(w: dict, sig: bytes) -> bytes:
-    """armWithdrawIntent's env: abi.encode(abi.encode(WithdrawItem), abi.encode(sig))."""
-    return encode(["bytes", "bytes"], [encode(WITHDRAW_ITEM, withdraw_fields(w)), encode(["bytes"], [sig])])
-
-
 def selector(signature: str) -> bytes:
     return keccak(text=signature)[:4]
 

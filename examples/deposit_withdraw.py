@@ -1,4 +1,4 @@
-"""Move USDC in or out. Needs CRX_WALLET_PK and test AVAX for gas.
+"""Move USDC in or out. Needs CRX_WALLET_PK. Deposit: you pay gas. Withdraw: CRX sends the tx and pays gas.
 
     python deposit_withdraw.py deposit 1000
     python deposit_withdraw.py withdraw 1000

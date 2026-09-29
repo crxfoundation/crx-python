@@ -29,24 +29,27 @@ from .models import (
 
 log = logging.getLogger("crx")
 
+# settle_wait: s that trade(), deposit() and withdraw() poll their own status at most.
 NETWORKS = {
     "testnet": {
         "chain": "avax-fuji",
         "base_url": "https://api.crxfx.com",
         "rpc_url": "https://api.avax-test.network/ext/bc/C/rpc",
+        "settle_wait": 30.0,
     },
     # Ethereum mainnet. Off unless the caller opts in; no default URLs.
     "mainnet": {
         "chain": "ethereum",
         "base_url": None,
         "rpc_url": None,
+        "settle_wait": 90.0,
     },
 }
 _ALIASES = {"fuji": "testnet"}
 TESTNET_CHAIN_IDS = {43113, 84532, 11142220}
 MAINNET_CHAIN_IDS = {1}
 DEFAULT_STATE_DIR = "~/.crx-quickstart"  # shared with the CRX quickstart scripts: one Side nonce floor per seat
-SETTLE_WAIT = 30.0  # s: trade(), deposit() and withdraw() poll their own status at most this long
+WAITING = ("", "sending", "pending")  # statuses _settle polls past
 
 
 def _amount(value: Any, what: str = "amount") -> Decimal:
@@ -82,6 +85,12 @@ def _last(b: dict, key: str) -> dict:
     d = b.get(key)
     last = d.get("last") if isinstance(d, dict) else None
     return last if isinstance(last, dict) else {}
+
+
+def _word(value: Any) -> str | None:
+    """A 0x 32-byte hex word, lower case; None for anything else."""
+    s = value.lower() if isinstance(value, str) else ""
+    return s if len(s) == 66 and s[:2] == "0x" and all(ch in "0123456789abcdef" for ch in s[2:]) else None
 
 
 def _plain(d: Decimal) -> str:
@@ -151,6 +160,7 @@ class Client:
             raise ConfigError(f"unknown network {clean(network, 20)!r}; known: {', '.join(NETWORKS)}")
         self.network = name
         self.chain_key = net["chain"]
+        self._settle_wait = net["settle_wait"]
         gw_url = base_url or os.environ.get("CRX_BASE") or net["base_url"]
         rpc = rpc_url or os.environ.get("CRX_RPC") or net["rpc_url"]
         if name == "mainnet":
@@ -260,7 +270,7 @@ class Client:
 
     def _binder(self) -> Binder:
         c = self._chain_ready()
-        return Binder(self._gw, self._rpc, self._account, c, self._sep, self._state_dir, self._sleep, self._clock)
+        return Binder(self._gw, self._account, c, self._sep, self._state_dir, self._sleep, self._clock)
 
     # ---------- public reads ----------
 
@@ -468,10 +478,10 @@ class Client:
             self._sleep(1.0)
 
     def trade(self, quote: Quote) -> Trade:
-        """Accept a quote and bind it: sign your Side and send the arm tx (you pay gas).
+        """Accept a quote and bind it: you sign your Side. CRX sends the tx and pays gas.
 
-        Returns once the trade is ``open`` or ``refused``; ``pending`` when neither
-        shows within 30 s.
+        Returns once the trade is ``open`` or ``refused``. When neither shows within
+        30 s (testnet) or 90 s (mainnet), returns ``sending`` or ``pending``.
         """
         self._need_seat()
         if not isinstance(quote, Quote):
@@ -502,33 +512,39 @@ class Client:
             raise RefusedToSign("refused to sign: the Side template cannot be read") from None
         exp = quote.raw.get("expires_at")
         maker_by = min((exp if isinstance(exp, int) else 10**13) / 1000, opened + 120) + 5
-        tx = b.bind(rfq_id, arm, side, maker_by, log.info)
-        status = self._settle(lambda: self._gw.request("GET", f"/rfqs/{rfq_id}").get("trade_status"))
-        log.info("rfq %s %s: arm %s", rfq_id, status, tx)
+        b.bind(rfq_id, arm, side, maker_by, log.info)
+        status, view = self._settle(lambda: self._gw.request("GET", f"/rfqs/{rfq_id}"), "trade_status")
+        tx = _word(view.get("trade_tx"))
+        log.info("rfq %s %s: tx %s", rfq_id, status, tx)
         return Trade(status=status, tx=tx, raw=r, **base)
 
-    def _settle(self, read: Callable[[], Any]) -> str:
-        """Poll ``read()`` for a status other than ``pending``, at most ``SETTLE_WAIT`` s.
+    def _settle(self, read: Callable[[], Any], key: str = "status") -> tuple[str, dict]:
+        """Poll ``read()`` for a ``key`` status other than ``sending`` or ``pending``, at most
+        the network's ``settle_wait`` s. Returns (status, the answer that carried it).
 
-        ``read`` returns the status, or None when the gateway does not show it yet.
-        A gateway error counts as None.
+        ``read`` returns a dict, or None when the gateway does not show it yet. A gateway
+        error counts as None. Past the wait: the last ``sending`` or ``pending`` seen, else ``pending``.
         """
-        deadline = self._clock() + SETTLE_WAIT
+        deadline = self._clock() + self._settle_wait
+        word, seen = "pending", {}
         while True:
             try:
-                word = read()
+                got = read()
             except CrxError:
-                word = None
-            if isinstance(word, str) and word not in ("", "pending"):
-                return clean(word, 40)
+                got = None
+            w = got.get(key) if isinstance(got, dict) else None
+            if isinstance(w, str) and w:
+                word, seen = clean(w, 40), got
+                if w not in WAITING:
+                    return word, seen
             if self._clock() >= deadline:
-                return "pending"
+                return word, seen
             self._sleep(1.0)
 
-    def _money_status(self, key: str, tx: str) -> str | None:
-        """``/balance`` ``<key>.last.status`` when ``<key>.last.tx`` is ``tx``."""
+    def _money_last(self, key: str, match: str, value: str) -> dict | None:
+        """``/balance`` ``<key>.last`` when its ``match`` field is ``value``."""
         last = _last(self.balance().raw, key)
-        return last.get("status") if str(last.get("tx") or "").lower() == tx.lower() else None
+        return last if str(last.get(match) or "").lower() == value.lower() else None
 
     # ---------- money ----------
 
@@ -537,7 +553,7 @@ class Client:
 
         On a testnet, ``mint=True`` first mints the test USDC the wallet lacks.
         Returns once the deposit is ``credited`` or ``failed``; ``pending`` when
-        neither shows within 30 s.
+        neither shows within 30 s (testnet) or 90 s (mainnet).
         """
         self._need_seat()
         amount = _amount(amount)
@@ -573,16 +589,16 @@ class Client:
                     "mint(address,uint256)", ["address", "uint256"], [to_checksum_address(self.address), raw - held])))
         for (to, data), name in zip(want, ["approve", "deposit"][-len(want):]):
             hashes.append(self._send(name, to, data))
-        status = self._settle(lambda: self._money_status("deposit", hashes[-1]))
+        status, _ = self._settle(lambda: self._money_last("deposit", "tx", hashes[-1]))
         log.info("deposit %s %s", _plain(amount), status)
         return Deposit(amount=amount, txs=hashes, status=status)
 
     def withdraw(self, amount: Any) -> Withdraw:
-        """Withdraw USDC to your own wallet. Sign the intent, arm it on the core. You pay gas.
+        """Withdraw USDC to your own wallet. You sign the intent. CRX sends the tx and pays gas.
 
-        Returns once the withdraw shows a status other than ``pending``; ``pending``
-        when none shows within 30 s. ``accepted`` leaves the balance at once; the
-        payout follows.
+        Returns once the withdraw shows a status other than ``sending`` or ``pending``.
+        When none shows within 30 s (testnet) or 90 s (mainnet), returns ``sending`` or
+        ``pending``. ``accepted`` leaves the balance at once; the payout follows.
         """
         self._need_seat()
         amount = _amount(amount)
@@ -604,12 +620,18 @@ class Client:
                 raise RefusedToSign("digest mismatch: the served digest is not this intent; nothing signed")
         except (KeyError, TypeError, ValueError, AttributeError):
             raise RefusedToSign("the gateway served an intent this SDK cannot read; nothing signed") from None
-        sig = bytes(self._account.unsafe_sign_hash(digest).signature)
-        data = e7.calldata("armWithdrawIntent(uint8,bytes)", ["uint8", "bytes"], [5, e7.withdraw_envelope(w, sig)])
-        tx = self._send("armWithdrawIntent", c["core"], data)
-        status = self._settle(lambda: self._money_status("withdraw", tx))
-        log.info("withdraw %s %s, nonce %s", _plain(amount), status, nonce)
-        return Withdraw(amount=amount, nonce=nonce, tx=tx, status=status)
+        sig = "0x" + bytes(self._account.unsafe_sign_hash(digest).signature).hex()
+        intent = {"account": self.address, "amount": f"{amount:.6f}", "recipient": self.address,
+                  "nonce": str(nonce), "deadline": int(w["deadline"])}
+        r = self._gw.request("POST", "/withdraw/sig", body={"chain": self.chain_key, "intent": intent, "sig": sig},
+                             ok=(200, 202))
+        item = _word(r.get("item"))
+        if item is None:
+            raise BadAnswer("/withdraw/sig named no item")
+        status, last = self._settle(lambda: self._money_last("withdraw", "item", item))
+        tx = _word(last.get("tx"))
+        log.info("withdraw %s %s, nonce %s, item %s", _plain(amount), status, nonce, item)
+        return Withdraw(amount=amount, nonce=nonce, item=item, tx=tx, status=status)
 
     # ---------- viewers ----------
 

@@ -4,7 +4,6 @@ import time
 from decimal import Decimal
 
 import pytest
-from eth_abi import decode
 from eth_account import Account
 from eth_utils import to_checksum_address
 
@@ -175,21 +174,63 @@ def withdraw_route(session, health, account, amount=1000, edit=None, digest=None
     return w, sep
 
 
-def test_withdraw_signs_and_arms(make_client, session, health, account):
+ITEM = "0x" + "5c" * 32
+LANDED = "0x" + "7a" * 32
+
+
+def sig_route(session, status=202, item=ITEM):
+    """POST /withdraw/sig: the chain item id of the posted intent."""
+    def answer(req):
+        body = {"item": item, "status": "sending", "chain": req["body"]["chain"], **req["body"]["intent"]}
+        return (status, {k: v for k, v in body.items() if v is not None})
+    session.routes[("POST", "/withdraw/sig")] = answer
+
+
+def item_row(status, item=ITEM, tx=None):
+    return {"item": item, "tx": tx, "nonce": "3", "amount": "1000.000000", "paid": None, "status": status,
+            "reason": None}
+
+
+@pytest.mark.parametrize("code", [202, 200])
+def test_withdraw_posts_the_sig_sends_no_tx(make_client, session, health, account, code):
     chain = Chain(session)
-    money_view(session, account, chain, "withdraw", status="accepted", nonce="3")
     w, sep = withdraw_route(session, health, account)
+    sig_route(session, status=code)
+    session.routes[("GET", "/balance")] = [
+        balance_body(account),  # the nonce read
+        balance_body(account, withdraw=item_row("sending")),
+        balance_body(account, withdraw=item_row("accepted", tx=LANDED)),
+    ]
     out = make_client(clock=Clock(time.time())).withdraw(1000)
-    assert out.nonce == 3 and len(chain.sent) == 1
-    assert (out.status, out.tx) == ("accepted", "0x" + f"{1:064x}")
-    # The armed envelope carries this seat's signature over the served intent.
-    call = next(p for m, p in session.rpc_calls if m == "eth_estimateGas")[0]
-    assert call["to"].lower() == core_of(health)
-    kind, env = decode(["uint8", "bytes"], e7.hx(call["data"])[4:])
-    item, sig = decode(["bytes", "bytes"], env)
-    (sig,) = decode(["bytes"], sig)
-    assert kind == 5
-    assert Account._recover_hash(e7.withdraw_digest(sep, w), signature=sig) == account.address
+    assert (out.status, out.item, out.tx, out.nonce) == ("accepted", ITEM, LANDED, 3)
+    # No tx: only the chain check reads the RPC. test_deposit_mints_approves_deposits is the control.
+    assert chain.sent == [] and set(session.rpc_methods()) <= {"eth_chainId", "eth_getCode"}
+    body = next(c for c in session.calls if c["path"] == "/withdraw/sig")["body"]
+    assert body["chain"] == "avax-fuji"
+    assert body["intent"] == {"account": account.address.lower(), "amount": "1000.000000",
+                              "recipient": account.address.lower(), "nonce": "3", "deadline": w["deadline"]}
+    assert Account._recover_hash(e7.withdraw_digest(sep, w), signature=body["sig"]) == account.address
+
+
+@pytest.mark.parametrize("item,word", [(ITEM, "accepted"), ("0x" + "ee" * 32, "pending"), (None, "pending")])
+def test_withdraw_matches_by_item(make_client, session, health, account, item, word):
+    # Same nonce and tx on every row: only the item names this withdraw.
+    Chain(session)
+    withdraw_route(session, health, account)
+    sig_route(session)
+    session.routes[("GET", "/balance")] = [balance_body(account),
+                                           balance_body(account, withdraw=item_row("accepted", item=item, tx=LANDED))]
+    out = make_client(clock=Clock(time.time())).withdraw(1000)
+    assert (out.status, out.tx) == (word, LANDED if word == "accepted" else None)
+
+
+def test_withdraw_sig_answer_without_item(make_client, session, health, account):
+    Chain(session)
+    session.routes[("GET", "/balance")] = balance_body(account)
+    withdraw_route(session, health, account)
+    sig_route(session, item=None)
+    with pytest.raises(crx.BadAnswer, match="item"):
+        make_client().withdraw(1000)
 
 
 @pytest.mark.parametrize("edit", [{"recipient": "0x" + "99" * 20}, {"amount": str(2000 * 10**6)}, {"nonce": "9"},
@@ -198,44 +239,42 @@ def test_withdraw_refuses_foreign_intent(make_client, session, health, account, 
     chain = Chain(session)
     session.routes[("GET", "/balance")] = balance_body(account)
     withdraw_route(session, health, account, edit=edit)
+    sig_route(session)
     with pytest.raises(crx.RefusedToSign):
         make_client().withdraw(1000)
-    assert chain.sent == []
+    assert chain.sent == [] and "/withdraw/sig" not in session.paths()
 
 
 @pytest.mark.parametrize("word", ["accepted", "refused", "paid"])
-def test_withdraw_polls_until_its_own_tx_is_final(make_client, session, health, account, word):
-    chain = Chain(session)
-    old = {"tx": "0x" + "ee" * 32, "status": "paid", "nonce": "2"}
+def test_withdraw_polls_until_its_own_item_is_final(make_client, session, health, account, word):
+    Chain(session)
+    old = item_row("paid", item="0x" + "ee" * 32, tx="0x" + "ee" * 32)
     session.routes[("GET", "/balance")] = [
         balance_body(account, withdraw=old),  # the nonce read
         balance_body(account, withdraw=old),
-        balance_body(account, withdraw={"tx": "0x" + f"{1:064x}", "status": "pending", "nonce": "3"}),
-        balance_body(account, withdraw={"tx": "0x" + f"{1:064x}", "status": word, "nonce": "3"}),
+        balance_body(account, withdraw=item_row("sending")),
+        balance_body(account, withdraw=item_row("pending", tx=LANDED)),
+        balance_body(account, withdraw=item_row(word, tx=LANDED)),
     ]
     withdraw_route(session, health, account)
+    sig_route(session)
     clock = Clock(time.time())
     t0 = clock()
     assert make_client(clock=clock).withdraw(1000).status == word
-    assert polls(session, "/balance") == 4 and clock() - t0 == 2
+    assert polls(session, "/balance") == 5 and clock() - t0 == 3
 
 
-def test_withdraw_pending_after_30_s(make_client, session, health, account):
+@pytest.mark.parametrize("word", ["sending", "pending"])
+def test_withdraw_waits_30_s_on_testnet(make_client, session, health, account, word):
     chain = Chain(session)
-    money_view(session, account, chain, "withdraw", status="pending")
+    session.routes[("GET", "/balance")] = [balance_body(account), balance_body(account, withdraw=item_row(word))]
     withdraw_route(session, health, account)
+    sig_route(session)
     clock = Clock(time.time())
     t0 = clock()
-    assert make_client(clock=clock).withdraw(1000).status == "pending"
-    assert 30 <= clock() - t0 <= 31 and len(chain.sent) == 1
-
-
-def test_withdraw_other_tx_is_no_match(make_client, session, health, account):
-    # A refused intent keeps the nonce: only the tx names this withdraw.
-    chain = Chain(session)
-    money_view(session, account, chain, "withdraw", status="refused", tx="0x" + "ee" * 32, nonce="3")
-    withdraw_route(session, health, account)
-    assert make_client(clock=Clock(time.time())).withdraw(1000).status == "pending"
+    out = make_client(clock=clock).withdraw(1000)
+    assert (out.status, out.tx) == (word, None)
+    assert 30 <= clock() - t0 <= 31 and polls(session, "/balance") == 1 + 31 and chain.sent == []
 
 
 def test_withdraw_in_progress_sends_nothing(make_client, session, account):

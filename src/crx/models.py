@@ -63,8 +63,9 @@ class Quote:
 
 @dataclass(frozen=True)
 class Trade:
-    """``status`` is ``open`` (the trade counts now), ``pending`` (not final yet;
-    ``trade.confirmed`` or ``trade.refused`` follows) or ``refused``."""
+    """``status`` is ``sending`` (CRX is sending the tx), ``open`` (the trade counts now),
+    ``pending`` (not final yet; ``trade.opened`` or ``trade.refused`` follows) or ``refused``.
+    ``tx`` is the landed tx; None before it lands."""
 
     status: str
     rfq_id: str
@@ -136,9 +137,11 @@ class Deposit:
 
 @dataclass(frozen=True)
 class Withdraw:
-    """``status`` is ``accepted``, ``pending``, ``paid``, ``partial``, ``refused`` or ``returned``."""
+    """``status`` is ``sending``, ``accepted``, ``pending``, ``paid``, ``partial``, ``refused`` or ``returned``.
+    ``item`` is the chain item id. ``tx`` is the landed tx; None before it lands."""
 
     amount: Decimal
     nonce: int
-    tx: str
+    item: str
+    tx: str | None
     status: str
