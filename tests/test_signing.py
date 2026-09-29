@@ -9,7 +9,7 @@ from eth_utils import keccak
 from crx import _eip712 as e7
 from crx._http import Gateway, rest_message
 
-CORE = "0x893ed03f61e2d3f3e24ea610d66fa91d5ecd3645"
+CORE = "0x0f6fba28791dfd909bd023e63bc072081610eeea"
 DOMAIN = {"name": "CRX", "version": "rulebook-1.0", "chainId": 43113, "verifyingContract": CORE}
 
 
