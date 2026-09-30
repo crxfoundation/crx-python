@@ -267,6 +267,14 @@ def test_send_quote_refuses_a_bad_rate(maker, session, health, rate):
     assert not any(c["path"].endswith("/quotes") for c in session.calls)
 
 
+@pytest.mark.parametrize("cqid", ["q" * 129, "q-\u00e9", "q\n1"])
+def test_send_quote_refuses_a_client_quote_id_the_gateway_refuses(maker, session, health, cqid):
+    quote_route(session, sep_of(health))
+    with pytest.raises(crx.BadRequest):
+        maker.send_quote(rfq_obj(), "18.7", client_quote_id=cqid)
+    assert not any(c["path"].endswith("/quotes") for c in session.calls)
+
+
 def test_send_quote_takes_an_rfq_only(maker):
     with pytest.raises(crx.BadRequest):
         maker.send_quote({"rfq_id": RFQ}, "18.7")
