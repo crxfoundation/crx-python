@@ -54,6 +54,18 @@ def test_no_fold_or_crank_words():
     assert hits == []
 
 
+def test_market_closed_is_market_paused():
+    assert crx.MarketClosed is crx.MarketPaused
+    e = from_gateway(409, {"code": "market_paused", "error": "USD/JPY is paused", "details": {"pair": "USD/JPY"}})
+    assert isinstance(e, crx.MarketClosed) and e.code == "market_paused"
+
+
+def test_no_market_closed_code():
+    root = Path(__file__).parent.parent
+    files = [root / "README.md", *(root / "examples").glob("*.py"), *(root / "src" / "crx").glob("*.py")]
+    assert [f.name for f in files if "market_closed" in f.read_text()] == []
+
+
 def test_unknown_code_passes_through():
     e = from_gateway(409, {"code": "brand_new", "error": "x\x1b[31m"})
     assert type(e) is crx.CrxError and e.code == "brand_new" and e.gateway_code == "brand_new"

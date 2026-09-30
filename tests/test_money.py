@@ -331,6 +331,17 @@ def test_trades_pages(make_client, session):
     assert [c["query"]["since"] for c in session.calls if c["path"] == "/trades"] == [["0"], ["1000"]]
 
 
+def test_trades_limit_at_most_1000_and_loops(make_client, session):
+    def page(start, n):
+        rows = [{"type": "trade.opened", "seq": start + i + 1, "ts": 1, "data": {}} for i in range(n)]
+        return {"trades": rows, "seq": start + n}
+    session.routes[("GET", "/trades")] = [page(0, 1000), page(1000, 1000), page(2000, 3)]
+    assert [e.seq for e in make_client().trades()] == list(range(1, 2004))
+    q = [c["query"] for c in session.calls if c["path"] == "/trades"]
+    assert [x["since"] for x in q] == [["0"], ["1000"], ["2000"]]
+    assert all(1 <= int(x["limit"][0]) <= 1000 for x in q)
+
+
 def test_trades_own_by_default(make_client, session):
     # A seat that takes and makes: the gateway serves client_rfq_id to the RFQ's taker only.
     tape = {"seq": 9, "trades": [

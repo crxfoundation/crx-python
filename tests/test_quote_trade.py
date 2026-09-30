@@ -335,15 +335,6 @@ def test_closed_market_still_opens_the_rfq(make_client, venue, session, markets,
     assert session.paths("POST") == ["/rfqs"]
 
 
-def test_closed_market_gateway_refusal_is_market_closed(make_client, session, markets):
-    session.routes[("POST", "/rfqs")] = (409, {"code": "market_closed", "error": "USD/MXN is closed",
-                                               "details": {"opens_at": 1790200000000}})
-    with pytest.raises(crx.MarketClosed) as ei:
-        make_client().quote("USD/MXN", "buy", 25_000)
-    assert ei.value.code == "market_closed" and ei.value.details["opens_at"] == 1790200000000
-    assert session.paths("POST") == ["/rfqs"]
-
-
 def test_closed_market_no_maker_is_no_quotes(make_client, venue, session, markets, clock):
     session.routes[("GET", "/markets")] = markets
     session.routes[("GET", f"/rfqs/{RFQ}")] = {"quote": None, "quotes": []}
@@ -373,13 +364,79 @@ def test_gateway_below_min_maps(make_client, session, markets):
         make_client().quote("USD/MXN", "buy", 10_000)
 
 
-@pytest.mark.parametrize("args", [("USD/XXX", "buy", 25_000), ("USD/MXN", "long", 25_000),
+@pytest.mark.parametrize("args", [("USD/XX", "buy", 25_000), ("USD/MXN", "long", 25_000),
                                   ("USD/MXN", "buy", -1), ("USD/MXN", "buy", "1.0000001")])
 def test_bad_inputs(make_client, session, markets, args):
     session.routes[("GET", "/markets")] = open_market(markets, "USD/MXN")
     with pytest.raises(crx.BadRequest):
         make_client().quote(*args)
     assert session.paths("POST") == []
+
+
+def without(markets: dict, pair: str) -> dict:
+    m = open_market(markets, "USD/MXN")
+    m["markets"] = [row for row in m["markets"] if row["pair"] != pair]
+    return m
+
+
+@pytest.mark.parametrize("pair", ["USD/MXN", "USD/XXX"])
+def test_market_not_offered_is_market_paused(make_client, session, markets, pair):
+    session.routes[("GET", "/markets")] = without(markets, "USD/MXN")
+    with pytest.raises(crx.MarketPaused) as ei:
+        make_client().market(pair)
+    assert str(ei.value) == f"{pair} is not offered on avax-fuji" and ei.value.details == {"pair": pair}
+
+
+def test_market_on_another_chain_only_is_not_offered(make_client, session, markets):
+    m = open_market(markets, "USD/MXN")
+    for row in m["markets"]:
+        if row["pair"] == "USD/MXN":
+            row["chains"] = [dict(row["chains"][0], chain="ethereum", chain_id=1, paused=False)]
+    session.routes[("GET", "/markets")] = m
+    with pytest.raises(crx.MarketPaused, match="^USD/MXN is not offered on avax-fuji$"):
+        make_client().market("usdmxn")
+
+
+def test_quote_not_offered_sends_nothing(make_client, session, markets):
+    session.routes[("GET", "/markets")] = without(markets, "USD/MXN")
+    with pytest.raises(crx.MarketPaused) as ei:
+        make_client().quote("USD/MXN", "buy", 25_000)
+    assert ei.value.code == "market_paused" and ei.value.details == {"pair": "USD/MXN"}
+    assert session.paths("POST") == []
+
+
+def test_min_notional_comes_from_markets(make_client, venue, session, markets, clock):
+    m = open_market(markets, "USD/MXN")
+    for row in m["markets"]:
+        row["notional"]["min"] = "5000"
+    session.routes[("GET", "/markets")] = m
+    c = make_client(clock=clock)
+    with pytest.raises(crx.BelowMin) as ei:
+        c.quote("USD/MXN", "buy", "4999.999999")
+    assert ei.value.details == {"min": "5000"} and session.paths("POST") == []
+    c.quote("USD/MXN", "buy", 5_000)
+    assert session.paths("POST") == ["/rfqs"] and venue.rfq_body["notional"] == "5000"
+
+
+@pytest.mark.parametrize("cid", ["", "x" * 129, "a\nb", "tab\there", "caf\u00e9", "del\x7f", 123, b"id"])
+def test_client_rfq_id_refused_before_any_call(make_client, session, cid):
+    with pytest.raises(crx.BadRequest) as ei:
+        make_client().quote("USD/MXN", "buy", 25_000, client_rfq_id=cid)
+    assert str(ei.value) == "client_rfq_id must be 1 to 128 printable characters"
+    assert ei.value.details == {"field": "client_rfq_id", "max": 128}
+    assert session.calls == []
+
+
+@pytest.mark.parametrize("cid", ["x" * 128, " ~!desk 42~ ", "A"])
+def test_client_rfq_id_printable_ascii_is_sent(make_client, venue, clock, cid):
+    make_client(clock=clock).quote("USD/MXN", "buy", 25_000, client_rfq_id=cid)
+    assert venue.rfq_body["client_rfq_id"] == cid
+
+
+def test_default_client_rfq_id_fits(make_client, venue, clock):
+    make_client(clock=clock).quote("USD/MXN", "buy", 25_000)
+    cid = venue.rfq_body["client_rfq_id"]
+    assert 1 <= len(cid) <= 128 and all(0x20 <= ord(ch) <= 0x7E for ch in cid)
 
 
 def test_naive_expiry_refused(make_client, session, markets):
