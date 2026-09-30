@@ -41,13 +41,13 @@ def steps():
     maker = crx.Client(network="testnet")
     taker = crx.Client(os.environ["CRX_TAKER_PK"], network="testnet")
     log(maker.address, taker.address)
-    # 21:04:52 0x7638…fe71 0x5b38…ddc4
+    # 22:31:29 0x0ed8…6bc9 0x2a68…e44e
 
     # 2. Fund both. You pay gas. A seat with no collateral receives no RFQs.
     maker.deposit(20_000)
     taker.deposit(20_000)
     log(maker.balance().free, taker.balance().free)
-    # 21:04:58 20000.000000 20000.000000
+    # 22:32:20 160000.000000 140000.000000
 
     # 3. Open the RFQ stream. It reads your tape up to now,
     #    and ends when your test taker is done.
@@ -64,8 +64,9 @@ def steps():
             q = taker.quote("USD/MXN", "buy", 25_000, client_rfq_id=cid)
             log("taker: best quote", q.rate,
                 "house" if q.house else "maker")
+            # 22:32:26 taker: best quote 18.11994 maker
             if not q.house:
-                log("taker:", taker.trade(q).status)  # 21:05:09 taker: open
+                log("taker:", taker.trade(q).status)  # 22:32:40 taker: open
         except crx.CrxError as e:
             log("taker:", e.code, e)
             taker_failed.append(e)
@@ -111,14 +112,14 @@ def steps():
     for rfq in rfqs:
         if not asked_by_taker(rfq):
             continue
-        log(rfq.pair, rfq.side, rfq.notional)  # 21:05:00 USD/MXN sell 25000
+        log(rfq.pair, rfq.side, rfq.notional)  # 22:32:21 USD/MXN sell 25000
         q = maker.send_quote(rfq, near_mid(rfq))
-        log("maker: quoted", q.rate)  # 21:05:01 maker: quoted 18.09991
+        log("maker: quoted", q.rate)  # 22:32:22 maker: quoted 18.11994
 
         # 6. Confirm. Waits for the accept and signs your Side.
         #    CRX sends the tx and pays gas.
         t = maker.confirm(q, timeout=60)
-        log("maker:", t.status)  # 21:05:09 maker: open
+        log("maker:", t.status)  # 22:32:41 maker: open
         break
     else:
         # The taker's own refusal ends the run: its RFQ never opened.
@@ -136,7 +137,7 @@ def steps():
     for p in maker.positions():
         if p.rfq_id == t.rfq_id:
             log(p.pair, p.side, p.notional, p.rate, p.status)
-            # 21:05:10 USDMXN sell 25000 18.09991 open
+            # 22:32:41 USDMXN sell 25000 18.11994 open
 
 
 def ask_key(name: str, file_name: str | None = None) -> bool:
