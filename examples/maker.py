@@ -1,4 +1,5 @@
-"""The maker Quickstart. Needs two Testnet accounts: CRX_WALLET_PK quotes, CRX_TAKER_PK asks."""
+"""The maker Quickstart. Needs two Testnet accounts:
+CRX_WALLET_PK quotes, CRX_TAKER_PK asks."""
 import os
 import threading
 import time
@@ -12,15 +13,18 @@ def log(*values):
     print(datetime.now().strftime("%H:%M:%S"), *values)
 
 
-# 1. Connect. Account 1 quotes: CRX_WALLET_PK. Account 2 is your test taker: CRX_TAKER_PK.
+# 1. Connect. Account 1 quotes: CRX_WALLET_PK.
+#    Account 2 is your test taker: CRX_TAKER_PK.
 maker = crx.Client(network="testnet")
 taker = crx.Client(os.environ["CRX_TAKER_PK"], network="testnet")
-log(maker.address, taker.address)  # 21:04:52 0x7638…fe71 0x5b38…ddc4
+log(maker.address, taker.address)
+# 21:04:52 0x7638…fe71 0x5b38…ddc4
 
 # 2. Fund both. You pay gas. A seat with no collateral receives no RFQs.
 maker.deposit(20_000)
 taker.deposit(20_000)
-log(maker.balance().free, taker.balance().free)  # 21:04:58 20000.000000 20000.000000
+log(maker.balance().free, taker.balance().free)
+# 21:04:58 20000.000000 20000.000000
 
 # 3. Open the RFQ stream. It reads your tape up to now,
 #    and ends when your test taker is done.
@@ -28,14 +32,15 @@ taker_done = threading.Event()
 taker_failed = []
 rfqs = maker.rfqs(wait=60, stop=taker_done)
 
-# 4. Your test taker asks in the background: 25,000 USD, the least a Testnet
-#    account may ask. It accepts a maker quote only.
+# 4. Your test taker asks in the background: 25,000 USD, the
+#    least a Testnet account may ask. It accepts a maker quote only.
 cid = f"maker-qs-{uuid.uuid4().hex[:8]}"
 
 def ask():
     try:
         q = taker.quote("USD/MXN", "buy", 25_000, client_rfq_id=cid)
-        log("taker: best quote", q.rate, "house" if q.house else "maker")
+        log("taker: best quote", q.rate,
+            "house" if q.house else "maker")
         if not q.house:
             log("taker:", taker.trade(q).status)  # 21:05:09 taker: open
     except crx.CrxError as e:
@@ -47,8 +52,9 @@ def ask():
 asker = threading.Thread(target=ask, daemon=True)
 asker.start()
 
-# Your test taker's view of an RFQ. Your two accounts share one IP, and the
-# gateway limits GET /rfqs/{id} per IP: on a rate limit, wait and read again.
+# Your test taker's view of an RFQ. Your two accounts share one
+# IP, and the gateway limits GET /rfqs/{id} per IP: on a rate
+# limit, wait and read again.
 def taker_view(rfq):
     for pause in (0.5, 1.0, 1.5):
         try:
@@ -57,16 +63,17 @@ def taker_view(rfq):
             time.sleep(pause)
     return taker.rfq(rfq.rfq_id)
 
-# Other desks ask on Testnet too. Quote your test taker's RFQ only:
-# the gateway gives client_rfq_id back to an RFQ's own taker, no one else.
+# Other desks ask on Testnet too. Quote your test taker's RFQ
+# only: the gateway gives client_rfq_id back to an RFQ's own
+# taker, no one else.
 def asked_by_taker(rfq):
     try:
         return taker_view(rfq).client_rfq_id == cid
     except crx.AuthError:
         return False
 
-# A near-mid rate: the house desk's rate on this RFQ, as your test taker reads it.
-# Any maker quote outranks a house quote.
+# A near-mid rate: the house desk's rate on this RFQ, as your
+# test taker reads it. Any maker quote outranks a house quote.
 def near_mid(rfq):
     for _ in range(6):
         rate = taker_view(rfq).house_rate
@@ -75,8 +82,9 @@ def near_mid(rfq):
         time.sleep(0.5)
     raise crx.NoQuotes("no house quote to price from")
 
-# 5. Quote your test taker's RFQ. Signs your Leg. Quote fast: a few seconds
-#    after the RFQ opens, the gateway ranks the quotes and the taker gets the best one.
+# 5. Quote your test taker's RFQ. Signs your Leg. Quote fast: a
+#    few seconds after the RFQ opens, the gateway ranks the quotes
+#    and the taker gets the best one.
 for rfq in rfqs:
     if not asked_by_taker(rfq):
         continue
@@ -93,12 +101,15 @@ else:
     # The taker's own refusal ends the run: its RFQ never opened.
     if taker_failed and not isinstance(taker_failed[0], crx.NoQuotes):
         raise taker_failed[0]
-    raise crx.NoQuotes("your test taker's RFQ did not reach the maker seat: check its maker role and collateral")
+    raise crx.NoQuotes(
+        "your test taker's RFQ did not reach the maker seat: "
+        "check its maker role and collateral")
 
 # 7. Your trade, from the maker's side.
 asker.join(60)
 if t.status != "open":
-    raise crx.CrxError(f"the trade is {t.status}, not open", code="not_open")
+    raise crx.CrxError(
+        f"the trade is {t.status}, not open", code="not_open")
 for p in maker.positions():
     if p.rfq_id == t.rfq_id:
         log(p.pair, p.side, p.notional, p.rate, p.status)
