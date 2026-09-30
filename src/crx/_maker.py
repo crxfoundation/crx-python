@@ -340,9 +340,15 @@ def lost(view: dict, quote_id: str) -> str | None:
 
 
 def _template(c: "Client", q: MakerQuote, end: float, poll: float) -> dict | None:
-    """Poll GET /rfqs/{id}/side until the maker's template shows. None when the pair already armed."""
+    """Poll GET /rfqs/{id}/side until the maker's template shows. None when the pair already armed.
+
+    The RFQ view is read on every third poll and at the end of the wait: both reads share
+    the gateway's per-IP budget of 2 requests a second with the taker's own polls.
+    """
     path = f"/rfqs/{q.rfq_id}/side"
+    n = -1
     while True:
+        n += 1
         try:
             r = c._gw.raw_request("GET", path)
         except NetworkError:
@@ -360,10 +366,12 @@ def _template(c: "Client", q: MakerQuote, end: float, poll: float) -> dict | Non
             return None  # the pair armed: this seat signed before
         if r is not None and r.status_code not in (404, 429) and r.status_code < 500:
             raise from_gateway(r.status_code, Gateway.body_of(r), r.text[:300] if r.text else "")
-        try:
-            why = lost(c._gw.request("GET", f"/rfqs/{q.rfq_id}"), q.quote_id)
-        except TRANSIENT:
-            why = None
+        why = None
+        if n % 3 == 0 or c._clock() >= end:
+            try:
+                why = lost(c._gw.request("GET", f"/rfqs/{q.rfq_id}"), q.quote_id)
+            except TRANSIENT:
+                why = None
         if why is not None:
             raise QuoteLost({
                 "another_maker": "the taker accepted another quote",

@@ -133,6 +133,12 @@ def test_rfqs_yields_quotable_rfqs_once(maker, session, monkeypatch):
     assert all(c["query"]["limit"] == ["3"] for c in session.calls if c["path"] == "/trades")
 
 
+def test_rfqs_reads_the_tape_once_a_second_by_default(maker, session):
+    session.routes[("GET", "/trades")] = tape([], 1)
+    list(maker.rfqs(wait=10))
+    assert len([c for c in session.calls if c["path"] == "/trades"]) == 11  # the catch-up read, then one a second
+
+
 def test_rfqs_catch_up_error_raises_at_the_call(maker, session):
     session.routes[("GET", "/trades")] = (503, {"code": "upstream", "error": "down"})
     with pytest.raises(crx.ServerError):
@@ -372,6 +378,26 @@ def test_confirm_signs_the_maker_side_and_opens(maker, round_, sent, session):
     floor = (maker._state_dir / f"side-nonce-{seat.lower()}").read_text()
     assert floor == round_.t["own_nonce"]
     assert set(session.rpc_methods()) <= {"eth_chainId", "eth_getCode"}
+
+
+def test_confirm_reads_the_rfq_view_every_third_poll(maker, round_, sent, session):
+    round_.accept_after = 9
+    t = maker.confirm(sent)
+    before = [c["path"] for c in session.calls if c["method"] == "GET"]
+    first_template = [i for i, p in enumerate(before) if p.endswith("/side")][9]
+    views = [p for p in before[:first_template] if p == f"/rfqs/{RFQ}"]
+    assert t.status == "open" and len(views) == 3
+
+
+def test_confirm_rides_out_rate_limits(maker, round_, sent, session):
+    limited = (429, {"code": "rate_limited", "error": "slow down"})
+    side, view = round_.get_side, round_.view
+    session.routes[("GET", f"/rfqs/{RFQ}/side")] = [limited, limited, side]
+    session.routes[("GET", f"/rfqs/{RFQ}")] = [limited, view]
+    round_.accept_after = 0
+    round_.post_answers = [limited, {"ready": True}]
+    t = maker.confirm(sent)
+    assert t.status == "open" and len(round_.posts) == 2 and len(set(round_.posts)) == 1
 
 
 def test_confirm_resends_the_same_bytes_on_5xx(maker, round_, sent):
