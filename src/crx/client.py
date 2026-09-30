@@ -16,7 +16,7 @@ import requests
 from eth_utils import is_checksum_address, is_hex_address, keccak, to_checksum_address
 
 from . import _eip712 as e7
-from ._bind import Binder
+from ._bind import Binder, utc
 from ._chain import Rpc, send_tx
 from ._http import Gateway
 from ._keys import load_account
@@ -483,6 +483,11 @@ class Client:
     def trade(self, quote: Quote) -> Trade:
         """Accept a quote and open the trade: you sign your Side. CRX sends the tx and pays gas.
 
+        The quote carries your Side template. The SDK rebuilds and checks it, signs it,
+        and posts the accept with the signature: one call. When the template is stale,
+        the gateway answers with a fresh one, which is checked and signed in turn.
+        A gateway that takes the leg body only gets that body, then the Side.
+
         Returns once the trade is ``open`` or ``refused``. When neither shows within
         30 s (testnet) or 90 s (mainnet), returns ``sending`` or ``pending``.
         """
@@ -503,19 +508,27 @@ class Client:
             "im_bps": rfq["req_im_bps"], "premium_bps": 0,
         }
         b.check_terms(arm, want)
-        sig = b.sign_leg(arm)
-        r, answered = b.accept(rfq_id, quote.raw.get("expires_at"), {"quote_id": quote.quote_id, "leg": arm, "sig": sig})
-        log.info("rfq %s accepted @ %s", rfq_id, quote.rate)
         base = dict(rfq_id=rfq_id, quote_id=quote.quote_id, pair=quote.pair, side=quote.side,
                     notional=quote.notional, rate=quote.rate)
-        side = r.get("side")
-        try:
-            opened = min(int(side["own_nonce"]) / 1000, answered)
-        except (KeyError, TypeError, ValueError):
-            raise RefusedToSign("refused to sign: the Side template cannot be read") from None
         exp = quote.raw.get("expires_at")
-        maker_by = min((exp if isinstance(exp, int) else 10**13) / 1000, opened + 120) + 5
-        b.bind(rfq_id, arm, side, maker_by, log.info)
+        template = quote.raw.get("side_template")
+        one = b.accept_side(rfq_id, quote.quote_id, arm, template if isinstance(template, dict) else None, exp)
+        if one is not None:
+            r, side, answered = one
+            maker_by = min((exp if isinstance(exp, int) else 10**13) / 1000, answered + 120) + 5
+            log.info("rfq %s @ %s: side signed and posted with the accept, nonce %s; the maker signs by %s",
+                     rfq_id, quote.rate, clean(side["own_nonce"]), utc(maker_by))
+        else:
+            sig = b.sign_leg(arm)
+            r, answered = b.accept(rfq_id, exp, {"quote_id": quote.quote_id, "leg": arm, "sig": sig})
+            log.info("rfq %s accepted @ %s", rfq_id, quote.rate)
+            side = r.get("side")
+            try:
+                opened = min(int(side["own_nonce"]) / 1000, answered)
+            except (KeyError, TypeError, ValueError):
+                raise RefusedToSign("refused to sign: the Side template cannot be read") from None
+            maker_by = min((exp if isinstance(exp, int) else 10**13) / 1000, opened + 120) + 5
+            b.bind(rfq_id, arm, side, maker_by, log.info)
         status, view = self._settle(lambda: self._gw.request("GET", f"/rfqs/{rfq_id}"), "trade_status")
         tx = _word(view.get("trade_tx"))
         log.info("rfq %s %s: tx %s", rfq_id, status, tx)

@@ -27,10 +27,15 @@ def rnd():
 
 
 class Venue:
-    """One RFQ round: the gateway's answers, built from what the client sent."""
+    """One RFQ round: the gateway's answers, built from what the client sent.
 
-    def __init__(self, session, health, markets, clock, pair="USD/MXN"):
-        self.s, self.clock = session, clock
+    ``mode`` "one_call": the winner row carries the taker's Side template and
+    ``POST /accept {quote_id, sig}`` opens the round. "legacy": the gateway takes
+    the leg body only, then ``POST /side``.
+    """
+
+    def __init__(self, session, health, markets, clock, pair="USD/MXN", mode="legacy"):
+        self.s, self.clock, self.mode = session, clock, mode
         self.chain = next(c for c in health["chains"] if c["key"] == "avax-fuji")
         self.sep = e7.domain_separator(CHAIN_ID, self.chain["core"])
         self.rfq_body = None
@@ -39,6 +44,13 @@ class Venue:
         self.side_sig = None
         self.row_edit = {}
         self.template_edit = {}
+        self.winner = True      # the gateway named its pick: GET /rfqs/{id} carries `quote`
+        self.draft = None       # one_call: the taker's Side template for the winner
+        self.accepted = False
+        self.counter = 0        # the gateway's Side nonce counter for this seat
+        self.nonces = []        # one-shot nonces the next picks take, in order
+        self.stale = 0          # the next N accept posts answer 409 side_stale with a fresh draft
+        self.on_stale = None    # called before each fresh draft that `stale` forces
         # (trade_status, trade_tx) served one per poll once the Side is in; the last repeats.
         self.script = [("sending", None), ("open", TXH)]
         session.routes[("GET", "/markets")] = open_market(markets, pair)
@@ -64,24 +76,74 @@ class Venue:
         r.update(self.row_edit)
         return r
 
+    def taker_arm(self, seat):
+        """The taker half the gateway builds: its own seat and credential, the quote's joined terms."""
+        q = self.row()
+        return {"seat": seat, "leg_id": LEG, "join_ref": JOIN, "pair_id": q["pair_id"], "instrument_id": 1,
+                "side": q["side"], "notional": q["notional"], "rate": q["rate"], "im_bps": self.rfq_body["im_bps"],
+                "premium_bps": q["premium_bps"], "expiry": q["expiry"]}
+
+    def pick(self):
+        n = self.nonces.pop(0) if self.nonces else max(self.counter + 1, int(self.clock() * 1000))
+        self.counter = max(self.counter, n)
+        return n
+
+    def make_template(self, arm):
+        own_nonce = int(self.template_edit.get("own_nonce", self.pick()))
+        qe = int(self.template_edit.get("quote_expiry", int(self.clock()) + 300))
+        salt, c_maker = rnd(), keccak(os.urandom(32))
+        c_taker = e7.half_commitment(e7.arm_words(arm, own_nonce, qe), salt)
+        t = {"digest_kind": "side", "own_leg_id": arm["leg_id"], "own_nonce": str(own_nonce), "quote_expiry": qe,
+             "own_salt": salt, "c_taker": e7.h0x(c_taker), "c_maker": e7.h0x(c_maker),
+             "pair_c": e7.h0x(e7.pair_commitment(c_taker, c_maker)), "wraps_hash": WRAPS_HASH,
+             "domain_separator": e7.h0x(self.sep)}
+        t.update(self.template_edit)
+        t["digest"] = e7.h0x(e7.side_digest(self.sep, t))
+        return t
+
     def view(self, req):
-        v = {"quote": self.row(), "quotes": [self.row()]}
+        q = self.row()
+        if self.mode == "one_call" and self.winner and not self.accepted:
+            if self.draft is None:
+                self.draft = self.make_template(self.taker_arm(req["headers"]["x-crx-address"]))
+            q["side_template"] = self.draft
+        v = {"quote": q if self.winner else None, "quotes": [self.row()]}
         if self.side_sig is not None:
             word, tx = self.script.pop(0) if len(self.script) > 1 else self.script[0]
             v.update(trade_status=word, trade_tx=tx)
         return v
 
     def accept(self, req):
-        self.accept_body = leg = req["body"]["leg"]
-        own_nonce = int(self.template_edit.get("own_nonce", int(self.clock() * 1000)))
-        qe = int(self.template_edit.get("quote_expiry", int(self.clock()) + 300))
-        salt, c_maker = rnd(), keccak(os.urandom(32))
-        c_taker = e7.half_commitment(e7.arm_words(leg, own_nonce, qe), salt)
-        t = {"own_leg_id": leg["leg_id"], "own_nonce": str(own_nonce), "quote_expiry": qe, "own_salt": salt,
-             "c_taker": e7.h0x(c_taker), "c_maker": e7.h0x(c_maker),
-             "pair_c": e7.h0x(e7.pair_commitment(c_taker, c_maker)), "wraps_hash": WRAPS_HASH}
-        t.update(self.template_edit)
-        t["digest"] = e7.h0x(e7.side_digest(self.sep, t))
+        body = req["body"]
+        if "leg" in body and "sig" in body:
+            return self.accept_leg(body)
+        if self.mode == "legacy":
+            return (400, {"code": "bad_request", "error": "sig is required"})
+        seat = req["headers"]["x-crx-address"]
+        if self.draft is None or self.stale > 0 or body["quote_id"] != QID:
+            self.stale = max(self.stale - 1, 0)
+            if self.on_stale:
+                self.on_stale()
+            self.draft = self.make_template(self.taker_arm(seat))
+            return self.stale_answer(body)
+        if "sig" not in body:
+            return self.stale_answer(body)
+        signer = Account._recover_hash(e7.hx(self.draft["digest"]), signature=body["sig"]).lower()
+        if signer != seat:
+            return (400, {"code": "invalid_signature", "error": f"sign the digest {self.draft['digest']}"})
+        self.side_sig, self.template, self.accepted = body["sig"], self.draft, True
+        return {"rfq_id": RFQ, "quote_id": QID, "leg_id": LEG, "status": "accepted",
+                "leg_hash": e7.h0x(e7.leg_digest(self.sep, dict(self.taker_arm(seat), nonce=self.draft["own_nonce"],
+                                                                  quote_expiry=self.draft["quote_expiry"]))),
+                "side": dict(self.draft, signed=True)}
+
+    def stale_answer(self, body):
+        return (409, {"code": "side_stale", "error": "the Side template moved; sign this one",
+                      "details": {"quote_id": body["quote_id"], "side_template": self.draft}})
+
+    def accept_leg(self, body):
+        self.accept_body = leg = body["leg"]
+        t = self.make_template(leg)
         self.template = t
         return {"status": "accepted", "leg_hash": e7.h0x(e7.leg_digest(self.sep, leg)), "side": t}
 
@@ -89,17 +151,31 @@ class Venue:
         self.side_sig = req["body"]["sig"]
         return {"status": "signed"}
 
+    def reset(self):
+        """A new round on the same RFQ id: nothing accepted, no draft, no initial empty view."""
+        self.side_sig, self.draft, self.accepted = None, None, False
+        self.s.routes[("GET", f"/rfqs/{RFQ}")] = self.view
+
+
+def accepts(session):
+    return [x["body"] for x in session.calls if x["method"] == "POST" and x["path"] == f"/rfqs/{RFQ}/accept"]
+
 
 @pytest.fixture
 def clock():
     return Clock(time.time())
 
 
-@pytest.fixture
-def venue(session, health, markets, clock):
-    return Venue(session, health, markets, clock)
+@pytest.fixture(params=["one_call", "legacy"])
+def venue(request, session, health, markets, clock):
+    return Venue(session, health, markets, clock, mode=request.param)
 
 
+legacy_only = pytest.mark.parametrize("venue", ["legacy"], indirect=True)
+one_call_only = pytest.mark.parametrize("venue", ["one_call"], indirect=True)
+
+
+@legacy_only
 def test_quote_then_trade_binds(make_client, venue, session, clock, account):
     c = make_client(clock=clock)
     q = c.quote("USD/MXN", "buy", 25_000)
@@ -112,7 +188,7 @@ def test_quote_then_trade_binds(make_client, venue, session, clock, account):
     assert (t.status, t.tx) == ("open", TXH)
     leg = venue.accept_body
     assert leg["seat"] == account.address.lower() and leg["leg_id"] == LEG and leg["join_ref"] == JOIN
-    body = next(x for x in session.calls if x["path"].endswith("/accept"))["body"]
+    body = next(b for b in accepts(session) if "leg" in b)
     assert Account._recover_hash(e7.leg_digest(venue.sep, leg), signature=body["sig"]) == account.address
     assert Account._recover_hash(e7.side_digest(venue.sep, venue.template), signature=venue.side_sig) == account.address
     assert sent_nothing(session)
@@ -200,6 +276,7 @@ def test_trade_waits_30_s_on_testnet(make_client, venue, session, clock, word):
     assert len(trade_polls(session)) - before == 31 and 30 <= clock() - t0 <= 31
 
 
+@legacy_only
 @pytest.mark.parametrize("code,err", [((409, "round_closed"), crx.QuoteExpired),
                                       ((422, "insufficient_collateral"), crx.TradeUnknown)])
 def test_side_refusal(make_client, venue, session, clock, code, err):
@@ -212,6 +289,7 @@ def test_side_refusal(make_client, venue, session, clock, code, err):
     assert sent_nothing(session) and len(trade_polls(session)) == before
 
 
+@legacy_only
 def test_side_no_answer_still_reads_status(make_client, venue, session, clock):
     # A 5xx on the Side post: the gateway may hold it, so the status decides.
     def side(req):
@@ -234,8 +312,10 @@ def test_trade_no_status_is_pending(make_client, venue, session, clock, view):
     assert c.trade(q).status == "pending"
 
 
+@legacy_only
 def test_accept_without_side_template_sends_nothing(make_client, venue, session, clock):
-    session.routes[("POST", f"/rfqs/{RFQ}/accept")] = {"status": "accepted"}
+    session.routes[("POST", f"/rfqs/{RFQ}/accept")] = (
+        lambda req: {"status": "accepted"} if "leg" in req["body"] else venue.accept(req))
     c = make_client(clock=clock)
     with pytest.raises(crx.RefusedToSign, match="Side template"):
         c.trade(c.quote("USD/MXN", "buy", 25_000))
@@ -280,11 +360,16 @@ def test_side_nonce_floor_refuses_replay(make_client, venue, session, clock, acc
     c = make_client(clock=clock)
     c.trade(c.quote("USD/MXN", "buy", 25_000))
     floor = int(venue.template["own_nonce"])
-    venue.side_sig = None
+    venue.reset()
     venue.template_edit = {"own_nonce": str(floor)}
-    session.routes[("GET", f"/rfqs/{RFQ}")] = venue.view
+    q = c.quote("USD/MXN", "buy", 25_000)
+    before, sides = len(accepts(session)), session.paths("POST").count(f"/rfqs/{RFQ}/side")
     with pytest.raises(crx.RefusedToSign, match="own_nonce"):
-        c.trade(c.quote("USD/MXN", "buy", 25_000))
+        c.trade(q)
+    if venue.mode == "one_call":
+        # Asked for a newer template while a signed post still fits; the gateway kept the old nonce; nothing signed.
+        assert accepts(session)[before:] == [{"quote_id": QID}] * 2
+    assert session.paths("POST").count(f"/rfqs/{RFQ}/side") == sides
 
 
 def test_side_window_too_far_refused(make_client, venue, clock):
@@ -302,7 +387,8 @@ def test_rejected_accept_retries_then_quote_expired(make_client, venue, session,
         c.trade(c.quote("USD/MXN", "buy", 25_000))
     assert ei.value.code == "quote_expired" and ei.value.gateway_code == "rejected"
     assert sent_nothing(session)
-    assert session.paths("POST").count(f"/rfqs/{RFQ}/accept") > 1
+    bodies = accepts(session)
+    assert len(bodies) > 1 and all(b == bodies[0] for b in bodies)  # the same body, posted again
 
 
 def test_own_round_open(make_client, venue, session, clock):
@@ -312,6 +398,170 @@ def test_own_round_open(make_client, venue, session, clock):
     with pytest.raises(crx.OwnRoundOpen) as ei:
         c.trade(c.quote("USD/MXN", "buy", 25_000))
     assert ei.value.details["until"] == 123
+
+
+# ---------- one call: the Side signature rides on the accept ----------
+
+
+def recovers(venue, t, sig):
+    return Account._recover_hash(e7.side_digest(venue.sep, t), signature=sig)
+
+
+@one_call_only
+def test_one_call_trade(make_client, venue, session, clock, account):
+    c = make_client(clock=clock)
+    q = c.quote("USD/MXN", "buy", 25_000)
+    assert q.raw["side_template"] == venue.draft
+    t = c.trade(q)
+    assert (t.status, t.tx) == ("open", TXH) and t.raw["status"] == "accepted"
+    (body,) = accepts(session)
+    assert set(body) == {"quote_id", "sig"} and body["quote_id"] == QID
+    assert recovers(venue, venue.template, body["sig"]) == account.address
+    assert f"/rfqs/{RFQ}/side" not in session.paths("POST")
+    assert sent_nothing(session)
+    floor = (c._state_dir / f"side-nonce-{account.address.lower()}").read_text()
+    assert floor == venue.template["own_nonce"]
+
+
+@one_call_only
+def test_side_stale_signs_the_fresh_template(make_client, venue, session, clock, account):
+    c = make_client(clock=clock)
+    q = c.quote("USD/MXN", "buy", 25_000)
+    first = q.raw["side_template"]
+    venue.stale = 1
+    assert c.trade(q).status == "open"
+    a, b = accepts(session)
+    assert set(a) == set(b) == {"quote_id", "sig"} and a["sig"] != b["sig"]
+    assert recovers(venue, first, a["sig"]) == account.address
+    assert recovers(venue, venue.template, b["sig"]) == account.address
+    assert int(venue.template["own_nonce"]) > int(first["own_nonce"])
+    assert (c._state_dir / f"side-nonce-{account.address.lower()}").read_text() == venue.template["own_nonce"]
+    assert f"/rfqs/{RFQ}/side" not in session.paths("POST")
+
+
+@one_call_only
+@pytest.mark.parametrize("late,posts", [(False, 3), (True, 1)])
+def test_side_stale_three_posts_at_most(make_client, venue, session, clock, late, posts):
+    # Stale on every post: 3 signed posts, then a new quote. Past the quote's life: no second post.
+    venue.stale = 99
+    if late:
+        venue.on_stale = lambda: clock.sleep(61)  # the quote row lives 60 s
+    c = make_client(clock=clock)
+    q = c.quote("USD/MXN", "buy", 25_000)
+    with pytest.raises(crx.QuoteExpired) as ei:
+        c.trade(q)
+    assert ei.value.gateway_code == "side_stale"
+    bodies = accepts(session)
+    assert len(bodies) == posts and all(set(b) == {"quote_id", "sig"} for b in bodies)
+    assert len({b["sig"] for b in bodies}) == posts
+    assert f"/rfqs/{RFQ}/side" not in session.paths("POST") and sent_nothing(session)
+
+
+@legacy_only
+def test_leg_body_gateway_falls_back(make_client, venue, session, clock, account):
+    # No side_template on the row: {quote_id} asks for one; 400 bad_request means the leg body, then /side.
+    c = make_client(clock=clock)
+    q = c.quote("USD/MXN", "buy", 25_000)
+    assert "side_template" not in q.raw
+    assert c.trade(q).status == "open"
+    probe, legacy = accepts(session)
+    assert probe == {"quote_id": QID}
+    assert set(legacy) == {"quote_id", "leg", "sig"}
+    assert Account._recover_hash(e7.leg_digest(venue.sep, legacy["leg"]), signature=legacy["sig"]) == account.address
+    assert session.paths("POST").count(f"/rfqs/{RFQ}/side") == 1
+    assert recovers(venue, venue.template, venue.side_sig) == account.address
+
+
+@one_call_only
+def test_quote_not_the_winner_asks_for_its_template(make_client, venue, session, clock, account):
+    venue.winner = False
+    c = make_client(clock=clock)
+    q = c.quote("USD/MXN", "buy", 25_000, wait=3)
+    assert q.quote_id == QID and "side_template" not in q.raw
+    assert c.trade(q).status == "open"
+    probe, signed = accepts(session)
+    assert probe == {"quote_id": QID} and set(signed) == {"quote_id", "sig"}
+    assert recovers(venue, venue.template, signed["sig"]) == account.address
+    assert f"/rfqs/{RFQ}/side" not in session.paths("POST")
+
+
+@one_call_only
+def test_template_below_the_floor_is_asked_again(make_client, venue, session, clock, account):
+    # A template made before this seat's last signature: ask for a newer one, sign that.
+    c = make_client(clock=clock)
+    c.trade(c.quote("USD/MXN", "buy", 25_000))
+    floor = int(venue.template["own_nonce"])
+    venue.reset()
+    venue.nonces, venue.stale = [floor], 1
+    q = c.quote("USD/MXN", "buy", 25_000)
+    assert int(q.raw["side_template"]["own_nonce"]) == floor
+    before = len(accepts(session))
+    assert c.trade(q).status == "open"
+    ask, signed = accepts(session)[before:]
+    assert ask == {"quote_id": QID} and set(signed) == {"quote_id", "sig"}
+    assert int(venue.template["own_nonce"]) > floor
+    assert recovers(venue, venue.template, signed["sig"]) == account.address
+
+
+@one_call_only
+@pytest.mark.parametrize("bad", [True, False])  # False: the positive control, same path
+def test_template_c_taker_must_rebuild(make_client, venue, session, clock, account, bad):
+    if bad:
+        venue.template_edit = {"c_taker": rnd()}
+    c = make_client(clock=clock)
+    q = c.quote("USD/MXN", "buy", 25_000)
+    state = c._state_dir / f"side-nonce-{account.address.lower()}"
+    if bad:
+        with pytest.raises(crx.RefusedToSign, match="c_taker"):
+            c.trade(q)
+        assert accepts(session) == [] and not state.exists()
+    else:
+        assert c.trade(q).status == "open"
+        (body,) = accepts(session)
+        assert recovers(venue, venue.template, body["sig"]) == account.address
+    assert f"/rfqs/{RFQ}/side" not in session.paths("POST") and sent_nothing(session)
+
+
+@one_call_only
+@pytest.mark.parametrize("answer,err", [
+    ((409, "round_closed"), crx.QuoteExpired),
+    ((409, "own_round_open"), crx.OwnRoundOpen),
+    ((422, "insufficient_collateral"), crx.TradeUnknown),
+    ((400, "invalid_signature"), crx.TradeUnknown),
+    ((409, "side_stale"), crx.TradeUnknown),  # its fresh template cannot be read
+])
+def test_refusal_after_the_side_is_signed(make_client, venue, session, clock, answer, err):
+    session.routes[("POST", f"/rfqs/{RFQ}/accept")] = (answer[0], {"code": answer[1], "error": answer[1],
+                                                                   "details": {"side_template": "?"}})
+    c = make_client(clock=clock)
+    with pytest.raises(err) as ei:
+        c.trade(c.quote("USD/MXN", "buy", 25_000))
+    if err is crx.TradeUnknown:
+        assert "may still open" in str(ei.value) and ei.value.details == {"rfq_id": RFQ}
+    assert len(accepts(session)) == 1 and sent_nothing(session)
+
+
+@one_call_only
+def test_stale_template_that_fails_the_check_after_a_signature(make_client, venue, session, clock):
+    # The first Side is signed and posted; the fresh one does not rebuild: never "nothing happened".
+    venue.stale = 1
+    venue.on_stale = lambda: venue.template_edit.update(c_taker=rnd())
+    c = make_client(clock=clock)
+    with pytest.raises(crx.TradeUnknown, match="c_taker"):
+        c.trade(c.quote("USD/MXN", "buy", 25_000))
+    assert len(accepts(session)) == 1
+
+
+@one_call_only
+def test_signed_accept_no_answer_reads_status(make_client, venue, session, clock):
+    # A 5xx on the signed accept: the gateway may hold the Side, so the status decides.
+    def accept(req):
+        venue.accept(req)
+        return (503, {"code": "upstream", "error": "down"})
+    session.routes[("POST", f"/rfqs/{RFQ}/accept")] = accept
+    c = make_client(clock=clock)
+    t = c.trade(c.quote("USD/MXN", "buy", 25_000))
+    assert (t.status, t.raw) == ("open", {}) and len(accepts(session)) == 1
 
 
 def test_no_quotes(make_client, venue, session, clock):
