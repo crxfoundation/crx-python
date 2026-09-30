@@ -115,13 +115,13 @@ def _opened(rows: list) -> Iterator[Rfq]:
                 yield r
 
 
-def stream(c: "Client", since: int | None, wait: float | None, poll: float) -> Iterator[Rfq]:
+def stream(c: "Client", since: int | None, wait: float | None, poll: float, stop: Any = None) -> Iterator[Rfq]:
     """Open RFQs off the REST tape (``GET /trades``), oldest first, each once.
 
     Reads the tape from ``since`` (default: its start) up to its head at once, before
     it returns. From there it yields the RFQs still inside their quote window, then
     each new one. A gateway that does not answer, or answers 5xx or 429, is read again
-    after ``poll`` s. Ends when ``wait`` s pass; None never ends.
+    after ``poll`` s. Ends when ``wait`` s pass (None: never), or once ``stop`` is set.
     """
     cursor = int(since or 0)
     end = None if wait is None else c._clock() + max(float(wait), 0.0)
@@ -132,10 +132,12 @@ def stream(c: "Client", since: int | None, wait: float | None, poll: float) -> I
         backlog += [r for r in _opened(rows) if _quotable(r, c.chain_key, c._clock() * 1000)]
         if len(rows) < PAGE:
             break
-    return _follow(c, cursor, backlog, end, poll)
+    return _follow(c, cursor, backlog, end, poll, stop)
 
 
-def _follow(c: "Client", cursor: int, backlog: list[Rfq], end: float | None, poll: float) -> Iterator[Rfq]:
+def _follow(
+    c: "Client", cursor: int, backlog: list[Rfq], end: float | None, poll: float, stop: Any,
+) -> Iterator[Rfq]:
     seen: set[str] = set()
     pending = list(backlog)
     while True:
@@ -147,7 +149,7 @@ def _follow(c: "Client", cursor: int, backlog: list[Rfq], end: float | None, pol
                 seen.clear()
             yield r
         pending = []
-        if end is not None and c._clock() >= end:
+        if (end is not None and c._clock() >= end) or (stop is not None and stop.is_set()):
             return
         c._sleep(poll)
         try:

@@ -139,6 +139,16 @@ def test_rfqs_catch_up_error_raises_at_the_call(maker, session):
         maker.rfqs()
 
 
+def test_rfqs_ends_once_stop_is_set(maker, session):
+    import threading
+    stop = threading.Event()
+    session.routes[("GET", "/trades")] = tape([opened(frame(), 1)], 1)
+    stream = maker.rfqs(stop=stop)
+    assert next(stream).rfq_id == RFQ
+    stop.set()
+    assert list(stream) == []
+
+
 def test_rfqs_skips_an_rfq_whose_window_closed_while_waiting(maker, session, clock):
     session.routes[("GET", "/trades")] = tape([opened(frame(), 1)], 1)
     stream = maker.rfqs(wait=1)

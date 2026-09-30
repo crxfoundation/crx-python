@@ -72,13 +72,16 @@ class FakeClient:
 
     # the maker's calls
     def rfqs(self, **kwargs):
-        self.calls.append(("rfqs", kwargs))
+        stop = kwargs.pop("stop", None)
+        self.calls.append(("rfqs", kwargs, stop))
 
         def gen():
-            yield SimpleNamespace(rfq_id=FOREIGN, pair="USD/MXN", side="sell", notional=Decimal("10000"))
-            yield SimpleNamespace(rfq_id=SHARED, pair="USD/MXN", side="sell", notional=Decimal("10000"))
-            assert FakeClient.asked.wait(5)
-            yield SimpleNamespace(rfq_id=OURS, pair="USD/MXN", side="sell", notional=Decimal("10000"))
+            yield SimpleNamespace(rfq_id=FOREIGN, pair="USD/MXN", side="sell", notional=Decimal("25000"))
+            yield SimpleNamespace(rfq_id=SHARED, pair="USD/MXN", side="sell", notional=Decimal("25000"))
+            while not FakeClient.asked.wait(0.01):
+                if stop is not None and stop.is_set():
+                    return
+            yield SimpleNamespace(rfq_id=OURS, pair="USD/MXN", side="sell", notional=Decimal("25000"))
         return gen()
 
     def send_quote(self, rfq, rate):
@@ -94,7 +97,7 @@ class FakeClient:
     def positions(self):
         self.calls.append(("positions",))
         other = SimpleNamespace(rfq_id=FOREIGN, pair="USDMXN", side="buy", notional=5, rate="17", status="open")
-        mine = SimpleNamespace(rfq_id=OURS, pair="USDMXN", side="sell", notional=10000, rate="18.09991", status="open")
+        mine = SimpleNamespace(rfq_id=OURS, pair="USDMXN", side="sell", notional=25000, rate="18.09991", status="open")
         return [other, mine]
 
 
@@ -172,8 +175,10 @@ def test_quotes_only_its_own_takers_rfq(capsys, fake, keys):
     assert m.kwargs == {"network": "testnet"} and m.args == ()
     assert t.kwargs == {"network": "testnet"} and t.args == (TAKER_KEY,)
     assert [c for c in m.calls if c[0] == "send_quote"] == [("send_quote", OURS, Decimal("18.09991"))]
-    assert ("rfqs", {"wait": 60}) in m.calls and ("confirm", OURS, {"timeout": 60}) in m.calls
-    assert ("quote", "USD/MXN", "buy", 10_000) in t.calls and ("trade", OURS) in t.calls
+    stream = next(c for c in m.calls if c[0] == "rfqs")
+    assert stream[1] == {"wait": 60} and isinstance(stream[2], threading.Event)
+    assert ("confirm", OURS, {"timeout": 60}) in m.calls
+    assert ("quote", "USD/MXN", "buy", 25_000) in t.calls and ("trade", OURS) in t.calls
     assert FakeClient.cid.startswith("maker-qs-")
     lines = capsys.readouterr().out.splitlines()
     assert all(STAMP.match(line) for line in lines)
@@ -181,13 +186,40 @@ def test_quotes_only_its_own_takers_rfq(capsys, fake, keys):
     assert any(line.endswith(" maker: quoted 18.09991") for line in lines)
     assert any(line.endswith(" maker: open") for line in lines)
     assert any(line.endswith(" taker: open") for line in lines)
-    assert lines[-1].endswith(" USDMXN sell 10000 18.09991 open")
+    assert lines[-1].endswith(" USDMXN sell 25000 18.09991 open")
 
 
 def test_a_lost_quote_exits_1_with_its_code(capsys, fake, keys):
     FakeClient.lose = True
     assert qs.main([]) == 1
     assert capsys.readouterr().err.strip() == "quote_lost: the taker accepted another quote"
+
+
+def test_a_taker_refusal_ends_the_run_at_once_with_its_own_error(capsys, fake, keys, monkeypatch):
+    def refused(self, *a, **k):
+        raise crx.BelowMin("a pool wallet trades at least 25000 USD notional; got 10000")
+
+    monkeypatch.setattr(FakeClient, "quote", refused)
+    FakeClient.asked.wait = lambda timeout=None: False  # the taker's RFQ never opens
+    start = qs.time.monotonic()
+    assert qs.main([]) == 1
+    assert qs.time.monotonic() - start < 5
+    out, err = capsys.readouterr()
+    assert err.strip() == "below_min: a pool wallet trades at least 25000 USD notional; got 10000"
+    assert "maker role" not in err
+    assert any(line.endswith(" taker: below_min a pool wallet trades at least 25000 USD notional; got 10000")
+               for line in out.splitlines())
+    assert not any(c[0] == "send_quote" for c in FakeClient.maker.calls)
+
+
+def test_a_taker_rfq_with_no_quote_gets_the_maker_role_hint(capsys, fake, keys, monkeypatch):
+    def unquoted(self, *a, **k):
+        raise crx.NoQuotes("no quote before the wait ended")
+
+    monkeypatch.setattr(FakeClient, "quote", unquoted)
+    FakeClient.asked.wait = lambda timeout=None: False
+    assert qs.main([]) == 1
+    assert capsys.readouterr().err.startswith("no_quotes: your test taker's RFQ did not reach the maker seat")
 
 
 def test_no_rfq_for_the_taker_exits_1(capsys, fake, keys, monkeypatch):

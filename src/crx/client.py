@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -655,17 +656,20 @@ class Client:
 
     # ---------- maker ----------
 
-    def rfqs(self, *, since: int | None = None, wait: float | None = None, poll: float = 0.5) -> Iterator[Rfq]:
+    def rfqs(
+        self, *, since: int | None = None, wait: float | None = None, poll: float = 0.5,
+        stop: threading.Event | None = None,
+    ) -> Iterator[Rfq]:
         """Open RFQs you can quote, as they arrive: the ``rfq.opened`` frames of your tape.
 
         Needs a maker seat with collateral: the gateway sends no RFQ to a seat short of it.
         Yields open RFQs on this network, another seat's, inside their quote window, each
         once. The call reads your tape up to its head before it returns: from ``since``
-        (an ``Rfq.seq``), else from the start. Ends after ``wait`` s; by default it never
-        ends. Break out of the loop to stop.
+        (an ``Rfq.seq``), else from the start. Ends after ``wait`` s, or once ``stop`` (a
+        ``threading.Event``) is set; by default it never ends. Break out of the loop to stop.
         """
         self._need_seat()
-        return _maker.stream(self, since, wait, poll)
+        return _maker.stream(self, since, wait, poll, stop)
 
     def rfq(self, rfq_id: str) -> Rfq:
         """One RFQ as your seat reads it. As its taker, ``quotes`` holds every desk's

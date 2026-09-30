@@ -46,20 +46,27 @@ def steps():
     taker.deposit(20_000)
     log(maker.balance().free, taker.balance().free)  # 21:04:58 20000.000000 20000.000000
 
-    # 3. Open the RFQ stream. It reads your tape up to now.
-    rfqs = maker.rfqs(wait=60)
+    # 3. Open the RFQ stream. It reads your tape up to now,
+    #    and ends when your test taker is done.
+    taker_done = threading.Event()
+    taker_failed = []
+    rfqs = maker.rfqs(wait=60, stop=taker_done)
 
-    # 4. Your test taker asks in the background. It accepts a maker quote only.
+    # 4. Your test taker asks in the background: 25,000 USD, the least a Testnet
+    #    account may ask. It accepts a maker quote only.
     cid = f"maker-qs-{uuid.uuid4().hex[:8]}"
 
     def ask():
         try:
-            q = taker.quote("USD/MXN", "buy", 10_000, client_rfq_id=cid)
+            q = taker.quote("USD/MXN", "buy", 25_000, client_rfq_id=cid)
             log("taker: best quote", q.rate, "house" if q.house else "maker")
             if not q.house:
                 log("taker:", taker.trade(q).status)  # 21:05:09 taker: open
         except crx.CrxError as e:
             log("taker:", e.code, e)
+            taker_failed.append(e)
+        finally:
+            taker_done.set()
 
     asker = threading.Thread(target=ask, daemon=True)
     asker.start()
@@ -87,7 +94,7 @@ def steps():
     for rfq in rfqs:
         if not asked_by_taker(rfq):
             continue
-        log(rfq.pair, rfq.side, rfq.notional)  # 21:05:00 USD/MXN sell 10000
+        log(rfq.pair, rfq.side, rfq.notional)  # 21:05:00 USD/MXN sell 25000
         q = maker.send_quote(rfq, near_mid(rfq))
         log("maker: quoted", q.rate)  # 21:05:01 maker: quoted 18.09991
 
@@ -97,13 +104,16 @@ def steps():
         log("maker:", t.status)  # 21:05:09 maker: open
         break
     else:
+        # The taker's own refusal ends the run: its RFQ never opened.
+        if taker_failed and not isinstance(taker_failed[0], crx.NoQuotes):
+            raise taker_failed[0]
         raise crx.NoQuotes("your test taker's RFQ did not reach the maker seat: check its maker role and collateral")
 
     # 7. Your trade, from the maker's side.
     asker.join(60)
     p = [p for p in maker.positions() if p.rfq_id == t.rfq_id][0]
     log(p.pair, p.side, p.notional, p.rate, p.status)
-    # 21:05:10 USDMXN sell 10000 18.09991 open
+    # 21:05:10 USDMXN sell 25000 18.09991 open
 
 
 def ask_key(name: str, file_name: str | None = None) -> bool:
