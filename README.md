@@ -46,7 +46,7 @@ print(d.status)  # credited
 print(c.balance().free)  # 20000.000000
 
 # 4. Request a quote. Opens an RFQ, returns the best quote.
-q = c.quote("USD/BRL", "buy", 100_000)
+q = c.quote("USD/BRL", "buy", 25_000)
 print(q.pair, q.rate)  # USD/BRL 5.435
 
 # 5. Accept. Signs your confirmation. CRX sends the tx and pays gas.
@@ -55,7 +55,7 @@ print(t.status)  # open
 
 # 6. Your trade.
 p = c.positions()[0]
-print(p.pair, p.side, p.notional, p.rate, p.status)  # USDBRL buy 100000 5.435 open
+print(p.pair, p.side, p.notional, p.rate, p.status)  # USDBRL buy 25000 5.435 open
 
 # 7. Withdraw. Leaves your balance at once. In your wallet within about 2 hours.
 w = c.withdraw(1_000)

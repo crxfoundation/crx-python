@@ -8,7 +8,7 @@ from .errors import (
 )
 from .models import Balance, Deposit, Event, MakerQuote, Market, Position, Quote, Rfq, Trade, Viewer, Withdraw
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 
 __all__ = [
     "Client", "NETWORKS", "__version__",
