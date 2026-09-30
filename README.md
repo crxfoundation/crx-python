@@ -83,13 +83,15 @@ print(w.status)  # accepted
 
 ## Maker
 
-A maker seat quotes the RFQs other seats open. The maker Quickstart needs two Testnet accounts: account 1 quotes, account 2 is your test taker.
+A maker seat quotes the RFQs other seats open.
 
 ```bash
 CRX_WALLET_PK=0x... CRX_TAKER_PK=0x... python -m crx.quickstart_maker
 ```
 
-Same script: `examples/maker.py`. Other desks ask on Testnet too, so the script quotes its own test taker's RFQ only. It matches `client_rfq_id`, which the gateway serves to an RFQ's own taker alone.
+Runs the maker Quickstart on Testnet with two accounts: your test taker asks, you quote, sign and open the trade. Without a key, it asks for it and hides the input. Same script: `examples/maker.py`.
+
+Other desks ask on Testnet too, so the script quotes its own test taker's RFQ only. It matches `client_rfq_id`, which the gateway serves to an RFQ's own taker alone.
 
 | Call | Does |
 |---|---|
