@@ -2,9 +2,10 @@
 
 Two Testnet accounts: account 1 quotes (the maker), account 2 asks (the test
 taker). The test taker opens one RFQ in the background. The maker picks that RFQ
-out of its stream, quotes it, and signs its Side once the taker accepts. Each
-line starts with the local time. The steps are line for line the ones
-``examples/maker.py`` and the maker Quickstart page print.
+out of its stream, quotes it, and confirms the trade once the taker accepts.
+The RFQ names what a maker signs, and the calls follow it: a Leg and then a
+Side, or one binding quote. Each line starts with the local time. The steps are
+line for line the ones ``examples/maker.py`` and the maker Quickstart page print.
 
 The maker key comes from ``CRX_WALLET_PK`` or ``CRX_WALLET_PK_FILE``, the test
 taker key from ``CRX_TAKER_PK``. With one unset, the script asks for it and does
@@ -106,7 +107,7 @@ def steps():
             time.sleep(0.5)
         raise crx.NoQuotes("no house quote to price from")
 
-    # 5. Quote your test taker's RFQ. Signs your Leg. Quote fast: a
+    # 5. Quote your test taker's RFQ. Signs your quote. Quote fast: a
     #    few seconds after the RFQ opens, the gateway ranks the quotes
     #    and the taker gets the best one.
     for rfq in rfqs:
@@ -116,8 +117,8 @@ def steps():
         q = maker.send_quote(rfq, near_mid(rfq))
         log("maker: quoted", q.rate)  # 22:32:22 maker: quoted 18.11994
 
-        # 6. Confirm. Waits for the accept and signs your Side.
-        #    CRX sends the tx and pays gas.
+        # 6. Confirm. Waits for the accept. Signs your Side, unless
+        #    your quote is binding. CRX sends the tx and pays gas.
         t = maker.confirm(q, timeout=60)
         log("maker:", t.status)  # 22:32:41 maker: open
         break

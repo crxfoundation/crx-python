@@ -33,6 +33,11 @@ from .conftest import BASE, RPC
         (409, {"code": "quote_dropped", "error": "dropped", "details": {"best": None}}, crx.QuoteDropped, "quote_dropped"),
         (409, {"code": "quote_not_yours", "error": "not yours"}, crx.QuoteNotYours, "quote_not_yours"),
         (409, {"error": "quote_not_yours"}, crx.QuoteNotYours, "quote_not_yours"),
+        (409, {"code": "leg_id_taken", "error": "held"}, crx.LegIdTaken, "leg_id_taken"),
+        (409, {"code": "leg_live", "error": "live", "details": {"leg_id": "0x01"}}, crx.LegLive, "leg_live"),
+        (409, {"code": "quote_fills_full", "error": "full"}, crx.QuoteFillsFull, "quote_fills_full"),
+        (409, {"code": "already_accepted", "error": "taken", "details": {"trade_id": None}}, crx.AlreadyAccepted, "already_accepted"),
+        (404, {"code": "unknown_or_ended", "error": "no leg"}, crx.UnknownOrEnded, "unknown_or_ended"),
         (401, {"code": "unauthorized", "error": "who"}, crx.AuthError, "unauthorized"),
         (400, {"code": "viewer_invalid", "error": "no"}, crx.BadRequest, "bad_request"),
         (403, {"code": "viewer_is_maker", "error": "no"}, crx.BadRequest, "bad_request"),
@@ -64,6 +69,14 @@ def test_no_fold_or_crank_words():
 def test_rate_limited_retry_after(details, headers, wait):
     e = from_gateway(429, {"code": "rate_limited", "error": "slow", "details": details}, "", headers)
     assert type(e) is crx.RateLimited and e.retry_after == wait
+
+
+def test_leg_live_and_already_accepted_read_their_details():
+    e = from_gateway(409, {"code": "leg_live", "error": "live", "details": {"leg_id": "0xAB"}})
+    assert e.leg_id == "0xab" and from_gateway(409, {"code": "leg_live", "error": "live"}).leg_id is None
+    e = from_gateway(409, {"code": "already_accepted", "error": "x", "details": {"trade_id": "0xCD"}})
+    assert e.trade_id == "0xcd"
+    assert from_gateway(409, {"code": "already_accepted", "error": "x", "details": {"trade_id": None}}).trade_id is None
 
 
 def test_unknown_code_passes_through():

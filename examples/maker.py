@@ -83,7 +83,7 @@ def near_mid(rfq):
         time.sleep(0.5)
     raise crx.NoQuotes("no house quote to price from")
 
-# 5. Quote your test taker's RFQ. Signs your Leg. Quote fast: a
+# 5. Quote your test taker's RFQ. Signs your quote. Quote fast: a
 #    few seconds after the RFQ opens, the gateway ranks the quotes
 #    and the taker gets the best one.
 for rfq in rfqs:
@@ -93,8 +93,8 @@ for rfq in rfqs:
     q = maker.send_quote(rfq, near_mid(rfq))
     log("maker: quoted", q.rate)  # 22:32:22 maker: quoted 18.11994
 
-    # 6. Confirm. Waits for the accept and signs your Side.
-    #    CRX sends the tx and pays gas.
+    # 6. Confirm. Waits for the accept. Signs your Side, unless
+    #    your quote is binding. CRX sends the tx and pays gas.
     t = maker.confirm(q, timeout=60)
     log("maker:", t.status)  # 22:32:41 maker: open
     break

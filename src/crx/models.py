@@ -191,6 +191,12 @@ class Rfq:
         return "sell" if self.side == "buy" else "buy"
 
     @property
+    def sign_mode(self) -> str:
+        """What a maker signs on this RFQ: ``quote`` (a binding quote, nothing after the accept)
+        or ``side`` (a Leg, then a Side after the accept). An RFQ that names none is ``side``."""
+        return "quote" if self.raw.get("sign_mode") == "quote" else "side"
+
+    @property
     def house_rate(self) -> Decimal | None:
         """The rate of the best live house quote in ``quotes``; None when no house quote shows.
 
@@ -214,7 +220,9 @@ class MakerQuote:
     """Your firm quote on an open RFQ, as ``Client.send_quote`` posted it. Pass it to ``Client.confirm``.
 
     ``side`` is your own side. ``expiry`` is the settlement instant. ``expires_at`` is
-    the quote's own expiry. ``leg`` is the Leg you signed.
+    the quote's own expiry. ``leg`` is the half you signed: your Leg, or the terms of
+    your binding quote. ``sign_mode`` is ``quote`` for a binding quote, else ``side``.
+    A binding quote binds you until ``quote_expiry``: ``Client.drop_quote`` ends it.
     """
 
     rfq_id: str
@@ -229,3 +237,24 @@ class MakerQuote:
     raw: dict = field(repr=False, compare=False)
     leg: dict = field(repr=False, compare=False)
     rfq: Rfq = field(repr=False, compare=False)
+    sign_mode: str = "side"
+
+    @property
+    def leg_id(self) -> str:
+        """The id of the leg this quote is on."""
+        return self.leg["leg_id"]
+
+    @property
+    def quote_expiry(self) -> datetime | None:
+        """The last instant the signed half is good for."""
+        return ms_to_dt(self.leg.get("quote_expiry"))
+
+
+@dataclass(frozen=True)
+class Drop:
+    """A dropped leg, from ``Client.drop_quote``: every quote on it is ended. ``at`` is the drop time."""
+
+    rfq_id: str
+    leg_id: str
+    at: datetime | None
+    raw: dict = field(repr=False, compare=False)

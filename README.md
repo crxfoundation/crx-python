@@ -97,8 +97,11 @@ Other desks ask on Testnet too, so the script quotes its own test taker's RFQ on
 |---|---|
 | `rfqs()` | Streams the open RFQs you can quote. A seat with no collateral receives none. |
 | `rfq(rfq_id)` | One RFQ as your seat reads it. Its taker also reads every desk's quote: `house_rate` is the house desk's. |
-| `send_quote(rfq, rate)` | Signs your Leg and posts a firm quote. The taker gets the best quote only. Any maker quote outranks the house quote. |
-| `confirm(quote)` | Waits for the accept and signs your Side. CRX sends the tx and pays gas. `status`: `open`, `sending`, `pending` or `refused`. |
+| `send_quote(rfq, rate)` | Signs and posts a firm quote. The taker gets the best quote only. Any maker quote outranks the house quote. |
+| `confirm(quote)` | Waits for the accept; signs your Side, unless the quote is binding. CRX sends the tx and pays gas. `status`: `open`, `sending`, `pending` or `refused`. |
+| `drop_quote(quote)` | Ends your binding quote at once. |
+
+`rfq.sign_mode` names what you sign. `side`: a Leg at the quote, a Side after the accept. `quote`: a binding quote, and nothing after the accept. A binding quote is your trade signature until its `quote_expiry`, or until you drop it. A later quote on the same RFQ replaces the earlier one.
 
 ## Read another wallet (viewer)
 
@@ -131,7 +134,12 @@ Every error is a `crx.CrxError`. Branch on `.code`.
 | `market_paused` | Pair not live. |
 | `below_min`, `above_max` | Notional out of range. |
 | `no_quotes` | No maker quoted in time. |
-| `quote_lost` | Your maker quote opened no trade. `reason`: `another_maker`, `expired`, `cancelled`, `round_closed` or `timeout`. |
+| `quote_lost` | Your maker quote opened no trade. `reason`: `another_maker`, `expired`, `cancelled`, `round_closed`, `dropped` or `timeout`. |
+| `leg_live` | Your seat holds another live binding quote on the RFQ. Quote again, or `drop_quote(rfq, leg_id=err.leg_id)`. |
+| `leg_id_taken` | The quote's leg id is used. Quote again. |
+| `quote_fills_full` | The gateway takes no more of your quotes for now. |
+| `already_accepted` | The taker accepted before your drop. The trade stands: `confirm` it. |
+| `unknown_or_ended` | Nothing to drop: the RFQ ended. |
 | `quote_expired` | Round ended, or the maker refused. Quote again. |
 | `quote_dropped` | The maker dropped the quote. `trade()` takes the best live quote once when its rate is no worse. Else `.best` holds it, or None. |
 | `quote_not_yours` | The quote was made for another request or seat. Nothing sent. |

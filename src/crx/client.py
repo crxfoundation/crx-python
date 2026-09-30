@@ -26,7 +26,7 @@ from .errors import (
     MarketPaused, NoQuotes, QuoteDropped, RefusedToSign, clean,
 )
 from .models import (
-    Balance, Deposit, Event, MakerQuote, Market, Position, Quote, Rfq, Trade, Viewer, Withdraw, dec, ms_to_dt,
+    Balance, Deposit, Drop, Event, MakerQuote, Market, Position, Quote, Rfq, Trade, Viewer, Withdraw, dec, ms_to_dt,
     side_word,
 )
 
@@ -211,6 +211,7 @@ class Client:
         self._rpc_checked = False
         self._sleep = time.sleep
         self._clock = time.time
+        self._legs: dict[str, str] = {}  # rfq_id -> this seat's binding leg id on it
 
     def __repr__(self) -> str:
         return f"crx.Client(network={getattr(self, 'network', None)!r}, address={self.address!r})"
@@ -762,6 +763,14 @@ class Client:
         the quote that many seconds from now; by default it lives as long as the RFQ.
         A refusal raises its error: ``InsufficientCollateral``, ``QuoteExpired`` when the
         RFQ ended, ``NotWhitelisted``. Pass the result to ``confirm``.
+
+        Where ``rfq.sign_mode`` is ``quote``, you sign a binding quote instead: it is your
+        trade signature, and nothing is signed after the accept. It binds you until the
+        RFQ's ``quote_expiry_max`` (at least 60 s out, else ``QuoteLost``); ``drop_quote``
+        ends it. A later quote on the same RFQ replaces the earlier one on the same leg.
+        ``expires_in`` ends the quote's book life, at the quote expiry at most. Refusals:
+        ``LegLive`` (the seat holds another live leg on the RFQ: quote again, or drop it),
+        ``LegIdTaken`` (quote again), ``QuoteFillsFull``.
         """
         self._need_seat()
         return _maker.send(self, rfq, rate, client_quote_id, expires_in)
@@ -773,11 +782,25 @@ class Client:
         closes. Returns once the trade is ``open`` or ``refused``; ``sending`` or ``pending``
         when neither shows within 30 s (testnet) or 90 s (mainnet).
 
+        On a binding quote nothing is signed: the call waits for the accept and the trade.
+
         No trade raises ``QuoteLost``; ``reason`` is ``another_maker``, ``expired``,
-        ``cancelled``, ``round_closed`` or ``timeout``.
+        ``cancelled``, ``round_closed``, ``dropped`` or ``timeout``.
         """
         self._need_seat()
         return _maker.confirm(self, quote, timeout, poll)
+
+    def drop_quote(self, quote: MakerQuote | Rfq, *, leg_id: str | None = None) -> Drop:
+        """End your binding quote at once: its leg, with every quote you posted on it.
+
+        Takes the ``MakerQuote``, or the ``Rfq`` with ``leg_id=`` (a ``LegLive`` error names
+        one). A repeat answers the first drop's time. ``AlreadyAccepted`` when the taker
+        accepted first: the trade stands, pass the quote to ``confirm``. ``UnknownOrEnded``
+        when the RFQ ended or holds no such leg of yours. A dropped leg is final: the next
+        ``send_quote`` on the RFQ makes a new one.
+        """
+        self._need_seat()
+        return _maker.drop(self, quote, leg_id)
 
     def _send(self, what: str, to: str, data: str) -> str:
         tx = send_tx(self._rpc, self._account, self._chain_ready()["chain_id"], what, to, data, sleep=self._sleep)

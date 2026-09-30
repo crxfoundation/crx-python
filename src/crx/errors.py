@@ -167,6 +167,8 @@ class QuoteLost(CrxError):
     - ``expired``: the RFQ or your quote ended with no accept.
     - ``cancelled``: the RFQ was cancelled.
     - ``round_closed``: the taker accepted, and the Side round closed before the pair armed.
+    - ``dropped``: a binding quote that can no longer be taken: you dropped its leg, your
+      later quote on the RFQ replaced it, or the gateway restarted.
     - ``timeout``: no accept before the wait ended. The RFQ can still take one.
     """
 
@@ -177,6 +179,47 @@ class QuoteLost(CrxError):
         details["reason"] = reason
         super().__init__(message, details=details, **kw)
         self.reason = reason
+
+
+class LegIdTaken(CrxError):
+    """The quote's leg id is held: by another seat, another RFQ, or a dropped leg. Quote again: a new leg id is made."""
+
+    code = "leg_id_taken"
+
+
+class LegLive(CrxError):
+    """Your seat holds another live leg on the RFQ. ``leg_id`` names it: quote again on it, or drop it."""
+
+    code = "leg_live"
+
+    @property
+    def leg_id(self) -> str | None:
+        v = self.details.get("leg_id")
+        return v.lower() if isinstance(v, str) else None
+
+
+class QuoteFillsFull(CrxError):
+    """The gateway takes no more of your quotes for now: your seat's recently filled legs are at
+    their limit. They clear as their quote_expiry passes."""
+
+    code = "quote_fills_full"
+
+
+class AlreadyAccepted(CrxError):
+    """The taker accepted the quote before the drop: the trade stands. ``trade_id`` names it, when sent."""
+
+    code = "already_accepted"
+
+    @property
+    def trade_id(self) -> str | None:
+        v = self.details.get("trade_id")
+        return v.lower() if isinstance(v, str) else None
+
+
+class UnknownOrEnded(CrxError):
+    """Nothing to drop: the RFQ ended, or your seat has no such leg on it."""
+
+    code = "unknown_or_ended"
 
 
 class TradeUnknown(CrxError):
@@ -203,6 +246,11 @@ _BY_GATEWAY_CODE: dict[str, type[CrxError]] = {
     "quote_expired": QuoteExpired,
     "quote_dropped": QuoteDropped,
     "quote_not_yours": QuoteNotYours,
+    "leg_id_taken": LegIdTaken,
+    "leg_live": LegLive,
+    "quote_fills_full": QuoteFillsFull,
+    "already_accepted": AlreadyAccepted,
+    "unknown_or_ended": UnknownOrEnded,
     "rfq_expired": QuoteExpired,
     "round_closed": QuoteExpired,
     "rate_limited": RateLimited,

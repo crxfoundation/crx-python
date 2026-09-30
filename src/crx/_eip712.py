@@ -19,6 +19,13 @@ LEG_TYPEHASH = keccak(
 SIDE_TYPEHASH = keccak(
     text="Side(bytes32 pairC,bytes32 ownLegId,uint64 quoteExpiry,uint64 ownNonce,bytes32 ownSalt,bytes32 wrapsHash)"
 )
+QUOTE_TYPE = (
+    "Quote(address seat,bytes32 legId,bytes32 pair,uint8 instrumentId,int8 side,uint256 notional,uint64 rate,"
+    "uint16 imBps,int16 premiumBps,uint40 expiry,uint64 nonce,uint64 quoteExpiry,bytes32 salt,bytes32 wrapsHash,"
+    "bytes32 takerRef)"
+)
+QUOTE_TYPEHASH = keccak(text=QUOTE_TYPE)
+EMPTY_WRAPS_HASH = bytes.fromhex("569e75fc77c1a856f6daaf9e69d8a9566ca34aa47f9133711ce065a571af0cfd")  # no wraps
 WITHDRAW_TYPEHASH = keccak(
     text="WithdrawIntent(address account,uint256 amount,address recipient,uint64 nonce,uint64 deadline)"
 )
@@ -107,6 +114,32 @@ def side_digest(separator: bytes, t: dict) -> bytes:
         )
     )
     return keccak(b"\x19\x01" + separator + struct)
+
+
+def leg_id_for(random24: bytes, quote_expiry: int) -> str:
+    """A binding quote's leg id: 24 random bytes, then ``quote_expiry`` (unix s) as 8 bytes big-endian."""
+    if len(random24) != 24:
+        raise ValueError("the leg id takes 24 random bytes")
+    return h0x(random24 + int(quote_expiry).to_bytes(8, "big"))
+
+
+def leg_id_tail(leg_id: str) -> int:
+    """The ``quote_expiry`` (unix s) a binding quote's leg id ends with."""
+    return int.from_bytes(hx(leg_id)[-8:], "big")
+
+
+def quote_struct_hash(words: list, salt: str, taker_ref: str) -> bytes:
+    """The ``Quote`` struct hash: the twelve arm words, the salt, the empty wrap set, the RFQ's taker_ref."""
+    return keccak(
+        encode(
+            ["bytes32", *ARM_WORDS, "bytes32", "bytes32", "bytes32"],
+            [QUOTE_TYPEHASH, *words, hx(salt), EMPTY_WRAPS_HASH, hx(taker_ref)],
+        )
+    )
+
+
+def quote_digest(separator: bytes, words: list, salt: str, taker_ref: str) -> bytes:
+    return keccak(b"\x19\x01" + separator + quote_struct_hash(words, salt, taker_ref))
 
 
 def withdraw_fields(w: dict) -> list:
