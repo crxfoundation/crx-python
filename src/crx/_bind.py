@@ -70,13 +70,19 @@ def accept_refused(r: Any) -> CrxError:
     return refused(r)
 
 
-def stale_template(r: Any) -> dict | None:
-    """The fresh Side template a 409 side_stale answer carries; None for any other answer."""
+def stale_template(r: Any, quote_id: str) -> dict | None:
+    """The fresh Side template a 409 side_stale answer carries; None for any other answer.
+    A template for another quote raises RefusedToSign."""
     if status_code(r) != (409, "side_stale"):
         return None
     d = obj(r).get("details")
     t = d.get("side_template") if isinstance(d, dict) else None
-    return t if isinstance(t, dict) else None
+    if not isinstance(t, dict):
+        return None
+    q = d.get("quote_id")
+    if not isinstance(q, str) or q.lower() != quote_id.lower():
+        raise RefusedToSign("refused to sign: the fresh Side template is for another quote")
+    return t
 
 
 class Binder:
@@ -272,7 +278,7 @@ class Binder:
                 if ask:
                     r = self.post_accept(rfq_id, {"quote_id": quote_id}, until)
                     posts += 1
-                    fresh = stale_template(r)
+                    fresh = stale_template(r, quote_id)
                     if fresh is None:
                         if signed is None and status_code(r) == (400, "bad_request"):
                             return None
@@ -293,7 +299,7 @@ class Binder:
                     return {}, t, self.now()
                 if r.status_code == 200:
                     return obj(r), t, self.now()
-                fresh = stale_template(r)
+                fresh = stale_template(r, quote_id)
                 if fresh is None:
                     raise accept_refused(r)
                 if posts >= MAX_POSTS or self.now() >= until:

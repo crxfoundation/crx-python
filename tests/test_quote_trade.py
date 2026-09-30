@@ -51,6 +51,8 @@ class Venue:
         self.nonces = []        # one-shot nonces the next picks take, in order
         self.stale = 0          # the next N accept posts answer 409 side_stale with a fresh draft
         self.on_stale = None    # called before each fresh draft that `stale` forces
+        self.stale_quote_id = None  # the quote_id a side_stale answer names; None: the one posted; "": none
+        self.served_digest = None   # the digest the template names; None: the Side's own
         # (trade_status, trade_tx) served one per poll once the Side is in; the last repeats.
         self.script = [("sending", None), ("open", TXH)]
         session.routes[("GET", "/markets")] = open_market(markets, pair)
@@ -98,7 +100,7 @@ class Venue:
              "pair_c": e7.h0x(e7.pair_commitment(c_taker, c_maker)), "wraps_hash": WRAPS_HASH,
              "domain_separator": e7.h0x(self.sep)}
         t.update(self.template_edit)
-        t["digest"] = e7.h0x(e7.side_digest(self.sep, t))
+        t["digest"] = self.served_digest or e7.h0x(e7.side_digest(self.sep, t))
         return t
 
     def view(self, req):
@@ -138,8 +140,9 @@ class Venue:
                 "side": dict(self.draft, signed=True)}
 
     def stale_answer(self, body):
-        return (409, {"code": "side_stale", "error": "the Side template moved; sign this one",
-                      "details": {"quote_id": body["quote_id"], "side_template": self.draft}})
+        named = body["quote_id"] if self.stale_quote_id is None else self.stale_quote_id
+        details = {"side_template": self.draft} | ({"quote_id": named} if named else {})
+        return (409, {"code": "side_stale", "error": "the Side template moved; sign this one", "details": details})
 
     def accept_leg(self, body):
         self.accept_body = leg = body["leg"]
@@ -470,6 +473,54 @@ def test_leg_body_gateway_falls_back(make_client, venue, session, clock, account
     assert Account._recover_hash(e7.leg_digest(venue.sep, legacy["leg"]), signature=legacy["sig"]) == account.address
     assert session.paths("POST").count(f"/rfqs/{RFQ}/side") == 1
     assert recovers(venue, venue.template, venue.side_sig) == account.address
+
+
+@pytest.mark.parametrize("bad", ["pair_c", "digest", None])  # None: the positive control, same path
+def test_template_pair_c_and_digest_must_rebuild(make_client, venue, session, clock, account, bad):
+    # pair_c: c_taker rebuilds, pair_c is not keccak(0x03, c_taker, c_maker); the served digest is over it.
+    # digest: every word rebuilds, the served digest is not the Side's.
+    if bad == "pair_c":
+        venue.template_edit = {"pair_c": rnd()}
+    elif bad == "digest":
+        venue.served_digest = rnd()
+    c = make_client(clock=clock)
+    q = c.quote("USD/MXN", "buy", 25_000)
+    if bad:
+        with pytest.raises(crx.RefusedToSign, match="pair_c" if bad == "pair_c" else "digest"):
+            c.trade(q)
+        assert not any("sig" in b and "leg" not in b for b in accepts(session))
+        assert f"/rfqs/{RFQ}/side" not in session.paths("POST")
+    else:
+        assert c.trade(q).status == "open"
+        assert recovers(venue, venue.template, venue.side_sig) == account.address
+    assert sent_nothing(session)
+
+
+@one_call_only
+@pytest.mark.parametrize("names,signed_first,err", [
+    ("other", False, crx.RefusedToSign),   # the template asked for names another quote: nothing signed
+    ("other", True, crx.TradeUnknown),     # after a signed post: never "nothing happened"
+    ("missing", False, crx.RefusedToSign),
+    (None, False, None),                   # positive control: the quote posted
+    (None, True, None),
+])
+def test_side_stale_names_the_quote(make_client, venue, session, clock, account, names, signed_first, err):
+    venue.stale_quote_id = {"other": "0x" + "66" * 32, "missing": "", None: None}[names]
+    if signed_first:
+        venue.stale = 1
+    else:
+        venue.winner = False
+    c = make_client(clock=clock)
+    q = c.quote("USD/MXN", "buy", 25_000, wait=3)
+    if err is None:
+        assert c.trade(q).status == "open"
+        assert recovers(venue, venue.template, accepts(session)[-1]["sig"]) == account.address
+    else:
+        with pytest.raises(err, match="another quote"):
+            c.trade(q)
+        assert len(accepts(session)) == 1
+        assert ("sig" in accepts(session)[0]) is signed_first
+    assert f"/rfqs/{RFQ}/side" not in session.paths("POST")
 
 
 @one_call_only
