@@ -2,7 +2,7 @@
 
 Run: CRX_LIVE=1 pytest -m live
 The quote check uses a fresh throwaway key. It is not whitelisted, so the
-gateway refuses it, or the market is closed. Either answer is typed.
+gateway refuses it, or no maker quotes. Either answer is typed.
 """
 
 import os
@@ -43,7 +43,7 @@ def test_rpc_matches_chain(client):
 def test_throwaway_quote_is_refused_typed(client):
     with pytest.raises(crx.CrxError) as ei:
         client.quote("USD/MXN", "buy", 25_000, wait=10)
-    assert ei.value.code in {"market_closed", "not_whitelisted", "unauthorized", "no_quotes", "seat_not_ready"}
+    assert ei.value.code in {"market_paused", "not_whitelisted", "unauthorized", "no_quotes", "seat_not_ready"}
 
 
 def test_throwaway_balance_is_typed(client):

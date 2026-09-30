@@ -110,6 +110,11 @@ def _pair(pair: str) -> tuple[str, str]:
     return f"{s[:3]}/{s[3:]}", s
 
 
+def _client_id(value: Any) -> bool:
+    """True for 1 to 128 characters, each printable ASCII (0x20 to 0x7E)."""
+    return isinstance(value, str) and 1 <= len(value) <= 128 and all(" " <= ch <= "~" for ch in value)
+
+
 def _side(side: str) -> str:
     s = str(side).strip().lower()
     if s not in ("buy", "sell"):
@@ -307,10 +312,13 @@ class Client:
         return out
 
     def market(self, pair: str) -> Market:
+        """One pair. A pair /markets does not offer on this chain raises ``MarketPaused``."""
         slash, _ = _pair(pair)
         m = next((m for m in self.markets() if m.pair == slash), None)
-        if m is None:
-            raise BadRequest(f"unknown pair {slash}")
+        chains = m.raw.get("chains") if m is not None else None
+        if not isinstance(chains, list) or not any(
+                isinstance(c, dict) and c.get("chain") == self.chain_key for c in chains):
+            raise MarketPaused(f"{slash} is not offered on {self.chain_key}", details={"pair": slash})
         return m
 
     # ---------- seat reads ----------
@@ -406,11 +414,15 @@ class Client:
         instant: a datetime, a timedelta from now, or unix ms. Default: one
         month out, off the weekend.
 
+        ``client_rfq_id`` is 1 to 128 printable ASCII characters.
+
         A closed market still takes the RFQ: the gateway decides. Its refusal
-        raises the matching error (``MarketClosed`` for ``market_closed``);
-        no quote before ``wait`` ends raises ``NoQuotes``.
+        raises the matching error; no quote before ``wait`` ends raises ``NoQuotes``.
         """
         self._need_seat()
+        if client_rfq_id is not None and not _client_id(client_rfq_id):
+            raise BadRequest("client_rfq_id must be 1 to 128 printable characters",
+                             details={"field": "client_rfq_id", "max": 128})
         slash, compact = _pair(pair)
         side = _side(side)
         amount = _amount(notional, "notional")
