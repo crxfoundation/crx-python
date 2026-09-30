@@ -20,6 +20,7 @@ import sys
 import threading
 import time
 import uuid
+import warnings
 from datetime import datetime
 
 import crx
@@ -111,8 +112,11 @@ def ask_key(name: str, file_name: str | None = None) -> bool:
         return True
     key = ""
     try:
-        key = getpass.getpass(f"{name} (hidden): ").strip()
-    except (EOFError, KeyboardInterrupt):
+        # No terminal to hide the input on: ask nothing.
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", getpass.GetPassWarning)
+            key = getpass.getpass(f"{name} (hidden): ").strip()
+    except (EOFError, KeyboardInterrupt, getpass.GetPassWarning):
         key = ""
     if not key:
         return False

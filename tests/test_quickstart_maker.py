@@ -234,11 +234,15 @@ def test_only_the_missing_key_is_asked(monkeypatch, fake, no_keys):
     assert asked == ["CRX_TAKER_PK (hidden): "]
 
 
-@pytest.mark.parametrize("answer", ["", "   ", EOFError, KeyboardInterrupt])
+@pytest.mark.parametrize("answer", ["", "   ", EOFError, KeyboardInterrupt, "no-terminal"])
 def test_no_taker_key_exits_2_before_any_call(monkeypatch, capsys, fake, no_keys, answer):
     monkeypatch.setenv("CRX_WALLET_PK", MAKER_KEY)
 
     def prompt(_t):
+        if answer == "no-terminal":
+            # getpass's fallback: it warns, then would read with echo on.
+            qs.warnings.warn("Can not control echo on the terminal.", qs.getpass.GetPassWarning)
+            return TAKER_KEY
         if isinstance(answer, type):
             raise answer()
         return answer
