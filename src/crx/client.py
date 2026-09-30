@@ -50,6 +50,7 @@ TESTNET_CHAIN_IDS = {43113, 84532, 11142220}
 MAINNET_CHAIN_IDS = {1}
 DEFAULT_STATE_DIR = "~/.crx-quickstart"  # shared with the CRX quickstart scripts: one Side nonce floor per seat
 WAITING = ("", "sending", "pending")  # statuses _settle polls past
+WITHDRAW_TTL = 22 * 3600  # s; the gateway takes a deadline at most 23 h out
 
 
 def _amount(value: Any, what: str = "amount") -> Decimal:
@@ -596,36 +597,29 @@ class Client:
     def withdraw(self, amount: Any) -> Withdraw:
         """Withdraw USDC to your own wallet. You sign the intent. CRX sends the tx and pays gas.
 
-        Returns once the withdraw shows a status other than ``sending`` or ``pending``.
-        When none shows within 30 s (testnet) or 90 s (mainnet), returns ``sending`` or
-        ``pending``. ``accepted`` leaves the balance at once; the payout follows.
+        Builds the intent from your next withdraw nonce, signs it and posts it in one request.
+        The deadline is 22 h out. Returns once the withdraw shows a status other than
+        ``sending`` or ``pending``. When none shows within 30 s (testnet) or 90 s (mainnet),
+        returns ``sending`` or ``pending``. ``accepted`` leaves the balance at once; the payout follows.
         """
         self._need_seat()
         amount = _amount(amount)
-        c = self._chain_ready()
+        self._chain_ready()
         nonce = self.balance().withdraw_nonce
-        r = self._gw.request("POST", "/withdraw", body={"chain": self.chain_key, "amount": _plain(amount)})
-        try:
-            w = r["intent"]
-            mine = (w["account"].lower(), w["recipient"].lower(), int(w["amount"]), r["core"].lower(), int(r["chain_id"]))
-            if mine != (self.address, self.address, e7.scaled6(amount), c["core"].lower(), c["chain_id"]):
-                raise RefusedToSign("the intent is not this withdraw to this wallet; nothing signed")
-            if nonce is None or int(w["nonce"]) != nonce:
-                raise RefusedToSign("the intent's nonce is not the seat's next withdraw nonce; nothing signed")
-            now = self._clock()
-            if not now < int(w["deadline"]) <= now + 86_400:
-                raise RefusedToSign("the intent's deadline is not within the next 24 h; nothing signed")
-            digest = e7.withdraw_digest(self._sep, w)
-            if e7.h0x(digest) != str(r["digest"]).lower():
-                raise RefusedToSign("digest mismatch: the served digest is not this intent; nothing signed")
-        except (KeyError, TypeError, ValueError, AttributeError):
-            raise RefusedToSign("the gateway served an intent this SDK cannot read; nothing signed") from None
+        if nonce is None:
+            raise RefusedToSign("/balance names no withdraw nonce for this seat; nothing signed")
+        w = {"account": self.address, "amount": e7.scaled6(amount), "recipient": self.address,
+             "nonce": nonce, "deadline": int(self._clock()) + WITHDRAW_TTL}
+        digest = e7.withdraw_digest(self._sep, w)
         sig = "0x" + bytes(self._account.unsafe_sign_hash(digest).signature).hex()
-        r = self._gw.request("POST", "/withdraw/sig", body={"chain": self.chain_key, "intent": w, "sig": sig},
-                             ok=(200, 202))
+        r = self._gw.request("POST", "/withdraw", body={
+            "chain": self.chain_key, "amount": _plain(amount), "nonce": str(nonce), "deadline": w["deadline"],
+            "sig": sig}, ok=(200, 202))
         item = _word(r.get("item"))
         if item is None:
-            raise BadAnswer("/withdraw/sig named no item")
+            raise BadAnswer("/withdraw named no item")
+        if item != e7.h0x(e7.withdraw_item(w)):
+            raise BadAnswer("/withdraw queued an item other than the signed withdraw")
         status, last = self._settle(lambda: self._money_last("withdraw", "item", item))
         tx = _word(last.get("tx"))
         log.info("withdraw %s %s, nonce %s, item %s", _plain(amount), status, nonce, item)
