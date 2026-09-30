@@ -110,7 +110,7 @@ def test_allow_mainnet_leaves_testnet_as_is(make_client):
 def test_withdraw_wait_cap_per_network(session, tmp_path, account, health, network, wait):
     # Mainnet waits 90 s past sending, testnet 30 s: each run is the other's control.
     from .conftest import CHAIN_ID, Clock
-    from .test_money import balance_body, item_row, sig_route
+    from .test_money import Gate, balance_body
     if network == "mainnet":
         session.routes[("GET", "/health")] = mainnet_health()
         session.rpc.update({"eth_chainId": "0x1", "eth_getCode": lambda p: "0x6080" if p[0].lower() == CORE else "0x"})
@@ -118,19 +118,13 @@ def test_withdraw_wait_cap_per_network(session, tmp_path, account, health, netwo
     else:
         chain_id, key = CHAIN_ID, "avax-fuji"
         core = next(c for c in health["chains"] if c["key"] == key)["core"]
-    w = {"account": account.address.lower(), "amount": str(1000 * 10**6), "recipient": account.address.lower(),
-         "nonce": "3", "deadline": int(time.time()) + 3600}
-    sep = e7.domain_separator(chain_id, core)
-    session.routes[("POST", "/withdraw")] = {"intent": w, "digest": e7.h0x(e7.withdraw_digest(sep, w)),
-                                             "core": core, "chain_id": chain_id, "kind": 5}
-    session.routes[("GET", "/balance")] = [dict(balance_body(account), chain=key),
-                                           dict(balance_body(account, withdraw=item_row("sending")), chain=key)]
-    sig_route(session)
+    g = Gate(session, account, chain_id, core)
+    session.routes[("GET", "/balance")] = [dict(balance_body(account), chain=key), g.view("sending", chain=key)]
     c = main(session, tmp_path, account, allow_mainnet=True, network=network)
     clock = Clock(time.time())
     c._clock, c._sleep = clock, clock.sleep
     t0 = clock()
     out = c.withdraw(1000)
-    assert out.status == "sending" and clock() - t0 == wait
+    assert out.status == "sending" and clock() - t0 == wait and g.signer == account.address
     assert sum(1 for x in session.calls if x["path"] == "/balance") == 1 + wait + 1
     assert crx.NETWORKS[network]["settle_wait"] == wait

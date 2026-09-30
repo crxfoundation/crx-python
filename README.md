@@ -71,7 +71,7 @@ print(w.status)  # accepted
 | `quote(pair, side, notional)` | Opens an RFQ. Returns the best firm quote. Accepts nothing. |
 | `trade(quote)` | Accepts and opens. CRX sends the tx and pays gas. `status`: `sending`, `open`, `pending` or `refused`. |
 | `deposit(amount)` | Approve, then deposit USDC. On testnet, mints the test USDC you lack. `status`: `credited`, `pending` or `failed`. |
-| `withdraw(amount)` | Signs a withdraw. CRX sends the tx and pays gas. `status`: `sending`, `accepted`, `pending`, `paid`, `partial`, `refused` or `returned`. In your wallet within about 2 hours. |
+| `withdraw(amount)` | Signs a withdraw to your own wallet and sends it in one request. CRX sends the tx and pays gas. `status`: `sending`, `accepted`, `pending`, `paid`, `partial`, `refused` or `returned`. In your wallet within about 2 hours. |
 | `balance()` | Collateral, free, margin, withdraw state. |
 | `positions()` | Open positions. |
 | `trades()` | Your event tape. `market=True` adds every open RFQ a maker seat receives (no owner named). |
@@ -140,6 +140,7 @@ Every error is a `crx.CrxError`. Branch on `.code`.
 | `viewer_cap` | 5 viewers already. Remove one first. |
 | `insufficient_collateral` | Deposit more. |
 | `refused_to_sign` | The gateway served something unexpected. Nothing signed. |
+| `bad_answer` | The gateway sent an answer the SDK cannot read, or queued a withdraw other than the one signed. Read `balance()`. |
 | `trade_unknown` | The trade may still open. Do not trade again. Read `positions()` after the time the error names. |
 | `tx_failed` | A transaction would revert, or reverted. |
 | `network` | The gateway or the RPC did not answer. |
