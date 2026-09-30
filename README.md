@@ -21,6 +21,14 @@ The seat must be onboarded. It needs test AVAX for gas.
 Or pass `key_file="seat.key"` (the file must be `chmod 600`).
 The SDK never prints or logs the key.
 
+## Quickstart
+
+```bash
+CRX_WALLET_PK=0x... python -m crx.quickstart
+```
+
+Runs the API Quickstart on Testnet: connect, fund, quote, trade, read, withdraw. Without the key, it asks for it and hides the input. Same script: `examples/quickstart.py`.
+
 ## Hello world
 
 ```python
