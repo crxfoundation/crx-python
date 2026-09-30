@@ -80,13 +80,12 @@ class SeatNotReady(CrxError):
 
 
 class MarketPaused(CrxError):
+    """The pair is paused, or not offered on this chain. ``details['pair']`` names it."""
+
     code = "market_paused"
 
 
-class MarketClosed(CrxError):
-    """The gateway refused: the pair's session is closed. ``details['opens_at']`` is unix ms, when sent."""
-
-    code = "market_closed"
+MarketClosed = MarketPaused
 
 
 class BelowMin(CrxError):
@@ -174,7 +173,6 @@ class TradeUnknown(CrxError):
 
 _BY_GATEWAY_CODE: dict[str, type[CrxError]] = {
     "market_paused": MarketPaused,
-    "market_closed": MarketClosed,
     "notional_below_minimum": BelowMin,
     "pool_min_notional": BelowMin,
     "notional_above_maximum": AboveMax,
