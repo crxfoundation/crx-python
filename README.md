@@ -81,6 +81,23 @@ print(w.status)  # accepted
 
 `quote()` also takes `expiry=` (datetime, timedelta or unix ms), `im_bps=` and `wait=` (seconds).
 
+## Maker
+
+A maker seat quotes the RFQs other seats open. The maker Quickstart needs two Testnet accounts: account 1 quotes, account 2 is your test taker.
+
+```bash
+CRX_WALLET_PK=0x... CRX_TAKER_PK=0x... python -m crx.quickstart_maker
+```
+
+Same script: `examples/maker.py`. Other desks ask on Testnet too, so the script quotes its own test taker's RFQ only. It matches `client_rfq_id`, which the gateway serves to an RFQ's own taker alone.
+
+| Call | Does |
+|---|---|
+| `rfqs()` | Streams the open RFQs you can quote. A seat with no collateral receives none. |
+| `rfq(rfq_id)` | One RFQ as your seat reads it. Its taker also reads every desk's quote: `house_rate` is the house desk's. |
+| `send_quote(rfq, rate)` | Signs your Leg and posts a firm quote. The taker gets the best quote only. Any maker quote outranks the house quote. |
+| `confirm(quote)` | Waits for the accept and signs your Side. CRX sends the tx and pays gas. `status`: `open`, `sending`, `pending` or `refused`. |
+
 ## Read another wallet (viewer)
 
 The owner grants read access. The viewer reads with its own key and `account=`.
@@ -112,6 +129,7 @@ Every error is a `crx.CrxError`. Branch on `.code`.
 | `market_paused` | Pair not live. |
 | `below_min`, `above_max` | Notional out of range. |
 | `no_quotes` | No maker quoted in time. |
+| `quote_lost` | Your maker quote opened no trade. `reason`: `another_maker`, `expired`, `cancelled`, `round_closed` or `timeout`. |
 | `quote_expired` | Round ended, or the maker refused. Quote again. |
 | `own_round_open` | Your last round is still open. |
 | `not_whitelisted` | Onboard the seat first. |

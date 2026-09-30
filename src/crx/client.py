@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 import requests
 from eth_utils import is_checksum_address, is_hex_address, keccak, to_checksum_address
@@ -19,12 +19,14 @@ from ._bind import Binder
 from ._chain import Rpc, send_tx
 from ._http import Gateway
 from ._keys import load_account
+from . import _maker
 from .errors import (
     AboveMax, BadAnswer, BadRequest, BelowMin, ConfigError, CrxError,
     MarketPaused, NoQuotes, RefusedToSign, clean,
 )
 from .models import (
-    Balance, Deposit, Event, Market, Position, Quote, Trade, Viewer, Withdraw, dec, ms_to_dt, side_word,
+    Balance, Deposit, Event, MakerQuote, Market, Position, Quote, Rfq, Trade, Viewer, Withdraw, dec, ms_to_dt,
+    side_word,
 )
 
 log = logging.getLogger("crx")
@@ -650,6 +652,54 @@ class Client:
         if not isinstance(rows, list):
             raise BadAnswer("/viewers lists no viewers")
         return [_viewer(v) for v in rows if isinstance(v, dict)]
+
+    # ---------- maker ----------
+
+    def rfqs(self, *, since: int | None = None, wait: float | None = None, poll: float = 0.5) -> Iterator[Rfq]:
+        """Open RFQs you can quote, as they arrive: the ``rfq.opened`` frames of your tape.
+
+        Needs a maker seat with collateral: the gateway sends no RFQ to a seat short of it.
+        Yields open RFQs on this network, another seat's, inside their quote window, each
+        once. The call reads your tape up to its head before it returns: from ``since``
+        (an ``Rfq.seq``), else from the start. Ends after ``wait`` s; by default it never
+        ends. Break out of the loop to stop.
+        """
+        self._need_seat()
+        return _maker.stream(self, since, wait, poll)
+
+    def rfq(self, rfq_id: str) -> Rfq:
+        """One RFQ as your seat reads it. As its taker, ``quotes`` holds every desk's
+        quote (``house_rate`` names the house desk's) and ``client_rfq_id`` is yours.
+        As a maker, ``quotes`` holds your own quotes only."""
+        self._need_seat()
+        return _maker.read(self, rfq_id)
+
+    def send_quote(
+        self, rfq: Rfq, rate: Any, *, client_quote_id: str | None = None, expires_in: float | None = None,
+    ) -> MakerQuote:
+        """Post a firm quote at ``rate`` on ``rfq``: you sign your Leg. The taker gets the best quote only.
+
+        The Leg carries the RFQ's terms, your own side (the opposite of the taker's) and
+        your nonce from ``client_quote_id`` (a fresh one by default). ``expires_in`` ends
+        the quote that many seconds from now; by default it lives as long as the RFQ.
+        A refusal raises its error: ``InsufficientCollateral``, ``QuoteExpired`` when the
+        RFQ ended, ``NotWhitelisted``. Pass the result to ``confirm``.
+        """
+        self._need_seat()
+        return _maker.send(self, rfq, rate, client_quote_id, expires_in)
+
+    def confirm(self, quote: MakerQuote, *, timeout: float | None = None, poll: float = 1.0) -> Trade:
+        """Wait for the taker's accept, sign your Side, and open the trade. CRX sends the tx and pays gas.
+
+        Waits at most ``timeout`` s for the accept; by default until the RFQ's quote window
+        closes. Returns once the trade is ``open`` or ``refused``; ``sending`` or ``pending``
+        when neither shows within 30 s (testnet) or 90 s (mainnet).
+
+        No trade raises ``QuoteLost``; ``reason`` is ``another_maker``, ``expired``,
+        ``cancelled``, ``round_closed`` or ``timeout``.
+        """
+        self._need_seat()
+        return _maker.confirm(self, quote, timeout, poll)
 
     def _send(self, what: str, to: str, data: str) -> str:
         tx = send_tx(self._rpc, self._account, self._chain_ready()["chain_id"], what, to, data, sleep=self._sleep)

@@ -141,6 +141,25 @@ class TxFailed(CrxError):
     code = "tx_failed"
 
 
+class QuoteLost(CrxError):
+    """Your quote opened no trade. ``reason`` says why:
+
+    - ``another_maker``: the taker accepted another quote.
+    - ``expired``: the RFQ or your quote ended with no accept.
+    - ``cancelled``: the RFQ was cancelled.
+    - ``round_closed``: the taker accepted, and the Side round closed before the pair armed.
+    - ``timeout``: no accept before the wait ended. The RFQ can still take one.
+    """
+
+    code = "quote_lost"
+
+    def __init__(self, message: str, *, reason: str, **kw: Any) -> None:
+        details = dict(kw.pop("details", None) or {})
+        details["reason"] = reason
+        super().__init__(message, details=details, **kw)
+        self.reason = reason
+
+
 class TradeUnknown(CrxError):
     """The trade may be on chain. Do not trade again: read ``positions()`` after the time the message names."""
 

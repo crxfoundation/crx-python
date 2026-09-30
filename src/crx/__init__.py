@@ -3,18 +3,18 @@
 from .client import NETWORKS, Client
 from .errors import (
     AboveMax, AuthError, BadAnswer, BadRequest, BelowMin, ConfigError, CrxError, InsufficientCollateral,
-    MarketClosed, MarketPaused, NetworkError, NoQuotes, NotWhitelisted, OwnRoundOpen, QuoteExpired,
+    MarketClosed, MarketPaused, NetworkError, NoQuotes, NotWhitelisted, OwnRoundOpen, QuoteExpired, QuoteLost,
     RateLimited, RefusedToSign, Rejected, SeatNotReady, ServerError, TradeUnknown, TxFailed,
 )
-from .models import Balance, Deposit, Event, Market, Position, Quote, Trade, Viewer, Withdraw
+from .models import Balance, Deposit, Event, MakerQuote, Market, Position, Quote, Rfq, Trade, Viewer, Withdraw
 
 __version__ = "0.2.0"
 
 __all__ = [
     "Client", "NETWORKS", "__version__",
-    "Balance", "Deposit", "Event", "Market", "Position", "Quote", "Trade", "Viewer", "Withdraw",
+    "Balance", "Deposit", "Event", "MakerQuote", "Market", "Position", "Quote", "Rfq", "Trade", "Viewer", "Withdraw",
     "CrxError", "AboveMax", "AuthError", "BadAnswer", "BadRequest", "BelowMin", "ConfigError",
     "InsufficientCollateral", "MarketClosed", "MarketPaused", "NetworkError", "NoQuotes",
-    "NotWhitelisted", "OwnRoundOpen", "QuoteExpired", "RateLimited", "RefusedToSign", "Rejected",
+    "NotWhitelisted", "OwnRoundOpen", "QuoteExpired", "QuoteLost", "RateLimited", "RefusedToSign", "Rejected",
     "SeatNotReady", "ServerError", "TradeUnknown", "TxFailed",
 ]

@@ -1,0 +1,92 @@
+{
+ "domain": {
+  "chain_id": 43113,
+  "core": "0x0f6fba28791dfd909bd023e63bc072081610eeea",
+  "separator": "0xa360b83ea212664bd3328ac11dd6558752fee818bba2807d51049806a9f7fd84"
+ },
+ "key": "the fixed test key 0x42 repeated 32 times",
+ "legs": [
+  {
+   "client_quote_id": "sdk-q-vector-1",
+   "digest": "0xee8f25da9d8f05764b587f472762947383f5c31daa5403dac3a29e9845800129",
+   "sig": "0x3d476a8220f7f06aed6dee50a8de3f8435cd59a4d29b0da6c66c017c669999424d2ed7ad8dd9ed7c9f347e7da19c2b3b3a731f478d7c3a0150853155837cdb451c",
+   "wire": {
+    "expiry": 1792195200000,
+    "im_bps": 100,
+    "instrument_id": 1,
+    "join_ref": "0x7777777777777777777777777777777777777777777777777777777777777777",
+    "leg_id": "0x5555555555555555555555555555555555555555555555555555555555555555",
+    "nonce": "2958535767014822117",
+    "notional": "25000",
+    "pair_id": "0x69f1670ccd0386df6e79b445190cb08f07e9d85ef8bb6ef820417312ea39752f",
+    "premium_bps": 0,
+    "quote_expiry": 1790000600000,
+    "rate": "18.7123",
+    "seat": "0x17c5185167401ed00cf5f5b2fc97d9bbfdb7d025",
+    "side": -1
+   }
+  },
+  {
+   "client_quote_id": "sdk-q-vector-2",
+   "digest": "0x9e20a965a3f48465981e9156d60e2e0be4557c7f539837223ab03c32aff7d675",
+   "sig": "0x291d1476d82622935db6e91628bf9885bc6cace2d6dcd392716c00db5b4eb535394c32943f406aac7ed30252a4e280be8d49d9439a5978b9dab3eb5499ca74dd1b",
+   "wire": {
+    "expiry": 1792195200000,
+    "im_bps": 100,
+    "instrument_id": 1,
+    "join_ref": "0x7777777777777777777777777777777777777777777777777777777777777777",
+    "leg_id": "0x5555555555555555555555555555555555555555555555555555555555555555",
+    "nonce": "11550031863654611717",
+    "notional": "1500000.25",
+    "pair_id": "0x69f1670ccd0386df6e79b445190cb08f07e9d85ef8bb6ef820417312ea39752f",
+    "premium_bps": -25,
+    "quote_expiry": 1790000600000,
+    "rate": "156.4321",
+    "seat": "0x17c5185167401ed00cf5f5b2fc97d9bbfdb7d025",
+    "side": 1
+   }
+  }
+ ],
+ "maker_side": {
+  "digest": "0x4d47b3f596912523a6a7b20336b1279d7a4325ff06a85035aceaabd34af63d57",
+  "domain": {
+   "chain_id": 43113,
+   "name": "CRX",
+   "verifying_contract": "0xd757933e2a5600c6f00f83fd282b33aa7cb409c0",
+   "version": "rulebook-1.0"
+  },
+  "leg": {
+   "expiry": 1792195200,
+   "im_bps": 100,
+   "instrument_id": 1,
+   "leg_id": "0x5555555555555555555555555555555555555555555555555555555555555555",
+   "nonce": "1790000000456",
+   "notional": "100000000000",
+   "pair": "0x2222222222222222222222222222222222222222222222222222222222222222",
+   "premium_bps": -25,
+   "quote_expiry": 1790000600,
+   "rate": "5408042",
+   "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+   "side": -1
+  },
+  "now_ms": 1790000300000,
+  "own_c": "0xea0f13898cf08105e5203d7ddb1465b5b913866845675379dbb7020ef8c3d439",
+  "own_nonce": 1790000000456,
+  "sig_by_0x42": "0x0fed4643192aaeec5ed214542d26082525caa720377e27ea1502c60a527d437129aa471f46c9cb58c7afac1d7ea021f77136a7304ab5c3e6c712e8fbd8cc57551b",
+  "template": {
+   "c_maker": "0xea0f13898cf08105e5203d7ddb1465b5b913866845675379dbb7020ef8c3d439",
+   "c_taker": "0x062e5f51ba1d3f60599d7a042fbe6a868efd4648b43fbe43e93424817c708682",
+   "digest": "0x4d47b3f596912523a6a7b20336b1279d7a4325ff06a85035aceaabd34af63d57",
+   "digest_kind": "side",
+   "domain_separator": "0x38bfb6b828498b78403a209f336f3d5fa6335d23f7e50d1859e12f213c3fe59b",
+   "own_leg_id": "0x5555555555555555555555555555555555555555555555555555555555555555",
+   "own_nonce": "1790000000456",
+   "own_salt": "0x6666666666666666666666666666666666666666666666666666666666666666",
+   "pair_c": "0xb5a969d50d8c6b221facce95f629c0f6388cc23d68689e47e75dbd210fd1c596",
+   "quote_expiry": 1790000600,
+   "wraps_hash": "0x569e75fc77c1a856f6daaf9e69d8a9566ca34aa47f9133711ce065a571af0cfd"
+  }
+ },
+ "seat": "0x17c5185167401ed00cf5f5b2fc97d9bbfdb7d025",
+ "source": "crx_pilot_mm::sign in mono clients/pilot-mm: LegWire::digest, nonce_for, sign_digest, half_commitment, check_side_template(Role::Maker). maker_side runs on clients/pilot-mm/tests/fixtures/side-vectors.json (side_hash::build_pair)."
+}
