@@ -222,6 +222,53 @@ def test_a_taker_rfq_with_no_quote_gets_the_maker_role_hint(capsys, fake, keys, 
     assert capsys.readouterr().err.startswith("no_quotes: your test taker's RFQ did not reach the maker seat")
 
 
+def test_rate_limits_in_the_match_loop_are_waited_out(capsys, fake, keys, monkeypatch):
+    real = FakeClient.rfq
+    hits = []
+
+    def limited(self, rfq_id):
+        hits.append(rfq_id)
+        if rfq_id == OURS and len([h for h in hits if h == OURS]) in (1, 2, 5):
+            raise crx.RateLimited("slow down", status=429)
+        return real(self, rfq_id)
+
+    monkeypatch.setattr(FakeClient, "rfq", limited)
+    assert qs.main([]) == 0
+    assert [c for c in FakeClient.maker.calls if c[0] == "send_quote"] == [("send_quote", OURS, Decimal("18.09991"))]
+
+
+def test_a_rate_limit_that_holds_exits_1(capsys, fake, keys, monkeypatch):
+    real = FakeClient.rfq
+
+    def limited(self, rfq_id):
+        if rfq_id == OURS:
+            raise crx.RateLimited("slow down", status=429)
+        return real(self, rfq_id)
+
+    monkeypatch.setattr(FakeClient, "rfq", limited)
+    assert qs.main([]) == 1
+    assert capsys.readouterr().err.strip() == "rate_limited: slow down"
+    assert not any(c[0] == "send_quote" for c in FakeClient.maker.calls)
+
+
+@pytest.mark.parametrize("status", ["refused", "pending", "sending"])
+def test_a_trade_not_open_ends_cleanly(capsys, fake, keys, monkeypatch, status):
+    def confirm(self, q, **kwargs):
+        return SimpleNamespace(status=status, rfq_id=q.rfq_id, tx=None)
+
+    monkeypatch.setattr(FakeClient, "confirm", confirm)
+    assert qs.main([]) == 1
+    out, err = capsys.readouterr()
+    assert err.strip() == f"not_open: the trade is {status}, not open"
+    assert "Traceback" not in out + err
+    assert ("positions",) not in FakeClient.maker.calls
+
+
+def test_an_open_trade_not_yet_listed_ends_without_error(capsys, fake, keys, monkeypatch):
+    monkeypatch.setattr(FakeClient, "positions", lambda self: [])
+    assert qs.main([]) == 0
+
+
 def test_no_rfq_for_the_taker_exits_1(capsys, fake, keys, monkeypatch):
     monkeypatch.setattr(FakeClient, "rfqs", lambda self, **k: iter([]))
     assert qs.main([]) == 1

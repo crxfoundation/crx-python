@@ -71,22 +71,32 @@ def steps():
     asker = threading.Thread(target=ask, daemon=True)
     asker.start()
 
+    # Your test taker's view of an RFQ. Your two accounts share one IP, and the
+    # gateway limits GET /rfqs/{id} per IP: on a rate limit, wait and read again.
+    def taker_view(rfq):
+        for pause in (0.5, 1.0, 1.5):
+            try:
+                return taker.rfq(rfq.rfq_id)
+            except crx.RateLimited:
+                time.sleep(pause)
+        return taker.rfq(rfq.rfq_id)
+
     # Other desks ask on Testnet too. Quote your test taker's RFQ only:
     # the gateway gives client_rfq_id back to an RFQ's own taker, no one else.
     def asked_by_taker(rfq):
         try:
-            return taker.rfq(rfq.rfq_id).client_rfq_id == cid
+            return taker_view(rfq).client_rfq_id == cid
         except crx.AuthError:
             return False
 
     # A near-mid rate: the house desk's rate on this RFQ, as your test taker reads it.
     # Any maker quote outranks a house quote.
     def near_mid(rfq):
-        for _ in range(12):
-            rate = taker.rfq(rfq.rfq_id).house_rate
+        for _ in range(6):
+            rate = taker_view(rfq).house_rate
             if rate:
                 return rate
-            time.sleep(0.25)
+            time.sleep(0.5)
         raise crx.NoQuotes("no house quote to price from")
 
     # 5. Quote your test taker's RFQ. Signs your Leg. Quote fast: a few seconds
@@ -111,9 +121,12 @@ def steps():
 
     # 7. Your trade, from the maker's side.
     asker.join(60)
-    p = [p for p in maker.positions() if p.rfq_id == t.rfq_id][0]
-    log(p.pair, p.side, p.notional, p.rate, p.status)
-    # 21:05:10 USDMXN sell 25000 18.09991 open
+    if t.status != "open":
+        raise crx.CrxError(f"the trade is {t.status}, not open", code="not_open")
+    for p in maker.positions():
+        if p.rfq_id == t.rfq_id:
+            log(p.pair, p.side, p.notional, p.rate, p.status)
+            # 21:05:10 USDMXN sell 25000 18.09991 open
 
 
 def ask_key(name: str, file_name: str | None = None) -> bool:
