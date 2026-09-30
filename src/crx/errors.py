@@ -6,6 +6,7 @@ import html
 import math
 import re
 import time
+from datetime import timezone
 from email.utils import parsedate_to_datetime
 from typing import Any
 
@@ -196,13 +197,22 @@ def first_line(text: str, limit: int = 200) -> str:
     return ""
 
 
+RETRY_AFTER_MAX = 86400  # s
+
+
 def retry_after_secs(value: Any) -> int | None:
-    """Seconds from a Retry-After header: delta-seconds or an HTTP date. None when absent or unreadable."""
+    """Seconds from a Retry-After header: delta-seconds or an HTTP date, at most ``RETRY_AFTER_MAX``.
+
+    None when absent or unreadable. A date without a zone is UTC.
+    """
     v = str(value or "").strip()
-    if v.isdigit():
-        return int(v)
+    if v.isascii() and v.isdigit():
+        return RETRY_AFTER_MAX if len(v) > 9 else min(int(v), RETRY_AFTER_MAX)
     try:
-        return max(0, math.ceil(parsedate_to_datetime(v).timestamp() - time.time()))
+        dt = parsedate_to_datetime(v)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return min(max(0, math.ceil(dt.timestamp() - time.time())), RETRY_AFTER_MAX)
     except (TypeError, ValueError, IndexError, OverflowError):
         return None
 
