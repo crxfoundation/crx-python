@@ -1,5 +1,8 @@
 """Error bodies that are not gateway JSON: edge HTML, plain text, empty. Retry-After."""
 
+import os
+import time
+
 import pytest
 
 import crx
@@ -89,10 +92,35 @@ def test_json_429_body_retry_after_wins(make_client, session):
     assert e.details == {"retry_after_secs": 2}
 
 
-@pytest.mark.parametrize("value,want", [("0", 0), (" 12 ", 12), ("Wed, 21 Oct 2015 07:28:00 GMT", 0), ("soon", None), ("-3", None)])
+@pytest.mark.parametrize("value,want", [
+    ("0", 0), (" 12 ", 12), ("Wed, 21 Oct 2015 07:28:00 GMT", 0), ("soon", None), ("-3", None),
+    ("\xb2", None), ("\xb9", None), ("\xb3", None), ("\u0663", None),
+    ("99999999999999999999999", 86400), pytest.param("9" * 5000, 86400, id="5000-digits"), ("Fri, 31 Dec 9999 23:59:59 GMT", 86400),
+])
 def test_retry_after_forms(make_client, session, value, want):
     e = fail_balance(make_client, session, 503, "", {"Retry-After": value})
     assert e.details.get("retry_after_secs") == want
+
+
+def test_retry_after_superscript_still_rate_limited(make_client, session):
+    e = fail_balance(make_client, session, 429, "Too Many Requests", {"Retry-After": "\xb2"})
+    assert type(e) is crx.RateLimited and e.details == {"body": "Too Many Requests"}
+
+
+def test_retry_after_date_without_zone_is_utc(make_client, session, monkeypatch):
+    monkeypatch.setattr("time.time", lambda: 4070908800.0 - 60)  # 2099-01-01 00:00:00 UTC less 60 s
+    old = os.environ.get("TZ")
+    os.environ["TZ"] = "America/New_York"
+    time.tzset()
+    try:
+        e = fail_balance(make_client, session, 503, "", {"Retry-After": "Thu, 01 Jan 2099 00:00:00 -0000"})
+    finally:
+        if old is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = old
+        time.tzset()
+    assert e.details["retry_after_secs"] == 60
 
 
 def test_json_bodies_unchanged(make_client, session):
