@@ -30,6 +30,9 @@ from .conftest import BASE, RPC
         (410, {"code": "quote_expired", "error": "gone"}, crx.QuoteExpired, "quote_expired"),
         (410, {"error": "gone"}, crx.QuoteExpired, "quote_expired"),
         (429, {"code": "rate_limited", "error": "slow", "details": {"retry_after_secs": 2}}, crx.RateLimited, "rate_limited"),
+        (409, {"code": "quote_dropped", "error": "dropped", "details": {"best": None}}, crx.QuoteDropped, "quote_dropped"),
+        (409, {"code": "quote_not_yours", "error": "not yours"}, crx.QuoteNotYours, "quote_not_yours"),
+        (409, {"error": "quote_not_yours"}, crx.QuoteNotYours, "quote_not_yours"),
         (401, {"code": "unauthorized", "error": "who"}, crx.AuthError, "unauthorized"),
         (400, {"code": "viewer_invalid", "error": "no"}, crx.BadRequest, "bad_request"),
         (403, {"code": "viewer_is_maker", "error": "no"}, crx.BadRequest, "bad_request"),
@@ -52,6 +55,15 @@ def test_no_fold_or_crank_words():
     hits = [f"{f.name}:{i}" for f in files for i, line in enumerate(f.read_text().splitlines(), 1)
             if re.search(r"\b(fold|folds|crank)\b", line, re.I)]
     assert hits == []
+
+
+@pytest.mark.parametrize("details,headers,wait", [
+    ({"retry_after_secs": 2}, None, 2.0), ({}, {"Retry-After": "9"}, 9.0),
+    ({}, {"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"}, None), ({"retry_after_secs": "x"}, None, None),
+])
+def test_rate_limited_retry_after(details, headers, wait):
+    e = from_gateway(429, {"code": "rate_limited", "error": "slow", "details": details}, "", headers)
+    assert type(e) is crx.RateLimited and e.retry_after == wait
 
 
 def test_unknown_code_passes_through():

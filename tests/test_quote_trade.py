@@ -122,7 +122,7 @@ class Venue:
         if self.mode == "legacy":
             return (400, {"code": "bad_request", "error": "sig is required"})
         seat = req["headers"]["x-crx-address"]
-        if self.draft is None or self.stale > 0 or body["quote_id"] != QID:
+        if self.draft is None or self.stale > 0 or body["quote_id"] != self.row()["quote_id"]:
             self.stale = max(self.stale - 1, 0)
             if self.on_stale:
                 self.on_stale()
@@ -134,7 +134,7 @@ class Venue:
         if signer != seat:
             return (400, {"code": "invalid_signature", "error": f"sign the digest {self.draft['digest']}"})
         self.side_sig, self.template, self.accepted = body["sig"], self.draft, True
-        return {"rfq_id": RFQ, "quote_id": QID, "leg_id": LEG, "status": "accepted",
+        return {"rfq_id": RFQ, "quote_id": body["quote_id"], "leg_id": LEG, "status": "accepted",
                 "leg_hash": e7.h0x(e7.leg_digest(self.sep, dict(self.taker_arm(seat), nonce=self.draft["own_nonce"],
                                                                   quote_expiry=self.draft["quote_expiry"]))),
                 "side": dict(self.draft, signed=True)}

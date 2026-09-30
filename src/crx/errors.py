@@ -107,6 +107,22 @@ class QuoteExpired(CrxError):
     code = "quote_expired"
 
 
+class QuoteDropped(QuoteExpired):
+    """The maker dropped the quote before the accept. Nothing was sent.
+
+    ``best`` is the best live quote on the same RFQ, as a ``Quote`` for ``Client.trade``, or None.
+    """
+
+    code = "quote_dropped"
+    best: Any = None
+
+
+class QuoteNotYours(CrxError):
+    """The quote was made for another RFQ or another seat. Nothing was sent. Do not retry it."""
+
+    code = "quote_not_yours"
+
+
 class Rejected(CrxError):
     code = "rejected"
 
@@ -122,7 +138,10 @@ class InsufficientCollateral(CrxError):
 
 
 class RateLimited(CrxError):
+    """Too many requests. ``retry_after`` is the wait in seconds, when the gateway sent one."""
+
     code = "rate_limited"
+    retry_after: float | None = None
 
 
 class ServerError(CrxError):
@@ -182,6 +201,8 @@ _BY_GATEWAY_CODE: dict[str, type[CrxError]] = {
     "rejected": Rejected,
     "own_round_open": OwnRoundOpen,
     "quote_expired": QuoteExpired,
+    "quote_dropped": QuoteDropped,
+    "quote_not_yours": QuoteNotYours,
     "rfq_expired": QuoteExpired,
     "round_closed": QuoteExpired,
     "rate_limited": RateLimited,
@@ -196,20 +217,45 @@ _BY_GATEWAY_CODE: dict[str, type[CrxError]] = {
 }
 
 
-def from_gateway(status: int, body: Any, text: str = "") -> CrxError:
-    """Map one gateway refusal to a typed error."""
+def gateway_code(body: Any) -> str:
+    """The gateway's code: ``code``, else an ``error`` that is itself a known code."""
+    if not isinstance(body, dict):
+        return ""
+    code, error = body.get("code"), body.get("error")
+    if not code and isinstance(error, str) and error in _BY_GATEWAY_CODE:
+        code = error
+    return clean(code or "", 64)
+
+
+def retry_after(details: dict, headers: Any = None) -> float | None:
+    """Seconds to wait: ``details.retry_after_secs``, else a numeric ``Retry-After`` header."""
+    for v in (details.get("retry_after_secs"), (headers or {}).get("Retry-After")):
+        try:
+            s = float(v)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= s < 86_400:
+            return s
+    return None
+
+
+def from_gateway(status: int, body: Any, text: str = "", headers: Any = None) -> CrxError:
+    """Map one gateway refusal to a typed error. ``headers`` gives a 429 its ``Retry-After``."""
     body = body if isinstance(body, dict) else {}
-    gw = clean(body.get("code") or "", 64) or None
+    gw = gateway_code(body) or None
     msg = clean(body.get("error") or body.get("detail") or text or f"HTTP {status}")
     details = body.get("details") if isinstance(body.get("details"), dict) else {}
     kw = {"status": status, "details": details, "gateway_code": gw}
     cls = _BY_GATEWAY_CODE.get(gw or "")
+    if cls is None and status == 410:
+        cls = QuoteExpired
+    if cls is None and status == 429:
+        cls = RateLimited
     if cls is not None:
-        return cls(msg, **kw)
-    if status == 410:
-        return QuoteExpired(msg, **kw)
-    if status == 429:
-        return RateLimited(msg, **kw)
+        e = cls(msg, **kw)
+        if isinstance(e, RateLimited):
+            e.retry_after = retry_after(details, headers)
+        return e
     if status in (401, 403):
         return AuthError(msg, **kw)
     if status >= 500:

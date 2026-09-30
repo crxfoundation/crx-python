@@ -108,7 +108,8 @@ class Gateway:
         """The JSON object of an ``ok`` answer; ``{}`` for a 204. Any other status raises."""
         body = self.body_of(r)
         if r.status_code not in ok:
-            raise from_gateway(r.status_code, body, "" if isinstance(body, dict) else (r.text or "")[:300])
+            raise from_gateway(r.status_code, body, "" if isinstance(body, dict) else (r.text or "")[:300],
+                               getattr(r, "headers", None))
         if r.status_code == 204:
             return {}
         if not isinstance(body, dict):

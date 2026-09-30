@@ -133,6 +133,9 @@ Every error is a `crx.CrxError`. Branch on `.code`.
 | `no_quotes` | No maker quoted in time. |
 | `quote_lost` | Your maker quote opened no trade. `reason`: `another_maker`, `expired`, `cancelled`, `round_closed` or `timeout`. |
 | `quote_expired` | Round ended, or the maker refused. Quote again. |
+| `quote_dropped` | The maker dropped the quote. `trade()` takes the best live quote once when its rate is no worse. Else `.best` holds it, or None. |
+| `quote_not_yours` | The quote was made for another request or seat. Nothing sent. |
+| `rate_limited` | Too many requests. `.retry_after` is the wait in seconds, when sent. |
 | `own_round_open` | Your last round is still open. |
 | `not_whitelisted` | Onboard the seat first. |
 | `seat_not_ready` | Onboarding not finished. Wait. |

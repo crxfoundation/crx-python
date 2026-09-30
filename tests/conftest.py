@@ -23,9 +23,10 @@ def fixture(name: str):
 
 
 class Resp:
-    def __init__(self, status: int, body):
+    def __init__(self, status: int, body, headers=None):
         self.status_code = status
         self._body = body
+        self.headers = headers or {}
         self.text = body if isinstance(body, str) else json.dumps(body)
 
     def json(self):
@@ -37,7 +38,7 @@ class Resp:
 class FakeSession:
     """Routes gateway calls to ``routes[(METHOD, path)]`` and RPC calls to ``rpc[method]``.
 
-    A route is a response body (200), a (status, body) tuple, a list of either
+    A route is a response body (200), a (status, body[, headers]) tuple, a list of either
     (served in order, the last one repeats), or a callable(req) -> one of those.
     """
 
@@ -54,7 +55,7 @@ class FakeSession:
         if callable(spec):
             return self._serve(spec(req), req)
         if isinstance(spec, tuple):
-            return Resp(spec[0], spec[1])
+            return Resp(*spec)
         return Resp(200, spec)
 
     def request(self, method, url, headers=None, data=None, timeout=None, allow_redirects=True):

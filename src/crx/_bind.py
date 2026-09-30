@@ -17,13 +17,15 @@ from typing import Any, Callable
 from . import _eip712 as e7
 from ._http import Gateway
 from .errors import (
-    BadAnswer, CrxError, NetworkError, OwnRoundOpen, QuoteExpired, RefusedToSign,
-    TradeUnknown, clean, from_gateway,
+    BadAnswer, CrxError, NetworkError, OwnRoundOpen, QuoteDropped, QuoteExpired, QuoteNotYours, RateLimited,
+    RefusedToSign, TradeUnknown, clean, from_gateway, gateway_code,
 )
 
 SIDE_WINDOW = 630  # s: the core takes a Side quote_expiry at most 600 s past its block time, plus 30 s of clock slack
 NEW_QUOTE = "not opened; request a new quote"
 MAX_POSTS = 3  # accept bodies per trade; a re-post of the same body after 409 rejected does not count
+# Accept refusals that reserve nothing and send nothing, even after a signed post.
+NOTHING_SENT = (QuoteExpired, OwnRoundOpen, QuoteNotYours, RateLimited)
 
 
 def utc(ts: float) -> str:
@@ -38,9 +40,7 @@ def read_later(qe: int) -> str:
 def status_code(r: Any) -> tuple[int, str]:
     if r is None:
         return (0, "")
-    body = Gateway.body_of(r)
-    code = clean(body.get("code") or "", 64) if isinstance(body, dict) else ""
-    return (r.status_code, code)
+    return (r.status_code, gateway_code(Gateway.body_of(r)))
 
 
 def obj(r: Any) -> dict:
@@ -53,14 +53,19 @@ def refused(r: Any) -> CrxError:
     k = status_code(r)
     if k[0] == 410 or k in ((409, "rejected"), (409, "round_closed"), (409, "conflict")):
         return QuoteExpired(NEW_QUOTE, status=k[0], gateway_code=k[1] or None)
-    return from_gateway(r.status_code, Gateway.body_of(r), r.text[:300] if r.text else "")
+    return from_gateway(r.status_code, Gateway.body_of(r), r.text[:300] if r.text else "", getattr(r, "headers", None))
 
 
 def accept_refused(r: Any) -> CrxError:
-    """An accept refusal. 409 rejected here is the end of the busy-maker retries."""
+    """An accept refusal. 409 rejected here is the end of the busy-maker retries.
+    409 quote_dropped keeps the served best live quote in ``details["best"]`` (a row, or None)."""
     k = status_code(r)
     d = obj(r).get("details")
     d = d if isinstance(d, dict) else {}
+    if k == (409, "quote_dropped"):
+        best = d.get("best", obj(r).get("best"))
+        return QuoteDropped(f"the maker dropped this quote; {NEW_QUOTE}", status=409, gateway_code="quote_dropped",
+                            details={"best": best if isinstance(best, dict) else None})
     if k == (409, "own_round_open"):
         return OwnRoundOpen("your previous round is still open; no new trade before it ends",
                             status=409, gateway_code="own_round_open", details=d)
@@ -194,8 +199,9 @@ class Binder:
         self.keep_signed(own_nonce)
         return digest
 
-    def bind(self, rfq_id: str, arm: dict, t: dict, maker_by: float, log: Callable[[str], None]) -> None:
+    def bind(self, rfq_id: str, arm: dict, t: dict, maker_by: float | None, log: Callable[[str], None]) -> None:
         """Sign this seat's Side and post it. CRX sends the trade once both Sides are in.
+        ``maker_by`` is the maker's last instant to sign its Side; None where the maker's quote binds it.
         Raises QuoteExpired (no bind) or TradeUnknown (maybe bound). Before the Side
         signature exists, a refusal is RefusedToSign. After it, the trade can still
         open, so any other failure is TradeUnknown."""
@@ -208,7 +214,8 @@ class Binder:
                 r = None  # 5xx or no answer: the gateway may hold the signature
             if r is not None and r.status_code != 200 and r.status_code < 500:
                 raise refused(r)
-            log(f"side signed, nonce {clean(t['own_nonce'])}; the maker signs by {utc(maker_by)}")
+            log(f"side signed, nonce {clean(t['own_nonce'])}"
+                + (f"; the maker signs by {utc(maker_by)}" if maker_by is not None else ""))
             return
         except QuoteExpired:
             raise
@@ -268,7 +275,7 @@ class Binder:
         gateway does not answer a signed post, the answer is ``{}``: the gateway may
         hold the signature, so the trade status decides. Before the first signature,
         a refusal raises as is. After it, the trade can still open, so any failure
-        other than QuoteExpired or OwnRoundOpen raises TradeUnknown.
+        other than a NOTHING_SENT refusal raises TradeUnknown.
         """
         until = self.until(expires_at_ms)
         posts, signed = 0, None
@@ -306,7 +313,7 @@ class Binder:
                     raise QuoteExpired(f"the Side template went stale; {NEW_QUOTE}", status=409,
                                        gateway_code="side_stale")
                 t, ask = fresh, False
-        except (QuoteExpired, OwnRoundOpen):
+        except NOTHING_SENT:
             raise
         except Exception as e:  # noqa: BLE001 - once a Side is signed, no failure may read as "nothing happened"
             if signed is None:
