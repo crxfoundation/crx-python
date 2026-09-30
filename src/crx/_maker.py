@@ -298,7 +298,7 @@ def check_side(b: Binder, t: dict, leg: dict) -> bytes:
             raise RefusedToSign("refused to sign: c_maker is not this leg")
         if e7.h0x(e7.pair_commitment(e7.hx(t["c_taker"]), c_maker)) != t["pair_c"].lower():
             raise RefusedToSign("refused to sign: pair_c is not keccak(0x03, c_taker, c_maker)")
-        if t.get("domain_separator") is not None and str(t["domain_separator"]).lower() != e7.h0x(b.sep):
+        if str(t["domain_separator"]).lower() != e7.h0x(b.sep):
             raise RefusedToSign("refused to sign: the template's domain is not this core's")
         own_nonce, qe = int(t["own_nonce"]), int(t["quote_expiry"])
         now = b.now()
@@ -314,7 +314,7 @@ def check_side(b: Binder, t: dict, leg: dict) -> bytes:
         if qe > now + SIDE_WINDOW:
             raise RefusedToSign(f"refused to sign: the Side quote_expiry is more than {SIDE_WINDOW} s ahead")
         digest = e7.side_digest(b.sep, t)
-        if t.get("digest") and e7.h0x(digest) != str(t["digest"]).lower():
+        if e7.h0x(digest) != str(t["digest"]).lower():
             raise RefusedToSign("refused to sign: the served digest is not this Side")
     except (KeyError, TypeError, ValueError, AttributeError, ArithmeticError):
         raise RefusedToSign("refused to sign: the Side template cannot be read") from None

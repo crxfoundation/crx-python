@@ -306,6 +306,7 @@ class Round:
         self.own_status = "quoted"
         self.edit = {}
         self.leg_edit = {}  # a template built over another leg, every hash consistent
+        self.drop = None  # a template key the gateway leaves out
         self.sig = None
         self.posts = []
         self.post_answers = [{"taker_signed": True, "maker_signed": True, "ready": True}]
@@ -326,6 +327,7 @@ class Round:
              "domain_separator": e7.h0x(self.sep), "signed": False}
         t["digest"] = e7.h0x(e7.side_digest(self.sep, t))
         t.update(self.edit)
+        t.pop(self.drop, None)
         return t
 
     def get_side(self, req):
@@ -469,6 +471,14 @@ def test_confirm_refuses_a_bad_template(maker, round_, sent, edit):
         maker.confirm(sent)
     assert round_.posts == []
     assert not (maker._state_dir / f"side-nonce-{maker.address}").exists()
+
+
+@pytest.mark.parametrize("key", ["digest", "domain_separator"])
+def test_confirm_refuses_a_template_without_its_digest_or_domain(maker, round_, sent, key):
+    round_.drop = key
+    with pytest.raises(crx.RefusedToSign):
+        maker.confirm(sent)
+    assert round_.posts == []
 
 
 @pytest.mark.parametrize("leg_edit", [
