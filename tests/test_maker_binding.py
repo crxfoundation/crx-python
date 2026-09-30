@@ -123,9 +123,19 @@ class Gateway:
                 row["status"] = "dropped"
         return {"dropped": True, "leg_id": leg, "at_ms": self.dropped[leg]}
 
+    def end(self, status):
+        """The RFQ leaves the book's live set: accepted, expired or cancelled. The gateway erases
+        every salt on it, so each quote still ``quoted`` reads ``dropped`` from here on."""
+        self.status, self.live = status, None
+        for row in self.rows:
+            if row["status"] == "quoted":
+                row["status"] = "dropped"
+
     def accept(self, row=None):
+        """The taker accepts this seat's quote ``row`` (default: its newest)."""
         self.accepted = row or self.rows[-1]
-        self.accepted["status"], self.status = "accepted", "accepted"
+        self.accepted["status"] = "accepted"
+        self.end("accepted")
 
     def view(self, req):
         self.views += 1
@@ -365,20 +375,45 @@ def test_confirm_rides_out_a_gateway_that_does_not_answer(maker, gw, sent, sessi
     assert maker.confirm(sent).status == "open"
 
 
-@pytest.mark.parametrize("status, own, reason", [
-    ("accepted", "quoted", "another_maker"),
-    ("opened", "quoted", "another_maker"),
-    ("accepted", "dropped", "dropped"),
-    ("quoted", "dropped", "dropped"),
-    ("expired", "quoted", "expired"),
-    ("quoted", "expired", "expired"),
-    ("cancelled", "quoted", "cancelled"),
+@pytest.mark.parametrize("status, reason", [
+    ("accepted", "another_maker"),   # the taker accepted another maker's quote
+    ("opened", "another_maker"),
+    ("expired", "expired"),
+    ("cancelled", "cancelled"),
 ])
-def test_confirm_a_lost_binding_quote_says_why(maker, gw, sent, session, status, own, reason):
-    gw.status, gw.rows[0]["status"] = status, own
+def test_confirm_a_binding_quote_on_an_ended_rfq_says_why(maker, gw, sent, session, status, reason):
+    # The states the gateway serves: the RFQ ended, so this seat's live quote reads dropped.
+    gw.end(status)
+    assert [r["status"] for r in gw.rows] == ["dropped"]
     with pytest.raises(crx.QuoteLost) as e:
         maker.confirm(sent)
     assert e.value.reason == reason and e.value.details["rfq_id"] == RFQ and side_calls(session) == []
+
+
+@pytest.mark.parametrize("status, own, reason", [
+    ("quoted", "dropped", "dropped"),    # a live RFQ: the seat's drop, or a gateway restart
+    ("quoted", "expired", "expired"),    # the quote's own book life ended
+    ("expired", "expired", "expired"),
+])
+def test_confirm_a_binding_quote_that_ended_on_its_own_says_why(maker, gw, sent, session, status, own, reason):
+    gw.status, gw.rows[0]["status"] = status, own
+    with pytest.raises(crx.QuoteLost) as e:
+        maker.confirm(sent)
+    assert e.value.reason == reason and side_calls(session) == []
+
+
+def test_lost_reads_the_rfq_status_before_the_quotes_own():
+    def view(status, *rows):
+        return {"status": status, "quotes": [{"quote_id": i, "status": s} for i, s in rows]}
+    assert _maker.lost(view("accepted", ("a", "dropped")), "a") == "another_maker"
+    assert _maker.lost(view("accepted", ("a", "dropped"), ("b", "accepted")), "a") == "dropped"
+    assert _maker.lost(view("accepted", ("a", "dropped"), ("b", "accepted")), "b") is None
+    assert _maker.lost(view("accepted"), "a") == "another_maker"
+    assert _maker.lost(view("cancelled", ("a", "dropped")), "a") == "cancelled"
+    assert _maker.lost(view("expired", ("a", "dropped")), "a") == "expired"
+    assert _maker.lost(view("quoted", ("a", "dropped")), "a") == "dropped"
+    assert _maker.lost(view("quoted", ("a", "dropped"), ("b", "quoted")), "a") == "dropped"
+    assert _maker.lost(view("quoted", ("a", "quoted")), "a") is None
 
 
 def test_confirm_no_accept_before_the_wait_is_timeout(maker, gw, sent, session, clock):
@@ -388,13 +423,32 @@ def test_confirm_no_accept_before_the_wait_is_timeout(maker, gw, sent, session, 
     assert e.value.reason == "timeout" and 4 <= clock() - start <= 6 and side_calls(session) == []
 
 
-def test_confirm_the_earlier_quote_on_a_leg_reads_dropped(maker, gw, sent):
+@pytest.mark.parametrize("accepted", [False, True])
+def test_confirm_the_earlier_quote_on_a_leg_reads_dropped(maker, gw, sent, accepted):
+    # Replaced by this seat's later quote: dropped, before and after the taker accepts the later one.
     later = maker.send_quote(rfq_obj(), "18.69")
-    gw.accept()
+    if accepted:
+        gw.accept()
     with pytest.raises(crx.QuoteLost) as e:
         maker.confirm(sent)
     assert e.value.reason == "dropped"
+    gw.accept_at = 1
     assert maker.confirm(later).rate == Decimal("18.69")
+
+
+def test_a_quote_that_may_rest_after_a_network_error_is_dropped_by_its_rfq(maker, gw, session):
+    # The post reached the gateway and its answer was lost: the client still holds the leg.
+    import requests
+
+    def lost_answer(req):
+        gw.post(req)
+        raise requests.ConnectionError("reset")
+    session.routes[("POST", f"/rfqs/{RFQ}/quotes")] = lost_answer
+    with pytest.raises(crx.NetworkError):
+        maker.send_quote(rfq_obj(), "18.7")
+    leg = gw.bodies[0]["leg_id"]
+    assert gw.rows[0]["status"] == "quoted" and maker._legs == {RFQ: leg}
+    assert maker.drop_quote(rfq_obj()).leg_id == leg and gw.rows[0]["status"] == "dropped"
 
 
 # ---------- drop_quote ----------

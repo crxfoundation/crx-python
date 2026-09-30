@@ -771,6 +771,10 @@ class Client:
         ``expires_in`` ends the quote's book life, at the quote expiry at most. Refusals:
         ``LegLive`` (the seat holds another live leg on the RFQ: quote again, or drop it),
         ``LegIdTaken`` (quote again), ``QuoteFillsFull``.
+
+        On a binding quote ``client_quote_id`` is no retry key: the same id again is refused
+        (409 ``nonce_collision``). After a network error the quote may rest:
+        ``drop_quote(rfq)`` ends it.
         """
         self._need_seat()
         return _maker.send(self, rfq, rate, client_quote_id, expires_in)

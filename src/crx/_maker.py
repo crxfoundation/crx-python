@@ -473,19 +473,26 @@ def own_status(view: dict, quote_id: str) -> str:
 
 
 def lost(view: dict, quote_id: str) -> str | None:
-    """Why the quote opened no trade, from the seat's own view of the RFQ; None while it still can."""
+    """Why the quote opened no trade, from the seat's own view of the RFQ; None while it still can.
+
+    The RFQ's status is read before the quote's own. Once an RFQ is accepted, expired or
+    cancelled, every other binding quote on it reads ``dropped``. A maker's view holds its
+    own quotes only: another of them accepted means this one was replaced.
+    """
     own = own_status(view, quote_id)
     if own == "accepted":
         return None
-    if own == "dropped":
-        return "dropped"
     st = str(view.get("status") or "").lower()
     if st == "cancelled":
         return "cancelled"
     if st in AFTER_ACCEPT:
-        return "another_maker"
+        won = any(isinstance(q, dict) and str(q.get("status") or "").lower() == "accepted"
+                  for q in view.get("quotes") or [])
+        return "dropped" if won else "another_maker"
     if st == "expired" or own == "expired":
         return "expired"
+    if own == "dropped":
+        return "dropped"
     return None
 
 
