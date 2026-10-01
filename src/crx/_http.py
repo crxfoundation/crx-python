@@ -72,8 +72,10 @@ class Gateway:
         }
 
     def raw_request(
-        self, method: str, path: str, *, body: Any = None, query: dict | None = None, auth: bool = True
+        self, method: str, path: str, *, body: Any = None, query: dict | None = None, auth: bool = True,
+        timeout: float | None = None,
     ) -> requests.Response:
+        """``timeout`` (s) for this call only; None: the gateway's own."""
         raw = b"" if body is None else json.dumps(body, separators=(",", ":")).encode()
         headers = {"accept": "application/json"}
         if body is not None:
@@ -85,7 +87,8 @@ class Gateway:
         try:
             # No redirects: signed headers go to this host only.
             return self._session.request(
-                method, url, headers=headers, data=raw or None, timeout=self._timeout, allow_redirects=False)
+                method, url, headers=headers, data=raw or None, timeout=timeout or self._timeout,
+                allow_redirects=False)
         except requests.RequestException as e:
             failed = type(e).__name__
         # Raised outside the except block: no context carries the URL.
@@ -93,9 +96,9 @@ class Gateway:
 
     def request(
         self, method: str, path: str, *, body: Any = None, query: dict | None = None, auth: bool = True,
-        ok: tuple[int, ...] = (200,),
+        ok: tuple[int, ...] = (200,), timeout: float | None = None,
     ) -> dict:
-        return self.parse(self.raw_request(method, path, body=body, query=query, auth=auth), ok)
+        return self.parse(self.raw_request(method, path, body=body, query=query, auth=auth, timeout=timeout), ok)
 
     @staticmethod
     def body_of(r: requests.Response) -> Any:

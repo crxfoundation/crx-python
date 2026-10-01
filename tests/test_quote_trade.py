@@ -45,6 +45,8 @@ class Venue:
         self.row_edit = {}
         self.template_edit = {}
         self.winner = True      # the gateway named its pick: GET /rfqs/{id} carries `quote`
+        self.waited = False     # POST /rfqs answers after the window: open fields + taker view + accept_by
+        self.waited_view = None  # callable: the view a waited answer carries; None: view()
         self.draft = None       # one_call: the taker's Side template for the winner
         self.accepted = False
         self.counter = 0        # the gateway's Side nonce counter for this seat
@@ -64,9 +66,14 @@ class Venue:
     def open_rfq(self, req):
         self.rfq_body = req["body"]
         self.qe_ms = int(self.clock() * 1000) + 3_600_000
-        return {"rfq_id": RFQ, "leg_id": LEG, "quote_expiry": self.qe_ms, "im_bps": req["body"]["im_bps"],
-                "side": 1 if req["body"]["side"] == "buy" else -1, "expiry": req["body"]["expiry"],
-                "status": "open", "kind": "open", "join_ref": None}
+        opened = {"rfq_id": RFQ, "leg_id": LEG, "quote_expiry": self.qe_ms, "im_bps": req["body"]["im_bps"],
+                  "side": 1 if req["body"]["side"] == "buy" else -1, "expiry": req["body"]["expiry"],
+                  "status": "open", "kind": "open", "join_ref": None}
+        if not self.waited:
+            return opened
+        v = self.view(req) if self.waited_view is None else self.waited_view()
+        q = v.get("quote")
+        return {**opened, **v, "accept_by": q["expires_at"] if isinstance(q, dict) else None}
 
     def row(self):
         b = self.rfq_body
@@ -642,6 +649,72 @@ def test_closed_market_no_maker_is_no_quotes(make_client, venue, session, market
     c = make_client(clock=clock)
     with pytest.raises(crx.NoQuotes):
         c.quote("USD/MXN", "buy", 25_000, wait=3)
+
+
+def rfq_posts(session):
+    return [x for x in session.calls if x["method"] == "POST" and x["path"] == "/rfqs"]
+
+
+def test_quote_sends_wait_with_a_30_s_timeout(make_client, venue, session, clock):
+    make_client(clock=clock).quote("USD/MXN", "buy", 25_000)
+    [post] = rfq_posts(session)
+    assert post["body"]["wait"] is True and post["timeout"] == 30
+    assert {x["timeout"] for x in session.calls if x is not post} == {10}
+
+
+def test_quote_timeout_is_never_below_the_client_timeout(make_client, venue, session, clock):
+    make_client(clock=clock, timeout=45).quote("USD/MXN", "buy", 25_000)
+    assert rfq_posts(session)[0]["timeout"] == 45
+
+
+def test_waited_answer_carries_the_winner(make_client, venue, session, clock):
+    venue.waited = True
+    session.routes[("GET", f"/rfqs/{RFQ}")] = venue.view
+    c = make_client(clock=clock)
+    q = c.quote("USD/MXN", "buy", 25_000)
+    assert (q.rfq_id, q.quote_id, q.rate) == (RFQ, QID, Decimal("18.700000"))
+    assert trade_polls(session) == []  # the answer named the winner: no poll
+    assert (q.rfq["leg_id"], q.rfq["quote_expiry"]) == (LEG, venue.qe_ms)
+    t = c.trade(q)
+    assert (t.status, t.tx) == ("open", TXH) and sent_nothing(session)
+
+
+@one_call_only
+def test_waited_answer_template_is_signed_in_one_call(make_client, venue, session, clock, account):
+    venue.waited = True
+    session.routes[("GET", f"/rfqs/{RFQ}")] = venue.view
+    c = make_client(clock=clock)
+    q = c.quote("USD/MXN", "buy", 25_000)
+    assert q.raw["side_template"] == venue.draft
+    c.trade(q)
+    [body] = accepts(session)
+    assert set(body) == {"quote_id", "sig"} and f"/rfqs/{RFQ}/side" not in session.paths("POST")
+    assert Account._recover_hash(e7.hx(venue.draft["digest"]), signature=body["sig"]) == account.address
+
+
+@pytest.mark.parametrize("expired", [False, True])
+def test_waited_answer_without_a_quote_is_no_quotes(make_client, venue, session, clock, expired):
+    venue.waited = True
+    venue.waited_view = lambda: {"quote": None, "quotes": [dict(venue.row(), expires_at=1)] if expired else []}
+    c = make_client(clock=clock)
+    start = clock()
+    with pytest.raises(crx.NoQuotes) as ei:
+        c.quote("USD/MXN", "buy", 25_000)
+    assert ei.value.details == {"rfq_id": RFQ} and trade_polls(session) == [] and clock() == start
+
+
+def test_waited_answer_without_a_pick_takes_the_best_live_quote(make_client, venue, session, clock):
+    # The gateway's wait cap answered before it named a winner.
+    venue.waited = True
+    venue.waited_view = lambda: {"quote": None, "quotes": [venue.row()]}
+    q = make_client(clock=clock).quote("USD/MXN", "buy", 25_000)
+    assert q.quote_id == QID and trade_polls(session) == []
+
+
+def test_old_gateway_answer_polls(make_client, venue, session, clock):
+    # An open answer without `quotes`: an older gateway answered at once.
+    q = make_client(clock=clock).quote("USD/MXN", "buy", 25_000)
+    assert q.quote_id == QID and len(trade_polls(session)) == 2
 
 
 def test_paused_pair(make_client, session):

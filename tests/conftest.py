@@ -66,7 +66,7 @@ class FakeSession:
         assert url.startswith(BASE), "gateway call went to an unexpected host"
         req = {
             "method": method, "path": u.path, "query": parse_qs(u.query), "headers": headers or {},
-            "raw": data or b"", "body": json.loads(data) if data else None,
+            "raw": data or b"", "body": json.loads(data) if data else None, "timeout": timeout,
         }
         self.calls.append(req)
         key = (method, u.path)
