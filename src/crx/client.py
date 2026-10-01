@@ -36,7 +36,7 @@ log = logging.getLogger("crx")
 NETWORKS = {
     "testnet": {
         "chain": "avax-fuji",
-        "base_url": "https://api.crxfx.com",
+        "base_url": "https://api.sandbox.crxfx.com",
         "rpc_url": "https://api.avax-test.network/ext/bc/C/rpc",
         "settle_wait": 30.0,
     },
