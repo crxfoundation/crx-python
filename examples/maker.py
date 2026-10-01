@@ -83,9 +83,9 @@ def near_mid(rfq):
         time.sleep(0.5)
     raise crx.NoQuotes("no house quote to price from")
 
-# 5. Quote your test taker's RFQ. Signs your quote. Quote fast: a
-#    few seconds after the RFQ opens, the gateway ranks the quotes
-#    and the taker gets the best one.
+# 5. Quote your test taker's RFQ. Signs your quote. Quote fast:
+#    the gateway takes quotes for the first 10 s of an RFQ, then
+#    ranks them, and the taker gets the best one.
 for rfq in rfqs:
     if not asked_by_taker(rfq):
         continue

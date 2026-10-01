@@ -97,7 +97,7 @@ Other desks ask on Testnet too, so the script quotes its own test taker's RFQ on
 |---|---|
 | `rfqs()` | Streams the open RFQs you can quote. A seat with no collateral receives none. |
 | `rfq(rfq_id)` | One RFQ as your seat reads it. Its taker also reads every desk's quote: `house_rate` is the house desk's. |
-| `send_quote(rfq, rate)` | Signs and posts a firm quote. The taker gets the best quote only. Any maker quote outranks the house quote. |
+| `send_quote(rfq, rate)` | Signs and posts a firm quote. The gateway takes quotes for the first 10 s of an RFQ only. The taker gets the best quote only. Any maker quote outranks the house quote. |
 | `confirm(quote)` | Waits for the accept; signs your Side, unless the quote is binding. CRX sends the tx and pays gas. `status`: `open`, `sending`, `pending` or `refused`. |
 | `drop_quote(quote)` | Ends your binding quote at once. |
 
@@ -137,6 +137,7 @@ Every error is a `crx.CrxError`. Branch on `.code`.
 | `leg_live` | Your seat holds another live binding quote on the RFQ. Quote again, or `drop_quote(rfq, leg_id=err.leg_id)`. |
 | `leg_id_taken` | The quote's leg id is used. Quote again. |
 | `quote_fills_full` | The gateway takes no more of your quotes for now. |
+| `quote_window_closed` | The quote came after the RFQ's first 10 s. The RFQ takes no more quotes. Quote the next one. |
 | `already_accepted` | The taker accepted before your drop. The trade stands: `confirm` it. |
 | `unknown_or_ended` | Nothing to drop: the RFQ ended. |
 | `quote_expired` | Round ended, or the maker refused. Quote again. |
