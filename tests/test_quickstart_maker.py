@@ -147,7 +147,7 @@ def test_the_contract_names_hold():
     for line in ('maker = crx.Client(network="testnet")',
                  'taker = crx.Client(os.environ["CRX_TAKER_PK"], network="testnet")',
                  "maker.deposit(20_000)", "taker.deposit(20_000)", 'RATE = "18.12"',
-                 'ask = taker.ask("USD/MXN", "buy", 25_000)', "for rfq in maker.rfqs(only=ask, wait=60):",
+                 'ask = taker.ask("USD/MXN", "buy", 25_000)', "rfq = next(maker.rfqs(only=ask, wait=10))",
                  "q = maker.send_quote(rfq, RATE)", "won = ask.quote()", "t = taker.trade(won)",
                  "t = maker.confirm(q, timeout=60)", "maker.drop_quote(q)"):
         assert line in src
@@ -184,7 +184,7 @@ def test_the_taker_asks_the_maker_quotes_the_taker_accepts(capsys, fake, keys):
     assert FakeClient.order == ["deposit", "deposit", "balance", "balance", "ask", "rfqs", "send_quote",
                                 "ask.quote", "trade", "confirm"]
     assert t.calls[2:] == [("ask", "USD/MXN", "buy", 25_000, {}), ("ask.quote",), ("trade", OURS)]
-    assert m.calls[2:] == [("rfqs", {"only": t.asked, "wait": 60}), ("send_quote", OURS, "18.12"),
+    assert m.calls[2:] == [("rfqs", {"only": t.asked, "wait": 10}), ("send_quote", OURS, "18.12"),
                            ("confirm", OURS, {"timeout": 60})]
     lines = capsys.readouterr().out.splitlines()
     assert all(STAMP.match(line) for line in lines)
@@ -241,8 +241,7 @@ def test_an_rfq_that_never_reaches_the_maker_exits_1(capsys, fake, keys, monkeyp
     monkeypatch.setattr(FakeClient, "rfqs", lambda self, **k: _maker._only(iter([]), k["only"].rfq_id, None))
     assert qs.main([]) == 1
     out, err = capsys.readouterr()
-    assert err.strip() == ("no_quotes: the RFQ did not reach this account before the wait ended: "
-                           "check its maker role and collateral")
+    assert err.strip() == "no_quotes: the RFQ did not show in this account's open RFQs before the wait ended"
     assert "Traceback" not in out + err and FakeClient.order[-1] == "ask"
 
 

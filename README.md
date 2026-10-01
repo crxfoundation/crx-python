@@ -95,7 +95,7 @@ Runs the maker Quickstart on Testnet with two accounts: your test taker asks, yo
 
 The trade reads `open`, or `pending`: accepted, the tx landed, and it opens at the next hourly check. The script exits 0 on both.
 
-Other desks ask on Testnet too, so the script quotes its own test taker's RFQ only: `rfqs(only=ask)`.
+Other desks ask on Testnet too, so the script quotes its own test taker's RFQ only: `rfqs(only=ask, wait=10)`.
 
 | Call | Does |
 |---|---|

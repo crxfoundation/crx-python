@@ -202,8 +202,21 @@ def test_rfqs_only_raises_no_quotes_when_the_rfq_never_arrives(maker, session, c
     start = clock()
     with pytest.raises(crx.NoQuotes) as ei:
         list(maker.rfqs(only=ASK, wait=3))
-    assert ei.value.details == {"rfq_id": RFQ} and "check its maker role and collateral" in str(ei.value)
+    assert ei.value.details == {"rfq_id": RFQ}
+    assert str(ei.value) == "the RFQ did not show in this account's open RFQs before the wait ended"
     assert clock() - start == 3
+
+
+def test_next_on_rfqs_only_raises_no_quotes_when_the_rfq_never_arrives(maker, session, clock):
+    session.routes[("GET", "/trades")] = tape([opened(frame(rfq_id=OTHER), 1)], 1)
+    with pytest.raises(crx.NoQuotes) as ei:
+        next(maker.rfqs(only=ASK, wait=3))
+    assert ei.value.details == {"rfq_id": RFQ}
+
+
+def test_next_on_rfqs_only_returns_that_rfq(maker, session):
+    session.routes[("GET", "/trades")] = tape([opened(frame(rfq_id=OTHER), 1), opened(frame(), 2)], 2)
+    assert next(maker.rfqs(only=ASK, wait=10)).rfq_id == RFQ
 
 
 def test_rfqs_only_ends_without_error_once_stop_is_set(maker, session):

@@ -1,6 +1,7 @@
 """quote() and trade() against a scripted gateway and chain."""
 
 import os
+import re
 import time
 from decimal import Decimal
 
@@ -766,6 +767,23 @@ def test_ask_sends_wait_false_and_returns_at_once(make_client, venue, session, c
     assert a.raw["leg_id"] == LEG and "Client" not in repr(a)
     with pytest.raises(AttributeError):
         a.rfq_id = QID
+
+
+def test_ask_sends_its_own_client_rfq_id_by_default(make_client, venue, session, clock):
+    make_client(clock=clock).ask("USD/MXN", "buy", 25_000)
+    [post] = rfq_posts(session)
+    assert re.fullmatch(r"sdk-[0-9a-f]{12}", post["body"]["client_rfq_id"])
+
+
+def test_ask_notional_is_the_notional_sent(make_client, venue, session, clock):
+    a = make_client(clock=clock).ask("USD/MXN", "buy", "25000.00")
+    [post] = rfq_posts(session)
+    assert post["body"]["notional"] == "25000" and str(a.notional) == "25000"
+
+
+def test_ask_is_public():
+    import crx.models
+    assert "Ask" in crx.__all__ and crx.Ask is crx.models.Ask
 
 
 def test_ask_quote_is_the_winner_and_trades(make_client, venue, session, clock):

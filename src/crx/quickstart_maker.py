@@ -56,10 +56,10 @@ def steps():
 
     # 5. Quote your test taker's RFQ. Your key signs a binding quote.
     #    Quote within 10 s.
-    for rfq in maker.rfqs(only=ask, wait=60):
-        log(rfq.pair, rfq.side, rfq.notional)  # 22:32:21 USD/MXN sell 25000
-        q = maker.send_quote(rfq, RATE)  # POST /rfqs/{rfq_id}/quotes
-        log("maker: quoted", q.rate)  # 22:32:22 maker: quoted 18.12
+    rfq = next(maker.rfqs(only=ask, wait=10))
+    log(rfq.pair, rfq.side, rfq.notional)  # 22:32:21 USD/MXN sell 25000
+    q = maker.send_quote(rfq, RATE)  # POST /rfqs/{rfq_id}/quotes
+    log("maker: quoted", q.rate)  # 22:32:22 maker: quoted 18.12
 
     # 6. Your test taker gets the winning quote: any maker quote
     #    outranks the house quote. It accepts a maker's only.
@@ -70,7 +70,7 @@ def steps():
         t = taker.trade(won)  # POST /rfqs/{rfq_id}/accept
         log("taker:", t.status)  # 22:33:02 taker: pending
 
-    # 7. Wait for the accept. Your quote is your signature:
+    # 7. Read the accept. Your quote is your signature:
     #    you sign nothing more. CRX sends the tx and pays gas.
     #    No accept in 60 s: cancel your quote.
     try:

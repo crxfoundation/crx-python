@@ -163,8 +163,8 @@ def _only(rfqs: Iterator[Rfq], rfq_id: str, stop: Any) -> Iterator[Rfq]:
             yield r
             return
     if stop is None or not stop.is_set():
-        raise NoQuotes("the RFQ did not reach this account before the wait ended: "
-                       "check its maker role and collateral", details={"rfq_id": rfq_id})
+        raise NoQuotes("the RFQ did not show in this account's open RFQs before the wait ended",
+                       details={"rfq_id": rfq_id})
 
 
 def _follow(
