@@ -211,9 +211,9 @@ def e6(value: Any, bits: int = 128) -> int:
     Takes a decimal string, an int or a finite Decimal. Refuses a float, a sign, more
     than 6 decimals, and a result at or above ``2**bits``.
     """
-    if isinstance(value, (bool, float)):
+    if isinstance(value, float):
         raise ValueError("an amount is a decimal string, not a float")
-    if isinstance(value, int):
+    if isinstance(value, int) and not isinstance(value, bool):
         value = str(value)
     elif isinstance(value, Decimal):
         if not value.is_finite():
