@@ -174,7 +174,7 @@ def test_e6_refuses(value, bits, why):
 
 
 def test_scaled6_rounds_where_e6_is_exact():
-    # The old helper rounds past 28 digits; the Trade path uses e6.
+    # scaled6 rounds past 28 digits; the Trade path uses e6.
     big = "340282366920938463463374607431768.211455"
     assert e7.e6(big) == 2**128 - 1 != int(__import__("decimal").Decimal(big).scaleb(6))
 

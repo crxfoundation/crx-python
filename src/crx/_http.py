@@ -124,7 +124,7 @@ class Gateway:
             return tok
 
     def drop_token(self, token: str) -> None:
-        """Forget ``token``: the next call mints a new one."""
+        """Forget ``token``: the next call mints another."""
         with self._lock:
             if self._token == token:
                 self._token = None
@@ -153,7 +153,7 @@ class Gateway:
     ) -> requests.Response:
         """``timeout`` (s) for this call only; None: the gateway's own.
 
-        In custodian mode a call that takes a session token sends it. A 401 on a token mints a new
+        In custodian mode a call that takes a session token sends it. A 401 on a token mints another
         one and sends the call once more: the gateway refused it before it read the call.
         """
         raw = b"" if body is None else json.dumps(body, separators=(",", ":")).encode()

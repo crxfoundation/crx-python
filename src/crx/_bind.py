@@ -253,7 +253,7 @@ class Binder:
             if (kind == "trade" or t.get("digest")) and e7.h0x(digest) != str(t["digest"]).lower():
                 raise RefusedToSign(f"refused to sign: the served digest is not this {kind.capitalize()}")
         except (KeyError, TypeError, ValueError, AttributeError, ArithmeticError, EncodingError):
-            raise RefusedToSign("refused to sign: the Side template cannot be read") from None
+            raise RefusedToSign("refused to sign: the template cannot be read") from None
         self.keep_signed(own_nonce)
         return digest, td
 

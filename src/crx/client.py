@@ -687,7 +687,7 @@ class Client:
             try:
                 opened = min(int(side["own_nonce"]) / 1000, answered)
             except (KeyError, TypeError, ValueError):
-                raise RefusedToSign("refused to sign: the Side template cannot be read") from None
+                raise RefusedToSign("refused to sign: the template cannot be read") from None
             maker_by = min((exp if isinstance(exp, int) else 10**13) / 1000, opened + 120) + 5 if lapse else None
             b.bind(rfq_id, arm, side, maker_by, log.info, rfq["pair"])
         status, view = self._settle(lambda: self._gw.request("GET", f"/rfqs/{rfq_id}"), "trade_status")

@@ -353,7 +353,7 @@ def test_accept_without_side_template_sends_nothing(make_client, venue, session,
     session.routes[("POST", f"/rfqs/{RFQ}/accept")] = (
         lambda req: {"status": "accepted"} if "leg" in req["body"] else venue.accept(req))
     c = make_client(clock=clock)
-    with pytest.raises(crx.RefusedToSign, match="Side template"):
+    with pytest.raises(crx.RefusedToSign, match="template cannot be read"):
         c.trade(c.quote("USD/MXN", "buy", 25_000))
     assert f"/rfqs/{RFQ}/side" not in session.paths("POST")
     assert sent_nothing(session)
@@ -1039,7 +1039,7 @@ def test_next_check_is_the_next_05_past_the_hour_on_testnet(make_client, session
     assert session.calls == []
 
 
-# ---------- digest_kind: trade (a readable Trade), side (today's Side), anything else refused ----------
+# ---------- digest_kind: trade (a readable Trade), side (a Side), anything else refused ----------
 
 
 def no_template_sig(session):
@@ -1049,7 +1049,7 @@ def no_template_sig(session):
 
 
 def template_sig(venue, session):
-    """The template signature the venue took: on the accept (one call) or POST /side (legacy)."""
+    """The template signature the venue took: on the accept (one call), or on POST /side after a leg-body accept."""
     return venue.side_sig
 
 
@@ -1069,7 +1069,7 @@ def test_trade_kind_signs_the_readable_trade(make_client, venue, session, clock,
 
 
 @pytest.mark.parametrize("typed", [False, True])  # True: a side template that also serves its typed_data
-def test_side_kind_is_todays_path(make_client, venue, session, clock, account, typed):
+def test_side_kind_signs_the_side(make_client, venue, session, clock, account, typed):
     venue.typed = typed
     c = make_client(clock=clock)
     assert c.trade(c.quote("USD/MXN", "buy", 25_000)).status == "open"
@@ -1168,7 +1168,7 @@ def test_trade_template_without_typed_data_refused(make_client, venue, session, 
 
 @pytest.mark.parametrize("digest", ["side", "random"])
 def test_trade_served_digest_must_be_the_trade(make_client, venue, session, clock, digest):
-    # side: the old client's digest of the same six words; random: any other.
+    # side: the Side digest of the same six words; random: any other.
     venue.kind = "trade"
     if digest == "random":
         venue.served_digest = rnd()
