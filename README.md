@@ -107,6 +107,24 @@ Other desks ask on Testnet too, so the script quotes its own test taker's RFQ on
 
 `rfq.sign_mode` names what you sign. `side`: a Leg at the quote, a Side after the accept. `quote`: a binding quote, and nothing after the accept. A binding quote is your trade signature until its `quote_expiry`, or until you drop it. A later quote on the same RFQ replaces the earlier one.
 
+## Custodian signer
+
+Pass `signer=` in place of a key. A signer has:
+
+| Member | Does |
+|---|---|
+| `address` | The seat wallet. |
+| `sign_typed_data(obj)` | Signs the EIP-712 object the SDK built (`eth_signTypedData_v4`). |
+| `sign_message(data)` | EIP-191 signature of `data` bytes. The gateway login uses it. |
+
+A signer that signs only a hash (KMS, raw MPC) has `sign_hash(digest)` in place of `sign_typed_data`. The SDK rebuilds the digest from its own typed data, compares it, then asks for the signature.
+
+The custodian must allow EIP-191 text signing. The client logs in by `POST /session`: one signature per 8 h, and again after a gateway restart or revoke. `deposit()`, `send_quote()` and `confirm()` need a local key.
+
+```python
+c = crx.Client(signer=my_custodian, network="testnet")
+```
+
 ## Read another wallet (viewer)
 
 The owner grants read access. The viewer reads with its own key and `account=`.
@@ -164,6 +182,8 @@ Every error is a `crx.CrxError`. Branch on `.code`.
 ## Safety
 
 - The SDK rebuilds every digest and transaction before it signs. A mismatch raises `refused_to_sign`.
+- A trade carries a readable `summary` line. The SDK builds its own typed data from your request and the quote, compares it with the gateway's member by member, and signs its own.
+- Every signature leaves with low `s` and `v` 27 or 28. One that does not recover to the seat raises `refused_to_sign`.
 - Testnet by default. `network="mainnet"` (Ethereum, chain 1) is off until you pass `allow_mainnet=True` or set `CRX_ALLOW_MAINNET=1`. It has no default URLs.
 - Keep DEBUG logging off in production: urllib3 then logs request paths, and an RPC key can sit in the path.
 - A Side nonce floor lives in `~/.crx-quickstart/`, shared with the quickstart scripts. `CRX_STATE_DIR` moves it.
