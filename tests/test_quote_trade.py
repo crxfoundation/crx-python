@@ -1,5 +1,6 @@
 """quote() and trade() against a scripted gateway and chain."""
 
+import copy
 import os
 import re
 import time
@@ -8,6 +9,7 @@ from decimal import Decimal
 import pytest
 from eth_abi import encode
 from eth_account import Account
+from eth_account.messages import encode_typed_data
 from eth_utils import keccak
 
 import crx
@@ -56,6 +58,9 @@ class Venue:
         self.on_stale = None    # called before each fresh draft that `stale` forces
         self.stale_quote_id = None  # the quote_id a side_stale answer names; None: the one posted; "": none
         self.served_digest = None   # the digest the template names; None: the Side's own
+        self.kind = "side"          # the template's digest_kind; None: no such member
+        self.typed = None           # serve typed_data: None = on a trade template only
+        self.typed_edit = None      # callable(typed_data): changes the served typed_data
         # (trade_status, trade_tx) served one per poll once the Side is in; the last repeats.
         self.script = [("sending", None), ("open", TXH)]
         session.routes[("GET", "/markets")] = open_market(markets, pair)
@@ -108,7 +113,25 @@ class Venue:
              "pair_c": e7.h0x(e7.pair_commitment(c_taker, c_maker)), "wraps_hash": WRAPS_HASH,
              "domain_separator": e7.h0x(self.sep)}
         t.update(self.template_edit)
-        t["digest"] = self.served_digest or e7.h0x(e7.side_digest(self.sep, t))
+        if self.kind == "trade":
+            b = self.rfq_body
+            msg = e7.trade_message(
+                b["pair"][:3] + "/" + b["pair"][3:], int(arm["side"]), e7.e6(arm["notional"]), e7.e6(arm["rate"], 64),
+                int(arm["premium_bps"]), int(arm["im_bps"]), int(arm["expiry"]) // 1000, t["pair_c"], t["own_leg_id"],
+                t["quote_expiry"], t["own_nonce"], t["own_salt"], t["wraps_hash"])
+            td, digest = e7.typed_data("Trade", CHAIN_ID, self.chain["core"], msg), e7.trade_digest(self.sep, msg)
+        else:
+            td = e7.typed_data("Side", CHAIN_ID, self.chain["core"], e7.side_message(t))
+            digest = e7.side_digest(self.sep, t)
+        if self.typed if self.typed is not None else self.kind == "trade":
+            t["typed_data"] = copy.deepcopy(td)
+            if self.typed_edit:
+                self.typed_edit(t["typed_data"])
+        if self.kind is None:
+            del t["digest_kind"]
+        else:
+            t["digest_kind"] = self.kind
+        t["digest"] = self.served_digest or e7.h0x(digest)
         return t
 
     def view(self, req):
@@ -415,6 +438,10 @@ def test_own_round_open(make_client, venue, session, clock):
 
 
 def recovers(venue, t, sig):
+    """The signer of ``sig`` over the template's own struct: a Side, or the Trade its typed_data names."""
+    if t.get("digest_kind") == "trade":
+        m = encode_typed_data(full_message=t["typed_data"])
+        return Account._recover_hash(keccak(b"\x19" + m.version + m.header + m.body), signature=sig)
     return Account._recover_hash(e7.side_digest(venue.sep, t), signature=sig)
 
 
@@ -1008,3 +1035,180 @@ def test_next_check_is_the_next_05_past_the_hour_on_testnet(make_client, session
     got = make_client(key=False, clock=Clock(t)).next_check()
     assert got == datetime.fromisoformat(at).replace(tzinfo=timezone.utc) and got.tzinfo is not None
     assert session.calls == []
+
+
+# ---------- digest_kind: trade (a readable Trade), side (today's Side), anything else refused ----------
+
+
+def no_template_sig(session):
+    """No template signature posted: no accept with a sig and no leg, no POST /side."""
+    return (not any("sig" in b and "leg" not in b for b in accepts(session))
+            and f"/rfqs/{RFQ}/side" not in session.paths("POST"))
+
+
+def template_sig(venue, session):
+    """The template signature the venue took: on the accept (one call) or POST /side (legacy)."""
+    return venue.side_sig
+
+
+def test_trade_kind_signs_the_readable_trade(make_client, venue, session, clock, account):
+    venue.kind = "trade"
+    c = make_client(clock=clock)
+    q = c.quote("USD/MXN", "buy", 25_000)
+    assert c.trade(q).status == "open"
+    t = venue.template
+    msg = t["typed_data"]["message"]
+    assert msg["summary"].startswith("buy 25 000 USD vs MXN at 18.7 MXN per USD, matures ")
+    assert msg["summary"].endswith(", upfront none, counterparty exit within 1.00 % of market")
+    assert t["digest"] == e7.h0x(e7.trade_digest(venue.sep, msg)) != e7.h0x(e7.side_digest(venue.sep, t))
+    sig = template_sig(venue, session)
+    assert recovers(venue, t, sig) == account.address
+    assert int(sig[66:130], 16) <= e7.SECP256K1_N // 2 and sig[-2:] in ("1b", "1c")
+
+
+@pytest.mark.parametrize("typed", [False, True])  # True: a side template that also serves its typed_data
+def test_side_kind_is_todays_path(make_client, venue, session, clock, account, typed):
+    venue.typed = typed
+    c = make_client(clock=clock)
+    assert c.trade(c.quote("USD/MXN", "buy", 25_000)).status == "open"
+    assert ("typed_data" in venue.template) is typed
+    assert Account._recover_hash(e7.side_digest(venue.sep, venue.template), signature=venue.side_sig) == account.address
+
+
+@pytest.mark.parametrize("kind", ["other", "Trade", "", None])  # None: no digest_kind member
+def test_unknown_kind_refused(make_client, venue, session, clock, kind):
+    venue.kind = kind
+    c = make_client(clock=clock)
+    with pytest.raises(crx.RefusedToSign, match="unknown digest_kind"):
+        c.trade(c.quote("USD/MXN", "buy", 25_000))
+    assert no_template_sig(session)
+
+
+def put(path, value):
+    """An edit of the served typed_data at ``path`` (``message.rateE6``, ``primaryType``...)."""
+    def edit(td):
+        *head, last = path.split(".")
+        node = td
+        for k in head:
+            node = node[k]
+        node[last] = value(node[last]) if callable(value) else value
+    return edit
+
+
+SERVED_EDITS = [
+    ("message.summary", lambda s: s.replace("25 000", "250 000")),
+    ("message.summary", lambda s: s.replace("25 000", "25,000")),
+    ("message.pair", "USD/BRL"),
+    ("message.side", "sell"),
+    ("message.notionalE6", "250000000000"),
+    ("message.rateE6", "18700001"),
+    ("message.premiumBps", "1"),
+    ("message.exitBandBps", "300"),
+    ("message.maturity", lambda m: str(int(m) + 1)),
+    ("message.pairC", "0x" + "ab" * 32),
+    ("message.ownLegId", "0x" + "ab" * 32),
+    ("message.quoteExpiry", lambda q: str(int(q) + 1)),
+    ("message.ownNonce", lambda n: str(int(n) + 1)),
+    ("message.ownSalt", "0x" + "ab" * 32),
+    ("message.wrapsHash", "0x" + "ab" * 32),
+    ("domain.chainId", 43114),
+    ("domain.verifyingContract", "0x" + "ab" * 20),
+    ("domain.name", "CRX2"),
+    ("domain.version", "rulebook-1.1"),
+    ("primaryType", "Side"),
+    ("types", lambda t: {**t, "Trade": t["Trade"][1:]}),
+    ("types", lambda t: {"Trade": t["Trade"]}),
+]
+
+
+@pytest.mark.parametrize("path,value", SERVED_EDITS, ids=[f"{p}-{i}" for i, (p, _) in enumerate(SERVED_EDITS)])
+def test_served_typed_data_must_equal_own(make_client, venue, session, clock, path, value):
+    venue.kind, venue.typed_edit = "trade", put(path, value)
+    c = make_client(clock=clock)
+    with pytest.raises(crx.RefusedToSign, match=f"differs at {re.escape(path)}$"):
+        c.trade(c.quote("USD/MXN", "buy", 25_000))
+    assert no_template_sig(session)
+
+
+@pytest.mark.parametrize("bad", ["extra_member", "missing_member", "unparsable"])
+def test_served_message_shape_refused(make_client, venue, session, clock, bad):
+    venue.kind = "trade"
+    venue.typed_edit = {
+        "extra_member": lambda td: td["message"].update(note="x"),
+        "missing_member": lambda td: td["message"].pop("summary"),
+        "unparsable": put("message.notionalE6", "25e9"),
+    }[bad]
+    c = make_client(clock=clock)
+    with pytest.raises(crx.RefusedToSign, match="differs at message"):
+        c.trade(c.quote("USD/MXN", "buy", 25_000))
+    assert no_template_sig(session)
+
+
+def test_served_values_compare_parsed(make_client, venue, session, clock, account):
+    # The same values in another spelling: upper-case hex, integers as JSON numbers.
+    def respell(td):
+        m = td["message"]
+        m["pairC"] = "0x" + m["pairC"][2:].upper()
+        m["notionalE6"], td["domain"]["verifyingContract"] = int(m["notionalE6"]), td["domain"]["verifyingContract"].upper().replace("0X", "0x")
+    venue.kind, venue.typed_edit = "trade", respell
+    c = make_client(clock=clock)
+    assert c.trade(c.quote("USD/MXN", "buy", 25_000)).status == "open"
+    assert recovers(venue, venue.template, venue.side_sig) == account.address
+
+
+def test_trade_template_without_typed_data_refused(make_client, venue, session, clock):
+    venue.kind, venue.typed = "trade", False
+    c = make_client(clock=clock)
+    with pytest.raises(crx.RefusedToSign, match="carries no typed_data"):
+        c.trade(c.quote("USD/MXN", "buy", 25_000))
+    assert no_template_sig(session)
+
+
+@pytest.mark.parametrize("digest", ["side", "random"])
+def test_trade_served_digest_must_be_the_trade(make_client, venue, session, clock, digest):
+    # side: the old client's digest of the same six words; random: any other.
+    venue.kind = "trade"
+    if digest == "random":
+        venue.served_digest = rnd()
+    else:
+        make = venue.make_template
+        venue.make_template = lambda arm: (lambda t: dict(t, digest=e7.h0x(e7.side_digest(venue.sep, t))))(make(arm))
+    c = make_client(clock=clock)
+    with pytest.raises(crx.RefusedToSign, match="served digest is not this Trade"):
+        c.trade(c.quote("USD/MXN", "buy", 25_000))
+    assert no_template_sig(session)
+
+
+def own_check(tmp_path, account, health, clock, **edit):
+    """Binder.check_side on one consistent trade template, with the taker's terms in ``edit`` changed.
+    The gateway words (c_taker, pair_c) are rebuilt over the changed terms, so only the Trade checks remain."""
+    from crx._bind import Binder
+    chain = next(c for c in health["chains"] if c["key"] == "avax-fuji")
+    sep = e7.domain_separator(CHAIN_ID, chain["core"])
+    pair = edit.pop("pair", "USD/MXN")
+    arm = {"seat": account.address.lower(), "leg_id": LEG, "join_ref": JOIN, "pair_id": e7.h0x(e7.pair_id("USD/MXN")),
+           "instrument_id": 1, "side": 1, "notional": "25000.000000", "rate": "18.700000", "im_bps": 100,
+           "premium_bps": 0, "expiry": int(clock() * 1000) + 30 * 86_400_000}
+    arm.update(edit)
+    nonce, qe, salt = int(clock() * 1000), int(clock()) + 300, rnd()
+    c_taker, c_maker = e7.half_commitment(e7.arm_words(arm, nonce, qe), salt), keccak(os.urandom(32))
+    t = {"digest_kind": "trade", "own_leg_id": LEG, "own_nonce": str(nonce), "quote_expiry": qe, "own_salt": salt,
+         "c_taker": e7.h0x(c_taker), "c_maker": e7.h0x(c_maker), "pair_c": e7.h0x(e7.pair_commitment(c_taker, c_maker)),
+         "wraps_hash": WRAPS_HASH, "typed_data": {}, "digest": "0x" + "00" * 32}
+    b = Binder(None, account, dict(chain, chain_id=CHAIN_ID), sep, tmp_path, clock=clock)
+    return b.check_side(t, arm, pair)
+
+
+@pytest.mark.parametrize("edit,why", [
+    ({}, "differs at typed_data"),  # the positive control: every term passes, the empty served object differs
+    ({"pair": "usd/mxn"}, "pair is not AAA/BBB"),
+    ({"pair": "USD/BRL"}, "does not hash to the quote's pair_id"),
+    ({"side": 2}, "side is not buy or sell"),
+    ({"side": -128}, "side is not buy or sell"),
+    ({"notional": "340282366920938463463374607431768.211456"}, "notional is not a 6-decimal amount below 2\\^128"),
+    ({"expiry": 253402300800_000}, "maturity is out of range"),
+])
+def test_own_trade_refusals(tmp_path, account, health, clock, edit, why):
+    with pytest.raises(crx.RefusedToSign, match=why):
+        own_check(tmp_path, account, health, clock, **edit)
+    assert not (tmp_path / f"side-nonce-{account.address.lower()}").exists()  # no nonce kept, nothing signed

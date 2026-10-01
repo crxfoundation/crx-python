@@ -19,6 +19,8 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Callable
 
+from eth_abi.exceptions import EncodingError
+
 from . import _eip712 as e7
 from ._http import Gateway
 from .signer import as_signer, sign_typed
@@ -153,7 +155,7 @@ class Binder:
         try:
             digest = e7.leg_digest(self.sep, a)
             td = self.typed("Leg", e7.leg_message(a))
-        except (KeyError, TypeError, ValueError, ArithmeticError):
+        except (KeyError, TypeError, ValueError, ArithmeticError, EncodingError):
             raise RefusedToSign("refused to sign: the quote's leg cannot be encoded") from None
         return sign_typed(self.signer, td, digest, self.seat)
 
@@ -250,7 +252,7 @@ class Binder:
                     raise RefusedToSign(f"refused to sign: the served typed_data differs at {diff}")
             if (kind == "trade" or t.get("digest")) and e7.h0x(digest) != str(t["digest"]).lower():
                 raise RefusedToSign(f"refused to sign: the served digest is not this {kind.capitalize()}")
-        except (KeyError, TypeError, ValueError, AttributeError, ArithmeticError):
+        except (KeyError, TypeError, ValueError, AttributeError, ArithmeticError, EncodingError):
             raise RefusedToSign("refused to sign: the Side template cannot be read") from None
         self.keep_signed(own_nonce)
         return digest, td
