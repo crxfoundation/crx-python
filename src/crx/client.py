@@ -601,9 +601,10 @@ class Client:
             self._sleep(1.0)
 
     def trade(self, quote: Quote) -> Trade:
-        """Accept a quote and open the trade: you sign your Side. CRX sends the tx and pays gas.
+        """Accept a quote and open the trade: you sign your template. CRX sends the tx and pays gas.
 
-        The quote carries your Side template. The SDK rebuilds and checks it, signs it,
+        The template is a readable ``Trade`` (``digest_kind`` ``trade``) or a ``Side``. The quote
+        carries it. The SDK rebuilds and checks it, signs its own typed data,
         and posts the accept with the signature: one call. When the template is stale,
         the gateway answers with a fresh one, which is checked and signed in turn.
         A gateway that takes the leg body only gets that body, then the Side.
