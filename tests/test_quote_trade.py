@@ -9,13 +9,15 @@ from decimal import Decimal
 import pytest
 from eth_abi import encode
 from eth_account import Account
-from eth_account.messages import encode_typed_data
+from eth_account.messages import encode_defunct, encode_typed_data
 from eth_utils import keccak
 
 import crx
 from crx import _eip712 as e7
 
-from .conftest import CHAIN_ID, Clock, open_market
+from crx._http import rest_message
+
+from .conftest import BASE, CHAIN_ID, RPC, Clock, Resp, open_market
 
 RFQ = "0x" + "11" * 32
 LEG = "0x" + "22" * 32
@@ -1212,3 +1214,256 @@ def test_own_trade_refusals(tmp_path, account, health, clock, edit, why):
     with pytest.raises(crx.RefusedToSign, match=why):
         own_check(tmp_path, account, health, clock, **edit)
     assert not (tmp_path / f"side-nonce-{account.address.lower()}").exists()  # no nonce kept, nothing signed
+
+
+# ---------- a custodian signer: typed data and EIP-191; one login per 8 h ----------
+
+
+def mangle(sig: bytes, form: str) -> bytes:
+    """A signature as an MPC custodian may return it: ``high_s`` (s' = n - s, v flipped), ``v01``, ``v29``."""
+    sig = bytes(sig)
+    if form == "high_s":
+        s = e7.SECP256K1_N - int.from_bytes(sig[32:64], "big")
+        return sig[:32] + s.to_bytes(32, "big") + bytes([55 - sig[64]])
+    if form == "v01":
+        return sig[:64] + bytes([sig[64] - 27])
+    if form == "v29":
+        return sig[:64] + bytes([29])
+    return sig
+
+
+class Custodian:
+    """Signs the typed data it is handed, and EIP-191 messages. Keeps what it was asked to sign."""
+
+    def __init__(self, account, form="plain", key=None):
+        self.a, self.form, self.key = account, form, key or account
+        self.address = account.address  # checksummed, as a custodian API names it
+        self.typed, self.messages = [], []
+
+    def sign_typed_data(self, td):
+        self.typed.append(td)
+        return "0x" + mangle(self.key.sign_typed_data(full_message=td).signature, self.form).hex()
+
+    def sign_message(self, message):
+        self.messages.append(message)
+        return mangle(self.a.sign_message(encode_defunct(primitive=message)).signature, self.form)
+
+
+class HashCustodian:
+    """A KMS or raw-MPC signer: signs a 32-byte digest only."""
+
+    def __init__(self, account):
+        self.a, self.address, self.hashes, self.messages = account, account.address, [], []
+
+    def sign_hash(self, digest):
+        self.hashes.append(digest)
+        return self.a.unsafe_sign_hash(digest).signature
+
+    def sign_message(self, message):
+        self.messages.append(message)
+        return self.a.sign_message(encode_defunct(primitive=message)).signature
+
+
+class SessionGate:
+    """The gateway's session bridge: POST /session mints a token from a signed envelope; a token
+    stands in for the envelope. ``on`` False: the bridge is off (POST /session answers 404)."""
+
+    def __init__(self, session, seat, on=True):
+        self.seat, self.tokens, self.mints, self.sent = seat, set(), 0, []
+        self.inner = session.request
+        session.request = self.request
+        if on:
+            session.routes[("POST", "/session")] = self.mint
+
+    def mint(self, req):
+        h = req["headers"]
+        msg = rest_message("POST", "/session", h["x-crx-address"], h["x-crx-signer"], int(h["x-crx-ts"]),
+                           h["x-crx-nonce"], b"")
+        assert Account.recover_message(encode_defunct(text=msg), signature=h["x-crx-sig"]).lower() == self.seat
+        self.mints += 1
+        tok = os.urandom(32).hex()
+        self.tokens.add(tok)
+        return {"token": tok, "expires_at": 0, "custody": self.seat, "signer": self.seat, "ttl_ms": 8 * 3_600_000}
+
+    def request(self, method, url, headers=None, **kw):
+        h = dict(headers or {})
+        self.sent.append((method, url, dict(h)))
+        tok = h.get("x-crx-session")
+        if tok is not None:
+            assert not [k for k in h if k.startswith("x-crx-") and k != "x-crx-session"]  # no envelope beside it
+            if tok not in self.tokens:
+                return Resp(401, {"code": "unauthorized", "error": "the x-crx-session token is unknown or expired"})
+            h["x-crx-address"] = self.seat
+        return self.inner(method, url, headers=h, **kw)
+
+    def restart(self):
+        self.tokens.clear()
+
+    def envelopes(self):
+        return [(m, u) for m, u, h in self.sent if "x-crx-sig" in h]
+
+    def tokened(self):
+        return [(m, u) for m, u, h in self.sent if "x-crx-session" in h]
+
+
+def custodian_client(session, tmp_path, signer, clock=None, **kw):
+    c = crx.Client(signer=signer, base_url=BASE, rpc_url=RPC, state_dir=tmp_path / "state", session=session, **kw)
+    if clock is not None:
+        c._clock, c._sleep, c._gw._clock = clock, clock.sleep, clock
+    return c
+
+
+def low_s(sig: str) -> bool:
+    return int(sig[66:130], 16) <= e7.SECP256K1_N // 2 and sig[-2:] in ("1b", "1c")
+
+
+@pytest.mark.parametrize("form", ["plain", "high_s", "v01"])
+@pytest.mark.parametrize("kind", ["trade", "side"])
+def test_custodian_signs_own_typed_data(venue, session, clock, account, tmp_path, kind, form):
+    venue.kind = kind
+    gate = SessionGate(session, account.address.lower())
+    s = Custodian(account, form)
+    c = custodian_client(session, tmp_path, s, clock)
+    assert c.trade(c.quote("USD/MXN", "buy", 25_000)).status == "open"
+    t = venue.template
+    primaries = [td["primaryType"] for td in s.typed]
+    assert primaries == ([] if venue.mode == "one_call" else ["Leg"]) + [kind.capitalize()]
+    own = s.typed[-1]
+    if kind == "trade":
+        assert own == t["typed_data"] and own is not t["typed_data"]  # its own object, equal by value
+    sig = venue.side_sig
+    assert low_s(sig) and recovers(venue, t, sig) == account.address  # normalized before it was sent
+    assert len(s.messages) == gate.mints == 1  # one login signature for the whole trade
+    assert gate.envelopes() == [("POST", BASE + "/session")]
+    assert all(h.get("x-crx-session") for m, u, h in gate.sent if u.split("?")[0] not in (
+        BASE + "/health", BASE + "/markets", BASE + "/session"))
+
+
+@pytest.mark.parametrize("kind", ["trade", "side"])
+def test_hash_only_signer_signs_the_rebuilt_digest(venue, session, clock, account, tmp_path, kind):
+    venue.kind = kind
+    SessionGate(session, account.address.lower())
+    s = HashCustodian(account)
+    c = custodian_client(session, tmp_path, s, clock)
+    assert c.trade(c.quote("USD/MXN", "buy", 25_000)).status == "open"
+    assert e7.h0x(s.hashes[-1]) == venue.template["digest"]
+    assert recovers(venue, venue.template, venue.side_sig) == account.address
+
+
+@pytest.mark.parametrize("form,why", [("v29", "no usable signature"), ("other_key", "does not recover to the seat")])
+def test_custodian_bad_signature_is_not_sent(venue, session, clock, account, tmp_path, form, why):
+    venue.kind = "trade"
+    SessionGate(session, account.address.lower())
+    s = Custodian(account, "plain", key=Account.create()) if form == "other_key" else Custodian(account, form)
+    if form == "v29":
+        s.sign_message = lambda m: account.sign_message(encode_defunct(primitive=m)).signature  # login works
+    c = custodian_client(session, tmp_path, s, clock)
+    with pytest.raises(crx.RefusedToSign, match=why):
+        c.trade(c.quote("USD/MXN", "buy", 25_000))
+    assert no_template_sig(session)
+    if venue.mode == "legacy":
+        assert not any("leg" in b for b in accepts(session))  # the Leg signature was refused too
+
+
+def test_custodian_withdraw_signs_typed_intent(session, health, account, tmp_path):
+    from .test_money import Chain, balance_body, gate
+    Chain(session)
+    g = gate(session, health, account)
+    session.routes[("GET", "/balance")] = [balance_body(account), g.view("accepted")]
+    SessionGate(session, account.address.lower())
+    s = Custodian(account, "high_s")
+    out = custodian_client(session, tmp_path, s, Clock(time.time())).withdraw(1000)
+    assert out.status == "accepted" and g.signer == account.address
+    (td,) = s.typed
+    assert td["primaryType"] == "WithdrawIntent" and td["message"]["amount"] == "1000000000"
+    assert td["domain"] == e7.domain_json(CHAIN_ID, next(c for c in health["chains"] if c["key"] == "avax-fuji")["core"])
+
+
+@pytest.mark.parametrize("call", ["deposit", "send_quote", "confirm"])
+def test_custodian_calls_that_need_a_local_key(session, account, tmp_path, call):
+    c = custodian_client(session, tmp_path, Custodian(account))
+    with pytest.raises(crx.ConfigError, match="needs a local key"):
+        getattr(c, call)(*{"deposit": (1000,), "send_quote": (None, 1), "confirm": (None,)}[call])
+    assert session.calls == []
+
+
+def test_signer_and_key_are_exclusive(session, account, tmp_path):
+    with pytest.raises(crx.ConfigError, match="one only"):
+        crx.Client(key=account.key.hex(), signer=Custodian(account), base_url=BASE, rpc_url=RPC, session=session)
+
+
+def balance_route(session, account):
+    from .test_money import balance_body
+    session.routes[("GET", "/balance")] = lambda req: balance_body(account)
+
+
+def test_one_login_per_8_hours(session, account, tmp_path):
+    balance_route(session, account)
+    gate = SessionGate(session, account.address.lower())
+    s = Custodian(account)
+    clock = Clock(time.time())
+    c = custodian_client(session, tmp_path, s, clock)
+    for _ in range(3):
+        c.balance()
+    assert (gate.mints, len(s.messages), len(gate.tokened())) == (1, 1, 3)
+    clock.t += 8 * 3600 - 61  # inside the token's life, less the margin
+    c.balance()
+    assert gate.mints == 1
+    clock.t += 2
+    c.balance()
+    assert (gate.mints, len(s.messages)) == (2, 2)
+
+
+def test_gateway_restart_mints_once_more(session, account, tmp_path):
+    balance_route(session, account)
+    gate = SessionGate(session, account.address.lower())
+    s = Custodian(account)
+    c = custodian_client(session, tmp_path, s, Clock(time.time()))
+    c.balance()
+    gate.restart()  # every token forgotten: the next call answers 401, then mints and goes again
+    c.balance()
+    assert (gate.mints, len(s.messages)) == (2, 2)
+    assert [u.split("?")[0] for m, u, h in gate.sent if m in ("GET", "POST")] == [
+        BASE + "/session", BASE + "/balance", BASE + "/balance", BASE + "/session", BASE + "/balance"]
+
+
+def test_token_refused_twice_is_auth_error(session, account, tmp_path):
+    balance_route(session, account)
+    gate = SessionGate(session, account.address.lower())
+    gate.tokens = type("Never", (set,), {"__contains__": lambda self, k: False})()
+    c = custodian_client(session, tmp_path, Custodian(account), Clock(time.time()))
+    with pytest.raises(crx.AuthError):
+        c.balance()
+    assert gate.mints == 2  # one mint more, then the 401 stands
+
+
+def test_sessions_off_signs_every_call(session, account, tmp_path):
+    balance_route(session, account)
+    gate = SessionGate(session, account.address.lower(), on=False)
+    s = Custodian(account)
+    c = custodian_client(session, tmp_path, s, Clock(time.time()))
+    for _ in range(3):
+        c.balance()
+    assert gate.tokened() == [] and len(gate.envelopes()) == 4  # one mint asked once, then three signed reads
+    assert session.paths("POST").count("/session") == 1 and len(s.messages) == 4
+
+
+def test_viewer_grants_and_viewer_mode_use_the_envelope(session, account, tmp_path):
+    other = Account.create().address.lower()
+    session.routes[("PUT", f"/viewers/{other}")] = {"viewer": other, "granted_by": account.address.lower()}
+    gate = SessionGate(session, account.address.lower())
+    c = custodian_client(session, tmp_path, Custodian(account), Clock(time.time()))
+    c.add_viewer(other)
+    assert gate.mints == 0 and gate.envelopes() == [("PUT", BASE + f"/viewers/{other}")]
+    owner = Account.create()
+    balance_route(session, owner)
+    v = custodian_client(session, tmp_path, Custodian(account), Clock(time.time()), account=owner.address)
+    v.balance()
+    assert gate.mints == 0 and gate.tokened() == []
+
+
+def test_local_key_never_mints(make_client, venue, session, clock, account):
+    gate = SessionGate(session, account.address.lower())
+    c = make_client(clock=clock)
+    assert c.trade(c.quote("USD/MXN", "buy", 25_000)).status == "open"
+    assert gate.mints == 0 and gate.tokened() == [] and "/session" not in session.paths()
