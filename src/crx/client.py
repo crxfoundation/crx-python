@@ -21,6 +21,7 @@ from ._chain import Rpc, send_tx
 from ._http import Gateway
 from ._keys import load_account
 from . import _maker
+from .signer import LocalSigner, as_signer, sign_typed
 from .errors import (
     AboveMax, BadAnswer, BadRequest, BelowMin, ConfigError, CrxError,
     MarketPaused, NoQuotes, QuoteDropped, RefusedToSign, clean,
@@ -147,6 +148,11 @@ class Client:
     ``markets`` work. The key is read from ``key``, ``key_file``,
     ``CRX_WALLET_PK`` or ``CRX_WALLET_PK_FILE``, in that order.
 
+    ``signer`` replaces the key with a custodian (see ``crx.signer``): it signs the
+    typed data the SDK builds, and EIP-191 for the gateway login. The client logs in by
+    ``POST /session``: one login signature per 8 h, and again after a gateway restart
+    or revoke. ``deposit``, ``send_quote`` and ``confirm`` need a local key.
+
     ``account`` is another seat this key may read (see ``add_viewer``). With it,
     ``balance``, ``positions`` and ``trades`` read that seat; every other call is refused.
 
@@ -168,9 +174,14 @@ class Client:
         session: requests.Session | None = None,
         account: str | None = None,
         allow_mainnet: bool = False,
+        signer: Any = None,
     ) -> None:
         self._account = None
+        self._signer = None
         self._custody = None
+        if signer is not None and (key is not None or key_file is not None):
+            key = None
+            raise ConfigError("set key, key_file or signer: one only")
         name = _ALIASES.get(network, network)
         net = NETWORKS.get(name)
         if net is None:
@@ -207,13 +218,15 @@ class Client:
             raise
         # The key leaves this frame's locals as soon as it is loaded, or fails to load.
         try:
-            self._account = load_account(key, key_file)
+            self._account = load_account(key, key_file) if signer is None else None
         except ConfigError:
             key = None
             raise
         key = None
-        self._gw._account = self._account
-        if self._account is not None and custody != self.address:
+        self._signer = as_signer(signer) if signer is not None else as_signer(self._account)
+        self._gw._signer = self._signer
+        self._gw.login = signer is not None and not isinstance(self._signer, LocalSigner)
+        if self._signer is not None and custody != self.address:
             self._custody = self._gw.custody = custody
         self._state_dir = Path(state_dir or os.environ.get("CRX_STATE_DIR") or DEFAULT_STATE_DIR).expanduser()
         self._chain: dict | None = None
@@ -231,9 +244,9 @@ class Client:
 
     @property
     def address(self) -> str | None:
-        """The key's address, lower case. None without a key."""
-        account = getattr(self, "_account", None)
-        return account.address.lower() if account is not None else None
+        """The key's (or the signer's) address, lower case. None without either."""
+        signer = getattr(self, "_signer", None)
+        return signer.address.lower() if signer is not None else None
 
     @property
     def account(self) -> str | None:
@@ -243,8 +256,14 @@ class Client:
     # ---------- setup checks ----------
 
     def _need_key(self) -> None:
-        if self._account is None:
+        if self._signer is None:
             raise ConfigError("this call needs the seat key: set CRX_WALLET_PK or pass key=")
+
+    def _need_local_key(self, what: str) -> None:
+        """A call that signs a transaction or a maker hash: it needs a local key, not a custodian signer."""
+        self._need_key()
+        if self._account is None:
+            raise ConfigError(f"{what} needs a local key (key= or CRX_WALLET_PK), not a signer")
 
     def _need_seat(self) -> None:
         """The key, acting for its own seat."""
@@ -253,7 +272,9 @@ class Client:
             raise ConfigError("a viewer (account=) only reads: balance, positions, trades")
 
     def _chain_info(self) -> dict:
-        """This network's chain from /health, with its domain checked against the core."""
+        """This network's chain from /health, by the network's chain key. The chain id must be the
+        network's (testnet or mainnet), and the served domain separator must equal the one of that
+        chain id and core. The typed-data domain is that chain id and core."""
         if self._chain is not None:
             return self._chain
         chains = self.health().get("chains")
@@ -296,7 +317,7 @@ class Client:
 
     def _binder(self) -> Binder:
         c = self._chain_ready()
-        return Binder(self._gw, self._account, c, self._sep, self._state_dir, self._sleep, self._clock)
+        return Binder(self._gw, self._signer, c, self._sep, self._state_dir, self._sleep, self._clock)
 
     # ---------- public reads ----------
 
@@ -646,7 +667,8 @@ class Client:
         lapse = self._sign_mode() == "side"
         exp = quote.raw.get("expires_at")
         template = quote.raw.get("side_template")
-        one = b.accept_side(rfq_id, quote.quote_id, arm, template if isinstance(template, dict) else None, exp)
+        one = b.accept_side(rfq_id, quote.quote_id, arm, template if isinstance(template, dict) else None, exp,
+                            rfq["pair"])
         if one is not None:
             r, side, answered = one
             if lapse:
@@ -666,7 +688,7 @@ class Client:
             except (KeyError, TypeError, ValueError):
                 raise RefusedToSign("refused to sign: the Side template cannot be read") from None
             maker_by = min((exp if isinstance(exp, int) else 10**13) / 1000, opened + 120) + 5 if lapse else None
-            b.bind(rfq_id, arm, side, maker_by, log.info)
+            b.bind(rfq_id, arm, side, maker_by, log.info, rfq["pair"])
         status, view = self._settle(lambda: self._gw.request("GET", f"/rfqs/{rfq_id}"), "trade_status")
         tx = _word(view.get("trade_tx"))
         log.info("rfq %s %s: tx %s", rfq_id, status, tx)
@@ -710,6 +732,7 @@ class Client:
         neither shows within 30 s (testnet) or 90 s (mainnet).
         """
         self._need_seat()
+        self._need_local_key("deposit()")
         amount = _amount(amount)
         c = self._chain_ready()
         r = self._gw.request("POST", "/deposit", body={"chain": self.chain_key, "amount": _plain(amount)})
@@ -757,14 +780,15 @@ class Client:
         """
         self._need_seat()
         amount = _amount(amount)
-        self._chain_ready()
+        c = self._chain_ready()
         nonce = self.balance().withdraw_nonce
         if nonce is None:
             raise RefusedToSign("/balance names no withdraw nonce for this seat; nothing signed")
         w = {"account": self.address, "amount": e7.scaled6(amount), "recipient": self.address,
              "nonce": nonce, "deadline": int(self._clock()) + WITHDRAW_TTL}
         digest = e7.withdraw_digest(self._sep, w)
-        sig = "0x" + bytes(self._account.unsafe_sign_hash(digest).signature).hex()
+        td = e7.typed_data("WithdrawIntent", c["chain_id"], c["core"], e7.withdraw_message(w))
+        sig = sign_typed(self._signer, td, digest, self.address)
         r = self._gw.request("POST", "/withdraw", body={
             "chain": self.chain_key, "amount": _plain(amount), "nonce": str(nonce), "deadline": w["deadline"],
             "sig": sig}, ok=(200, 202))
@@ -850,6 +874,7 @@ class Client:
         ``drop_quote(rfq)`` ends it.
         """
         self._need_seat()
+        self._need_local_key("send_quote()")
         return _maker.send(self, rfq, rate, client_quote_id, expires_in)
 
     def confirm(self, quote: MakerQuote, *, timeout: float | None = None, poll: float = 1.0) -> Trade:
@@ -865,6 +890,7 @@ class Client:
         ``cancelled``, ``round_closed``, ``dropped`` or ``timeout``.
         """
         self._need_seat()
+        self._need_local_key("confirm()")
         return _maker.confirm(self, quote, timeout, poll)
 
     def drop_quote(self, quote: MakerQuote | Rfq, *, leg_id: str | None = None) -> Drop:
@@ -880,6 +906,7 @@ class Client:
         return _maker.drop(self, quote, leg_id)
 
     def _send(self, what: str, to: str, data: str) -> str:
+        self._need_local_key("a transaction")
         tx = send_tx(self._rpc, self._account, self._chain_ready()["chain_id"], what, to, data, sleep=self._sleep)
         log.info("%s tx %s", what, tx)
         return tx

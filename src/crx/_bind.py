@@ -1,8 +1,13 @@
-"""The taker's bind: sign the Side and post it with the accept, or after the accept on a
+"""The taker's bind: sign the template and post it with the accept, or after the accept on a
 gateway that takes the leg body. CRX sends the tx and pays gas.
 
-Every value the gateway serves is rebuilt locally before a signature exists.
-A mismatch raises RefusedToSign and nothing is signed.
+A template names what the taker signs (``digest_kind``). ``side``: a ``Side``. ``trade``: a
+``Trade``, built from this seat's own RFQ and quote, with a readable ``summary``. Any other
+kind is refused.
+
+Every value the gateway serves is rebuilt locally before a signature exists: the SDK builds
+its own typed data, compares it with the served ``typed_data`` member by member, and
+recomputes the digest. A mismatch raises RefusedToSign and nothing is signed.
 """
 
 from __future__ import annotations
@@ -16,11 +21,13 @@ from typing import Any, Callable
 
 from . import _eip712 as e7
 from ._http import Gateway
+from .signer import as_signer, sign_typed
 from .errors import (
     BadAnswer, CrxError, NetworkError, OwnRoundOpen, QuoteDropped, QuoteExpired, QuoteNotYours, RateLimited,
     RefusedToSign, TradeUnknown, clean, from_gateway, gateway_code,
 )
 
+KINDS = ("side", "trade")  # the template kinds a taker signs
 SIDE_WINDOW = 630  # s: the core takes a Side quote_expiry at most 600 s past its block time, plus 30 s of clock slack
 NEW_QUOTE = "not opened; request a new quote"
 MAX_POSTS = 3  # accept bodies per trade; a re-post of the same body after 409 rejected does not count
@@ -104,9 +111,10 @@ class Binder:
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.time,
     ) -> None:
+        """``account``: the signer (``crx.signer``), or a local account."""
         self.gw = gateway
-        self.account = account
-        self.seat = account.address.lower()
+        self.signer = as_signer(account)
+        self.seat = self.signer.address.lower()
         self.chain = chain
         self.sep = separator
         self.state_path = Path(state_dir).expanduser() / f"side-nonce-{self.seat}"
@@ -141,11 +149,41 @@ class Binder:
             raise RefusedToSign(f"refused to sign: the quote's {', '.join(bad)} is not this request's")
 
     def sign_leg(self, a: dict) -> str:
+        """Sign this seat's ``Leg`` as typed data."""
         try:
             digest = e7.leg_digest(self.sep, a)
+            td = self.typed("Leg", e7.leg_message(a))
         except (KeyError, TypeError, ValueError, ArithmeticError):
             raise RefusedToSign("refused to sign: the quote's leg cannot be encoded") from None
-        return "0x" + bytes(self.account.unsafe_sign_hash(digest).signature).hex()
+        return sign_typed(self.signer, td, digest, self.seat)
+
+    def typed(self, primary: str, message: dict) -> dict:
+        """Typed data on this chain's domain: the chain id and core that /health serves."""
+        return e7.typed_data(primary, self.chain["chain_id"], self.chain["core"], message)
+
+    def own_trade(self, t: dict, arm: dict, pair: str) -> dict:
+        """This seat's ``Trade`` message: the terms from its own RFQ and quote, rows 9 to 14 from ``t``."""
+        if not e7.pair_text_ok(pair):
+            raise RefusedToSign("refused to sign: the pair is not AAA/BBB")
+        if e7.pair_id(pair) != e7.hx(arm["pair_id"]):
+            raise RefusedToSign("refused to sign: the pair does not hash to the quote's pair_id")
+        try:
+            notional = e7.e6(arm["notional"], 128)
+        except ValueError:
+            raise RefusedToSign("refused to sign: the notional is not a 6-decimal amount below 2^128") from None
+        try:
+            rate = e7.e6(arm["rate"], 64)
+        except ValueError:
+            raise RefusedToSign("refused to sign: the rate is not a 6-decimal amount below 2^64") from None
+        expiry = arm["expiry"]
+        if isinstance(expiry, bool) or not isinstance(expiry, int) or expiry < 0:
+            raise RefusedToSign("refused to sign: the expiry is not unix ms")
+        try:
+            return e7.trade_message(
+                pair, arm["side"], notional, rate, arm["premium_bps"], arm["im_bps"], expiry // 1000,
+                t["pair_c"], t["own_leg_id"], t["quote_expiry"], t["own_nonce"], t["own_salt"], t["wraps_hash"])
+        except ValueError as e:
+            raise RefusedToSign(f"refused to sign: {e}") from None
 
     # ---------- the Side round ----------
 
@@ -171,8 +209,16 @@ class Binder:
         except OSError:
             raise RefusedToSign("refused to sign: the Side nonce file is not writable") from None
 
-    def check_side(self, t: dict, arm: dict) -> bytes:
-        """Rebuild this seat's half with the gateway's nonce and the Side quote expiry."""
+    def check_side(self, t: dict, arm: dict, pair: str) -> tuple[bytes, dict]:
+        """Rebuild this seat's half with the gateway's nonce and the Side quote expiry, then this seat's
+        own typed data. Returns (the digest, the typed data) to sign. Writes the nonce floor first.
+
+        ``trade``: the served ``typed_data`` and ``digest`` must equal this seat's own. ``side``:
+        the served ``digest`` and ``typed_data``, when present, must equal this seat's own.
+        """
+        kind = t.get("digest_kind") if isinstance(t, dict) else None
+        if kind not in KINDS:
+            raise RefusedToSign(f"refused to sign: unknown digest_kind {clean(kind, 40)!r}")
         try:
             if t["own_leg_id"].lower() != arm["leg_id"].lower():
                 raise RefusedToSign("refused to sign: own_leg_id is not this leg")
@@ -191,21 +237,38 @@ class Binder:
                 raise QuoteExpired(f"the Side window has passed; {NEW_QUOTE}")
             if qe > now + SIDE_WINDOW:
                 raise RefusedToSign(f"refused to sign: the Side quote_expiry is more than {SIDE_WINDOW} s ahead")
-            digest = e7.side_digest(self.sep, t)
-            if t.get("digest") and e7.h0x(digest) != str(t["digest"]).lower():
-                raise RefusedToSign("refused to sign: the served digest is not this Side")
+            if kind == "trade":
+                msg = self.own_trade(t, arm, pair)
+                digest, td = e7.trade_digest(self.sep, msg), self.typed("Trade", msg)
+                if "typed_data" not in t:
+                    raise RefusedToSign("refused to sign: the trade template carries no typed_data")
+            else:
+                digest, td = e7.side_digest(self.sep, t), self.typed("Side", e7.side_message(t))
+            if "typed_data" in t:
+                diff = e7.typed_mismatch(t["typed_data"], td)
+                if diff is not None:
+                    raise RefusedToSign(f"refused to sign: the served typed_data differs at {diff}")
+            if (kind == "trade" or t.get("digest")) and e7.h0x(digest) != str(t["digest"]).lower():
+                raise RefusedToSign(f"refused to sign: the served digest is not this {kind.capitalize()}")
         except (KeyError, TypeError, ValueError, AttributeError, ArithmeticError):
             raise RefusedToSign("refused to sign: the Side template cannot be read") from None
         self.keep_signed(own_nonce)
-        return digest
+        return digest, td
 
-    def bind(self, rfq_id: str, arm: dict, t: dict, maker_by: float | None, log: Callable[[str], None]) -> None:
+    def sign_template(self, t: dict, arm: dict, pair: str) -> str:
+        """Check template ``t`` and sign this seat's own typed data for it."""
+        digest, td = self.check_side(t, arm, pair)
+        return sign_typed(self.signer, td, digest, self.seat)
+
+    def bind(
+        self, rfq_id: str, arm: dict, t: dict, maker_by: float | None, log: Callable[[str], None], pair: str,
+    ) -> None:
         """Sign this seat's Side and post it. CRX sends the trade once both Sides are in.
         ``maker_by`` is the maker's last instant to sign its Side; None where the maker's quote binds it.
         Raises QuoteExpired (no bind) or TradeUnknown (maybe bound). Before the Side
         signature exists, a refusal is RefusedToSign. After it, the trade can still
         open, so any other failure is TradeUnknown."""
-        sig = "0x" + bytes(self.account.unsafe_sign_hash(self.check_side(t, arm)).signature).hex()
+        sig = self.sign_template(t, arm, pair)
         why = None
         try:
             try:
@@ -259,7 +322,7 @@ class Binder:
             return False  # check_side refuses it
 
     def accept_side(
-        self, rfq_id: str, quote_id: str, arm: dict, t: dict | None, expires_at_ms: Any,
+        self, rfq_id: str, quote_id: str, arm: dict, t: dict | None, expires_at_ms: Any, pair: str,
     ) -> tuple[dict, dict, float] | None:
         """Accept in one call: check and sign the Side template, post ``{quote_id, sig}``.
 
@@ -294,8 +357,7 @@ class Binder:
                 if self.below_floor(t) and posts + 1 < MAX_POSTS and self.now() < until:  # room to sign after
                     ask = True
                     continue
-                digest = self.check_side(t, arm)
-                sig = "0x" + bytes(self.account.unsafe_sign_hash(digest).signature).hex()
+                sig = self.sign_template(t, arm, pair)
                 signed = t
                 try:
                     r = self.post_accept(rfq_id, {"quote_id": quote_id, "sig": sig}, until)
