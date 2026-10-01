@@ -11,7 +11,7 @@ license = { text = "LicenseRef-CRX-Proprietary" }
 requires-python = ">=3.10"
 dependencies = [
     "requests>=2.28",
-    "eth-account>=0.13",
+    "eth-account>=0.13.5",  # LocalAccount.sign_typed_data
     "eth-abi>=5",
     "eth-utils>=4",
 ]

@@ -1132,16 +1132,24 @@ def test_served_typed_data_must_equal_own(make_client, venue, session, clock, pa
     assert no_template_sig(session)
 
 
-@pytest.mark.parametrize("bad", ["extra_member", "missing_member", "unparsable"])
-def test_served_message_shape_refused(make_client, venue, session, clock, bad):
+@pytest.mark.parametrize("bad,at", [
+    ("extra_member", "message"), ("missing_member", "message"), ("unparsable", "message.notionalE6"),
+    ("extra_top", "typed_data"), ("missing_top", "typed_data"), ("extra_domain", "domain"), ("missing_domain", "domain"),
+])
+def test_served_message_shape_refused(make_client, venue, session, clock, bad, at):
+    # Key sets are exact at the top level, in domain and in message.
     venue.kind = "trade"
     venue.typed_edit = {
         "extra_member": lambda td: td["message"].update(note="x"),
         "missing_member": lambda td: td["message"].pop("summary"),
         "unparsable": put("message.notionalE6", "25e9"),
+        "extra_top": lambda td: td.update(metadata={"note": "x"}),
+        "missing_top": lambda td: td.pop("primaryType"),
+        "extra_domain": lambda td: td["domain"].update(salt="0x" + "00" * 32),
+        "missing_domain": lambda td: td["domain"].pop("version"),
     }[bad]
     c = make_client(clock=clock)
-    with pytest.raises(crx.RefusedToSign, match="differs at message"):
+    with pytest.raises(crx.RefusedToSign, match=f"differs at {re.escape(at)}$"):
         c.trade(c.quote("USD/MXN", "buy", 25_000))
     assert no_template_sig(session)
 
