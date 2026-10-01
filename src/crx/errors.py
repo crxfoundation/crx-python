@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+import html
+import math
+import re
+import time
+from datetime import timezone
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 
@@ -74,13 +80,12 @@ class SeatNotReady(CrxError):
 
 
 class MarketPaused(CrxError):
+    """The pair is paused, or not offered on this chain. ``details['pair']`` names it."""
+
     code = "market_paused"
 
 
-class MarketClosed(CrxError):
-    """The gateway refused: the pair's session is closed. ``details['opens_at']`` is unix ms, when sent."""
-
-    code = "market_closed"
+MarketClosed = MarketPaused
 
 
 class BelowMin(CrxError):
@@ -230,7 +235,6 @@ class TradeUnknown(CrxError):
 
 _BY_GATEWAY_CODE: dict[str, type[CrxError]] = {
     "market_paused": MarketPaused,
-    "market_closed": MarketClosed,
     "notional_below_minimum": BelowMin,
     "pool_min_notional": BelowMin,
     "notional_above_maximum": AboveMax,
@@ -275,24 +279,68 @@ def gateway_code(body: Any) -> str:
     return clean(code or "", 64)
 
 
-def retry_after(details: dict, headers: Any = None) -> float | None:
-    """Seconds to wait: ``details.retry_after_secs``, else a numeric ``Retry-After`` header."""
-    for v in (details.get("retry_after_secs"), (headers or {}).get("Retry-After")):
-        try:
-            s = float(v)
-        except (TypeError, ValueError):
-            continue
-        if 0 <= s < 86_400:
-            return s
-    return None
+_NOT_TEXT = re.compile(r"<(script|style)\b.*?</\1\s*>|<!--.*?-->|<[^>]*>", re.I | re.S)
 
 
-def from_gateway(status: int, body: Any, text: str = "", headers: Any = None) -> CrxError:
-    """Map one gateway refusal to a typed error. ``headers`` gives a 429 its ``Retry-After``."""
-    body = body if isinstance(body, dict) else {}
-    gw = gateway_code(body) or None
-    msg = clean(body.get("error") or body.get("detail") or text or f"HTTP {status}")
-    details = body.get("details") if isinstance(body.get("details"), dict) else {}
+def first_line(text: str, limit: int = 200) -> str:
+    """The first non-blank line of a text or HTML body, tags removed, at most ``limit`` characters."""
+    if text.lstrip().startswith("<"):
+        text = html.unescape(_NOT_TEXT.sub("\n", text))
+    for line in text.splitlines():
+        line = clean(line, 10_000).strip()
+        if line:
+            return line[:limit]
+    return ""
+
+
+RETRY_AFTER_MAX = 86400  # s
+
+
+def retry_after_secs(value: Any) -> int | None:
+    """Seconds from a Retry-After header: delta-seconds or an HTTP date, at most ``RETRY_AFTER_MAX``.
+
+    None when absent or unreadable. A date without a zone is UTC.
+    """
+    v = str(value or "").strip()
+    if v.isascii() and v.isdigit():
+        return RETRY_AFTER_MAX if len(v) > 9 else min(int(v), RETRY_AFTER_MAX)
+    try:
+        dt = parsedate_to_datetime(v)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return min(max(0, math.ceil(dt.timestamp() - time.time())), RETRY_AFTER_MAX)
+    except (TypeError, ValueError, IndexError, OverflowError):
+        return None
+
+
+def wait_secs(details: dict) -> float | None:
+    """``details['retry_after_secs']`` as seconds; None unless a number from 0 to ``RETRY_AFTER_MAX``."""
+    try:
+        s = float(details.get("retry_after_secs"))
+    except (TypeError, ValueError):
+        return None
+    return s if 0 <= s <= RETRY_AFTER_MAX else None
+
+
+def from_gateway(status: int, body: Any, text: str = "", *, host: str = "", retry_after: Any = None) -> CrxError:
+    """Map one gateway refusal to a typed error.
+
+    A body that is not a JSON object gives the message ``HTTP <status> from <host>``;
+    its first text line goes to ``details['body']``. A Retry-After header fills
+    ``details['retry_after_secs']`` when the body has none.
+    """
+    if isinstance(body, dict):
+        gw = gateway_code(body) or None
+        msg = clean(body.get("error") or body.get("detail") or f"HTTP {status}")
+        details = dict(body["details"]) if isinstance(body.get("details"), dict) else {}
+    else:
+        gw = None
+        msg = f"HTTP {status} from {clean(host, 100)}" if host else f"HTTP {status}"
+        line = first_line(text or "")
+        details = {"body": line} if line else {}
+    secs = retry_after_secs(retry_after)
+    if secs is not None:
+        details.setdefault("retry_after_secs", secs)
     kw = {"status": status, "details": details, "gateway_code": gw}
     cls = _BY_GATEWAY_CODE.get(gw or "")
     if cls is None and status == 410:
@@ -302,7 +350,7 @@ def from_gateway(status: int, body: Any, text: str = "", headers: Any = None) ->
     if cls is not None:
         e = cls(msg, **kw)
         if isinstance(e, RateLimited):
-            e.retry_after = retry_after(details, headers)
+            e.retry_after = wait_secs(details)
         return e
     if status in (401, 403):
         return AuthError(msg, **kw)

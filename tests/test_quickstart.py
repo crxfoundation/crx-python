@@ -39,11 +39,11 @@ class FakeClient:
 
     def balance(self):
         self.calls.append(("balance",))
-        return SimpleNamespace(free="20000.000000", as_of="2026-09-29 21:04:57+00:00", im="12221.225374")
+        return SimpleNamespace(free="20000.000000", as_of="2026-09-29 21:04:57+00:00", im="3065.908525")
 
     def quote(self, pair, side, notional, **kwargs):
         self.calls.append(("quote", pair, side, notional, kwargs))
-        return SimpleNamespace(pair=pair, rate="5.2902", house=True, expiry=kwargs.get("expiry"),
+        return SimpleNamespace(pair=pair, rate="5.2562", house=True, expiry=kwargs.get("expiry"),
                                expires_at="2026-09-29 21:08:30+00:00", rfq_id="r2")
 
     def trade(self, q):
@@ -53,7 +53,7 @@ class FakeClient:
     def positions(self):
         self.calls.append(("positions",))
         other = SimpleNamespace(rfq_id="r1", pair="USDMXN", side="sell", notional=5, rate="17", status="open")
-        mine = SimpleNamespace(rfq_id="r2", pair="USDBRL", side="buy", notional=100000, rate="5.2902", status="open")
+        mine = SimpleNamespace(rfq_id="r2", pair="USDBRL", side="buy", notional=25000, rate="5.2562", status="open")
         return [other, mine]
 
     def withdraw(self, amount):
@@ -123,7 +123,7 @@ def test_key_from_env_runs_every_step_without_asking(monkeypatch, capsys, fake):
     assert c.calls == [
         ("deposit", 20_000),
         ("balance",),
-        ("quote", "USD/BRL", "buy", 100_000, {"expiry": expiry}),
+        ("quote", "USD/BRL", "buy", 25_000, {"expiry": expiry}),
         ("trade", "r2"),
         ("positions",),
         ("balance",),
@@ -133,8 +133,25 @@ def test_key_from_env_runs_every_step_without_asking(monkeypatch, capsys, fake):
     assert len(lines) == 10 and all(STAMP.match(line) for line in lines)
     assert lines[0].endswith(" 0x7638c8075e517393fa62008b5faa6c1ea832fe71")
     assert lines[4].endswith(" 2026-12-15 18:00:00+00:00")
-    assert lines[7].endswith(" USDBRL buy 100000 5.2902 open")
+    assert lines[7].endswith(" USDBRL buy 25000 5.2562 open")
     assert lines[9].endswith(" accepted")
+
+
+def test_the_deposit_covers_the_ask(monkeypatch, fake):
+    """A seat with nothing but the script's deposit must get its quote.
+
+    Before a quote, the gateway checks that the seat's free collateral
+    covers the trade: about 21 USD per 100 USD asked on USD/BRL. The deposit
+    is at least twice that. The ask is 25,000, the least a Testnet account
+    may ask.
+    """
+    monkeypatch.setenv("CRX_WALLET_PK", KEY)
+    assert qs.main([]) == 0
+    calls = FakeClient.last.calls
+    deposit = next(c[1] for c in calls if c[0] == "deposit")
+    ask = next(c[3] for c in calls if c[0] == "quote")
+    assert ask == 25_000
+    assert deposit >= 2 * 0.21 * ask
 
 
 def test_key_file_env_counts_as_set(monkeypatch, fake, no_key):

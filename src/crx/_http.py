@@ -12,7 +12,7 @@ import requests
 from eth_account.messages import encode_defunct
 from eth_utils import keccak
 
-from .errors import BadAnswer, ConfigError, NetworkError, clean, from_gateway
+from .errors import BadAnswer, ConfigError, CrxError, NetworkError, clean, from_gateway
 
 
 def host_of(url: str) -> str:
@@ -104,12 +104,21 @@ class Gateway:
         except ValueError:
             return None
 
+    @staticmethod
+    def error_of(r: requests.Response, host: str = "") -> CrxError:
+        """The typed error for a refused answer. ``host`` defaults to the host of the answer's URL."""
+        body = Gateway.body_of(r)
+        text = "" if isinstance(body, dict) else (r.text or "")[:8192]
+        headers = getattr(r, "headers", None) or {}
+        return from_gateway(
+            r.status_code, body, text, host=host or host_of(getattr(r, "url", "") or ""),
+            retry_after=headers.get("Retry-After"))
+
     def parse(self, r: requests.Response, ok: tuple[int, ...] = (200,)) -> dict:
         """The JSON object of an ``ok`` answer; ``{}`` for a 204. Any other status raises."""
         body = self.body_of(r)
         if r.status_code not in ok:
-            raise from_gateway(r.status_code, body, "" if isinstance(body, dict) else (r.text or "")[:300],
-                               getattr(r, "headers", None))
+            raise self.error_of(r, self.host)
         if r.status_code == 204:
             return {}
         if not isinstance(body, dict):

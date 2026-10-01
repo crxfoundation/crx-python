@@ -53,7 +53,7 @@ def refused(r: Any) -> CrxError:
     k = status_code(r)
     if k[0] == 410 or k in ((409, "rejected"), (409, "round_closed"), (409, "conflict")):
         return QuoteExpired(NEW_QUOTE, status=k[0], gateway_code=k[1] or None)
-    return from_gateway(r.status_code, Gateway.body_of(r), r.text[:300] if r.text else "", getattr(r, "headers", None))
+    return Gateway.error_of(r)
 
 
 def accept_refused(r: Any) -> CrxError:

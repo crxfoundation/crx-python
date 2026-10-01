@@ -46,7 +46,7 @@ print(d.status)  # credited
 print(c.balance().free)  # 20000.000000
 
 # 4. Request a quote. Opens an RFQ, returns the best quote.
-q = c.quote("USD/BRL", "buy", 100_000)
+q = c.quote("USD/BRL", "buy", 25_000)
 print(q.pair, q.rate)  # USD/BRL 5.435
 
 # 5. Accept. Signs your confirmation. CRX sends the tx and pays gas.
@@ -55,7 +55,7 @@ print(t.status)  # open
 
 # 6. Your trade.
 p = c.positions()[0]
-print(p.pair, p.side, p.notional, p.rate, p.status)  # USDBRL buy 100000 5.435 open
+print(p.pair, p.side, p.notional, p.rate, p.status)  # USDBRL buy 25000 5.435 open
 
 # 7. Withdraw. Leaves your balance at once. In your wallet within about 2 hours.
 w = c.withdraw(1_000)
@@ -71,7 +71,7 @@ print(w.status)  # accepted
 | `quote(pair, side, notional)` | Opens an RFQ. Returns the best firm quote. Accepts nothing. |
 | `trade(quote)` | Accepts and opens. CRX sends the tx and pays gas. `status`: `sending`, `open`, `pending` or `refused`. |
 | `deposit(amount)` | Approve, then deposit USDC. On testnet, mints the test USDC you lack. `status`: `credited`, `pending` or `failed`. |
-| `withdraw(amount)` | Signs a withdraw. CRX sends the tx and pays gas. `status`: `sending`, `accepted`, `pending`, `paid`, `partial`, `refused` or `returned`. In your wallet within about 2 hours. |
+| `withdraw(amount)` | Signs a withdraw to your own wallet and sends it in one request. CRX sends the tx and pays gas. `status`: `sending`, `accepted`, `pending`, `paid`, `partial`, `refused` or `returned`. In your wallet within about 2 hours. |
 | `balance()` | Collateral, free, margin, withdraw state. |
 | `positions()` | Open positions. |
 | `trades()` | Your event tape. `market=True` adds every open RFQ a maker seat receives (no owner named). |
@@ -130,7 +130,6 @@ Every error is a `crx.CrxError`. Branch on `.code`.
 
 | Code | Meaning |
 |---|---|
-| `market_closed` | The gateway refused: session closed. `details["opens_at"]` is unix ms, when sent. |
 | `market_paused` | Pair not live. |
 | `below_min`, `above_max` | Notional out of range. |
 | `no_quotes` | No maker quoted in time. |
@@ -152,6 +151,7 @@ Every error is a `crx.CrxError`. Branch on `.code`.
 | `viewer_cap` | 5 viewers already. Remove one first. |
 | `insufficient_collateral` | Deposit more. |
 | `refused_to_sign` | The gateway served something unexpected. Nothing signed. |
+| `bad_answer` | The gateway sent an answer the SDK cannot read, or queued a withdraw other than the one signed. Read `balance()`. |
 | `trade_unknown` | The trade may still open. Do not trade again. Read `positions()` after the time the error names. |
 | `tx_failed` | A transaction would revert, or reverted. |
 | `network` | The gateway or the RPC did not answer. |

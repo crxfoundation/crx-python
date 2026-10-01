@@ -257,8 +257,8 @@ def send(c: "Client", r: Any, rate: Any, client_quote_id: str | None, expires_in
         raise BadRequest("send_quote() takes an Rfq from rfqs() or rfq()")
     rate = _rate(rate)
     cqid = client_quote_id or f"sdk-q-{uuid.uuid4().hex[:16]}"
-    if not isinstance(cqid, str) or not 0 < len(cqid) <= 128 or not cqid.isprintable():
-        raise BadRequest("client_quote_id is 1 to 128 printable characters")
+    if not isinstance(cqid, str) or not 0 < len(cqid) <= 128 or not all(" " <= ch <= "~" for ch in cqid):
+        raise BadRequest("client_quote_id is 1 to 128 printable ASCII characters")
     b = c._binder()
     now = c._clock()
     if r.sign_mode == "quote":

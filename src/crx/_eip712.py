@@ -34,6 +34,7 @@ ARM_WORDS = [
     "uint64", "uint16", "int16", "uint64", "uint64", "uint64",
 ]
 WITHDRAW_ITEM = ["address", "uint256", "address", "uint64", "uint64"]
+WITHDRAW_KIND = 5
 
 
 def hx(value: str) -> bytes:
@@ -152,6 +153,11 @@ def withdraw_fields(w: dict) -> list:
 def withdraw_digest(separator: bytes, w: dict) -> bytes:
     struct = keccak(encode(["bytes32"] + WITHDRAW_ITEM, [WITHDRAW_TYPEHASH, *withdraw_fields(w)]))
     return keccak(b"\x19\x01" + separator + struct)
+
+
+def withdraw_item(w: dict) -> bytes:
+    """The chain item id of a withdraw intent: keccak256 of kind 5 and the five fields, ABI-encoded."""
+    return keccak(encode(["uint256"] + WITHDRAW_ITEM, [WITHDRAW_KIND, *withdraw_fields(w)]))
 
 
 def selector(signature: str) -> bytes:

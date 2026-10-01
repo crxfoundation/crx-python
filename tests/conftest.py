@@ -9,6 +9,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from eth_account import Account
+from requests.structures import CaseInsensitiveDict
 
 import crx
 
@@ -23,11 +24,12 @@ def fixture(name: str):
 
 
 class Resp:
-    def __init__(self, status: int, body, headers=None):
+    def __init__(self, status: int, body, headers=None, url: str = BASE):
         self.status_code = status
         self._body = body
-        self.headers = headers or {}
         self.text = body if isinstance(body, str) else json.dumps(body)
+        self.headers = CaseInsensitiveDict(headers or {})
+        self.url = url
 
     def json(self):
         if isinstance(self._body, str):
@@ -69,8 +71,10 @@ class FakeSession:
         self.calls.append(req)
         key = (method, u.path)
         if key not in self.routes:
-            return Resp(404, {"code": "not_found", "error": f"no route {method} {u.path}"})
-        return self._serve(self.routes[key], req)
+            return Resp(404, {"code": "not_found", "error": f"no route {method} {u.path}"}, url=url)
+        r = self._serve(self.routes[key], req)
+        r.url = url
+        return r
 
     def post(self, url, json=None, timeout=None):
         assert url == RPC

@@ -1,6 +1,5 @@
 """deposit(), withdraw() and the seat reads against a scripted gateway and chain."""
 
-import json
 import time
 from decimal import Decimal
 
@@ -164,101 +163,135 @@ def test_deposit_revert_names_error(make_client, session, health, account):
     assert chain.sent == []
 
 
-def withdraw_route(session, health, account, amount=1000, edit=None, digest=None):
-    core = core_of(health)
-    w = {"account": account.address.lower(), "amount": str(amount * 10**6), "recipient": account.address.lower(),
-         "nonce": "3", "deadline": int(time.time()) + 3600}
-    w.update(edit or {})
-    sep = e7.domain_separator(CHAIN_ID, core)
-    session.routes[("POST", "/withdraw")] = {"intent": w, "digest": digest or e7.h0x(e7.withdraw_digest(sep, w)),
-                                             "core": core, "chain_id": CHAIN_ID, "kind": 5}
-    return w, sep
-
-
-ITEM = "0x" + "5c" * 32
 LANDED = "0x" + "7a" * 32
+OTHER = "0x" + "ee" * 32
+OWN = object()  # stands for the item of the withdraw the gateway queued
 
 
-def sig_route(session, status=202, item=ITEM):
-    """POST /withdraw/sig: the chain item id of the posted intent."""
-    def answer(req):
-        body = {"item": item, "status": "sending", "chain": req["body"]["chain"], **req["body"]["intent"]}
-        return (status, {k: v for k, v in body.items() if v is not None})
-    session.routes[("POST", "/withdraw/sig")] = answer
+class Gate:
+    """POST /withdraw as the gateway runs it: rebuilds the intent from the body and the seat,
+    recovers the signer of that rebuild, answers with its item. ``edit`` changes the queued intent."""
+
+    def __init__(self, session, account, chain_id, core, status=202, item=OWN, edit=None):
+        self.session, self.account = session, account
+        self.sep = e7.domain_separator(chain_id, core)
+        self.status, self.forced, self.edit = status, item, edit or {}
+        self.intent = self.signer = self.item = None
+        session.routes[("POST", "/withdraw")] = self.answer
+
+    def answer(self, req):
+        b, seat = req["body"], self.account.address.lower()
+        self.intent = {"account": seat, "amount": e7.scaled6(b["amount"]), "recipient": seat,
+                       "nonce": int(b["nonce"]), "deadline": int(b["deadline"])}
+        self.signer = Account._recover_hash(e7.withdraw_digest(self.sep, self.intent), signature=b["sig"])
+        self.item = e7.h0x(e7.withdraw_item({**self.intent, **self.edit}))
+        item = self.item if self.forced is OWN else self.forced
+        body = {"item": item, "status": "sending", "chain": b["chain"], "account": seat,
+                "amount": f"{Decimal(b['amount']):.6f}", "nonce": b["nonce"], "deadline": b["deadline"]}
+        return (self.status, {k: v for k, v in body.items() if v is not None})
+
+    def view(self, status, item=OWN, tx=None, **kw):
+        """GET /balance whose ``withdraw.last`` is ``item`` (default: the queued one) at ``status``."""
+        return lambda req: {**balance_body(self.account, withdraw=item_row(
+            status, self.item if item is OWN else item, tx)), **kw}
 
 
-def item_row(status, item=ITEM, tx=None):
+def gate(session, health, account, **kw):
+    return Gate(session, account, CHAIN_ID, core_of(health), **kw)
+
+
+def item_row(status, item, tx=None):
     return {"item": item, "tx": tx, "nonce": "3", "amount": "1000.000000", "paid": None, "status": status,
             "reason": None}
 
 
 @pytest.mark.parametrize("code", [202, 200])
-def test_withdraw_posts_the_sig_sends_no_tx(make_client, session, health, account, code):
+def test_withdraw_one_signed_post_sends_no_tx(make_client, session, health, account, code):
     chain = Chain(session)
-    w, sep = withdraw_route(session, health, account)
-    sig_route(session, status=code)
-    session.routes[("GET", "/balance")] = [
-        balance_body(account),  # the nonce read
-        balance_body(account, withdraw=item_row("sending")),
-        balance_body(account, withdraw=item_row("accepted", tx=LANDED)),
-    ]
-    out = make_client(clock=Clock(time.time())).withdraw(1000)
-    assert (out.status, out.item, out.tx, out.nonce) == ("accepted", ITEM, LANDED, 3)
+    g = gate(session, health, account, status=code)
+    session.routes[("GET", "/balance")] = [balance_body(account), g.view("sending"), g.view("accepted", tx=LANDED)]
+    clock = Clock(time.time())
+    now = int(clock())
+    out = make_client(clock=clock).withdraw(1000)
+    assert (out.status, out.item, out.tx, out.nonce) == ("accepted", g.item, LANDED, 3)
     # No tx: only the chain check reads the RPC. test_deposit_mints_approves_deposits is the control.
     assert chain.sent == [] and set(session.rpc_methods()) <= {"eth_chainId", "eth_getCode"}
-    body = next(c for c in session.calls if c["path"] == "/withdraw/sig")["body"]
-    assert body["chain"] == "avax-fuji"
-    served = next(c for c in session.calls if c["path"] == "/withdraw/sig")["raw"]
-    assert body["intent"] == w and served.count(json.dumps(w, separators=(",", ":")).encode()) == 1  # byte for byte
-    assert Account._recover_hash(e7.withdraw_digest(sep, w), signature=body["sig"]) == account.address
+    posts = [c for c in session.calls if c["method"] == "POST"]
+    assert [c["path"] for c in posts] == ["/withdraw"]
+    body = posts[0]["body"]
+    assert {k: v for k, v in body.items() if k != "sig"} == {
+        "chain": "avax-fuji", "amount": "1000", "nonce": "3", "deadline": now + 22 * 3600}
+    assert 120 < body["deadline"] - now <= 82_800  # the gateway's deadline window
+    assert g.intent == {"account": account.address.lower(), "amount": 1000 * 10**6,
+                        "recipient": account.address.lower(), "nonce": 3, "deadline": now + 22 * 3600}
+    assert g.signer == account.address  # the digest signed is the gateway's rebuild
 
 
-@pytest.mark.parametrize("item,word", [(ITEM, "accepted"), ("0x" + "ee" * 32, "pending"), (None, "pending")])
+@pytest.mark.parametrize("amount,nonce", [("1000", "0"), ("0.000001", "3"), ("12345.678901", "18446744073709551615")])
+def test_withdraw_signs_the_gateway_rebuild(make_client, session, health, account, amount, nonce):
+    Chain(session)
+    g = gate(session, health, account)
+    session.routes[("GET", "/balance")] = [balance_body(account, nonce=nonce), g.view("accepted")]
+    out = make_client(clock=Clock(time.time())).withdraw(amount)
+    assert g.signer == account.address and g.intent["amount"] == e7.scaled6(amount) and g.intent["nonce"] == int(nonce)
+    assert out.nonce == int(nonce) and out.item == g.item
+
+
+def test_withdraw_item_vector():
+    seat = "0x7638646FcFf3E28E42Dc4a778ea7bbc236701230"
+    w = {"account": seat, "amount": 1_000_000_000, "recipient": seat, "nonce": 3, "deadline": 1_790_082_800}
+    assert e7.h0x(e7.withdraw_item(w)) == "0x46d62f771582cf423fca01063c182410c03b62dda1125c000036f8d515584b76"
+
+
+@pytest.mark.parametrize("item,word", [(OWN, "accepted"), (OTHER, "pending"), (None, "pending")])
 def test_withdraw_matches_by_item(make_client, session, health, account, item, word):
     # Same nonce and tx on every row: only the item names this withdraw.
     Chain(session)
-    withdraw_route(session, health, account)
-    sig_route(session)
-    session.routes[("GET", "/balance")] = [balance_body(account),
-                                           balance_body(account, withdraw=item_row("accepted", item=item, tx=LANDED))]
+    g = gate(session, health, account)
+    session.routes[("GET", "/balance")] = [balance_body(account), g.view("accepted", item=item, tx=LANDED)]
     out = make_client(clock=Clock(time.time())).withdraw(1000)
     assert (out.status, out.tx) == (word, LANDED if word == "accepted" else None)
 
 
-def test_withdraw_sig_answer_without_item(make_client, session, health, account):
+def test_withdraw_answer_without_item(make_client, session, health, account):
     Chain(session)
     session.routes[("GET", "/balance")] = balance_body(account)
-    withdraw_route(session, health, account)
-    sig_route(session, item=None)
-    with pytest.raises(crx.BadAnswer, match="item"):
+    gate(session, health, account, item=None)
+    with pytest.raises(crx.BadAnswer, match="no item"):
         make_client().withdraw(1000)
 
 
-@pytest.mark.parametrize("edit", [{"recipient": "0x" + "99" * 20}, {"amount": str(2000 * 10**6)}, {"nonce": "9"},
-                                  {"deadline": int(time.time()) + 10 * 86_400}])
-def test_withdraw_refuses_foreign_intent(make_client, session, health, account, edit):
-    chain = Chain(session)
+@pytest.mark.parametrize("edit", [{"recipient": "0x" + "99" * 20}, {"amount": 2000 * 10**6}, {"nonce": 4},
+                                  {"deadline": 1}, {"account": "0x" + "99" * 20}])
+def test_withdraw_refuses_an_item_other_than_signed(make_client, session, health, account, edit):
+    # The gateway queues a withdraw other than the one signed: its item differs.
+    Chain(session)
     session.routes[("GET", "/balance")] = balance_body(account)
-    withdraw_route(session, health, account, edit=edit)
-    sig_route(session)
-    with pytest.raises(crx.RefusedToSign):
+    g = gate(session, health, account, edit=edit)
+    with pytest.raises(crx.BadAnswer, match="other than the signed"):
         make_client().withdraw(1000)
-    assert chain.sent == [] and "/withdraw/sig" not in session.paths()
+    assert g.signer == account.address and polls(session, "/balance") == 1
+
+
+@pytest.mark.parametrize("nonce", [None, "", "-1", "0x3"])
+def test_withdraw_without_nonce_signs_nothing(make_client, session, health, account, nonce):
+    Chain(session)
+    session.routes[("GET", "/balance")] = balance_body(account, nonce=nonce)
+    gate(session, health, account)
+    with pytest.raises(crx.RefusedToSign, match="nonce"):
+        make_client().withdraw(1000)
+    assert session.paths("POST") == []
 
 
 @pytest.mark.parametrize("word", ["accepted", "refused", "paid"])
 def test_withdraw_polls_until_its_own_item_is_final(make_client, session, health, account, word):
     Chain(session)
-    old = item_row("paid", item="0x" + "ee" * 32, tx="0x" + "ee" * 32)
+    g = gate(session, health, account)
+    old = g.view("paid", item=OTHER, tx=OTHER)
     session.routes[("GET", "/balance")] = [
-        balance_body(account, withdraw=old),  # the nonce read
-        balance_body(account, withdraw=old),
-        balance_body(account, withdraw=item_row("sending")),
-        balance_body(account, withdraw=item_row("pending", tx=LANDED)),
-        balance_body(account, withdraw=item_row(word, tx=LANDED)),
+        old,  # the nonce read
+        old, g.view("sending"), g.view("pending", tx=LANDED), g.view(word, tx=LANDED),
     ]
-    withdraw_route(session, health, account)
-    sig_route(session)
     clock = Clock(time.time())
     t0 = clock()
     assert make_client(clock=clock).withdraw(1000).status == word
@@ -268,9 +301,8 @@ def test_withdraw_polls_until_its_own_item_is_final(make_client, session, health
 @pytest.mark.parametrize("word", ["sending", "pending"])
 def test_withdraw_waits_30_s_on_testnet(make_client, session, health, account, word):
     chain = Chain(session)
-    session.routes[("GET", "/balance")] = [balance_body(account), balance_body(account, withdraw=item_row(word))]
-    withdraw_route(session, health, account)
-    sig_route(session)
+    g = gate(session, health, account)
+    session.routes[("GET", "/balance")] = [balance_body(account), g.view(word)]
     clock = Clock(time.time())
     t0 = clock()
     out = make_client(clock=clock).withdraw(1000)
@@ -286,16 +318,7 @@ def test_withdraw_in_progress_sends_nothing(make_client, session, account):
     with pytest.raises(crx.CrxError) as ei:
         make_client().withdraw(1000)
     assert ei.value.code == "withdraw_in_progress" and ei.value.status == 409
-    assert chain.sent == []
-
-
-def test_withdraw_refuses_served_digest_mismatch(make_client, session, health, account):
-    chain = Chain(session)
-    session.routes[("GET", "/balance")] = balance_body(account)
-    withdraw_route(session, health, account, digest="0x" + "ab" * 32)
-    with pytest.raises(crx.RefusedToSign, match="digest"):
-        make_client().withdraw(1000)
-    assert chain.sent == []
+    assert chain.sent == [] and polls(session, "/balance") == 1
 
 
 def test_balance(make_client, session, account):
@@ -329,6 +352,17 @@ def test_trades_pages(make_client, session):
     ev = make_client().trades()
     assert len(ev) == 1001 and ev[-1].type == "trade.settled" and ev[-1].seq is None
     assert [c["query"]["since"] for c in session.calls if c["path"] == "/trades"] == [["0"], ["1000"]]
+
+
+def test_trades_limit_at_most_1000_and_loops(make_client, session):
+    def page(start, n):
+        rows = [{"type": "trade.opened", "seq": start + i + 1, "ts": 1, "data": {}} for i in range(n)]
+        return {"trades": rows, "seq": start + n}
+    session.routes[("GET", "/trades")] = [page(0, 1000), page(1000, 1000), page(2000, 3)]
+    assert [e.seq for e in make_client().trades()] == list(range(1, 2004))
+    q = [c["query"] for c in session.calls if c["path"] == "/trades"]
+    assert [x["since"] for x in q] == [["0"], ["1000"], ["2000"]]
+    assert all(1 <= int(x["limit"][0]) <= 1000 for x in q)
 
 
 def test_trades_own_by_default(make_client, session):

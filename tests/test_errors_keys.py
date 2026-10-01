@@ -64,10 +64,11 @@ def test_no_fold_or_crank_words():
 
 @pytest.mark.parametrize("details,headers,wait", [
     ({"retry_after_secs": 2}, None, 2.0), ({}, {"Retry-After": "9"}, 9.0),
-    ({}, {"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"}, None), ({"retry_after_secs": "x"}, None, None),
+    ({}, {"Retry-After": "Wed, 21 Oct 2015 07:28:00 GMT"}, 0.0), ({"retry_after_secs": "x"}, None, None),
 ])
 def test_rate_limited_retry_after(details, headers, wait):
-    e = from_gateway(429, {"code": "rate_limited", "error": "slow", "details": details}, "", headers)
+    e = from_gateway(429, {"code": "rate_limited", "error": "slow", "details": details}, "",
+                     retry_after=(headers or {}).get("Retry-After"))
     assert type(e) is crx.RateLimited and e.retry_after == wait
 
 
@@ -77,6 +78,18 @@ def test_leg_live_and_already_accepted_read_their_details():
     e = from_gateway(409, {"code": "already_accepted", "error": "x", "details": {"trade_id": "0xCD"}})
     assert e.trade_id == "0xcd"
     assert from_gateway(409, {"code": "already_accepted", "error": "x", "details": {"trade_id": None}}).trade_id is None
+
+
+def test_market_closed_is_market_paused():
+    assert crx.MarketClosed is crx.MarketPaused
+    e = from_gateway(409, {"code": "market_paused", "error": "USD/JPY is paused", "details": {"pair": "USD/JPY"}})
+    assert isinstance(e, crx.MarketClosed) and e.code == "market_paused"
+
+
+def test_no_market_closed_code():
+    root = Path(__file__).parent.parent
+    files = [root / "README.md", *(root / "examples").glob("*.py"), *(root / "src" / "crx").glob("*.py")]
+    assert [f.name for f in files if "market_closed" in f.read_text()] == []
 
 
 def test_unknown_code_passes_through():

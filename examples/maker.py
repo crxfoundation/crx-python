@@ -18,7 +18,7 @@ def log(*values):
 maker = crx.Client(network="testnet")
 taker = crx.Client(os.environ["CRX_TAKER_PK"], network="testnet")
 log(maker.address, taker.address)
-# 22:31:29 0x0ed8…6bc9 0x2a68…e44e
+# 22:31:29 0x0ed8…6bc9 0x2a68…a44e
 
 # 2. Fund both. You pay gas. A seat with no collateral receives no RFQs.
 maker.deposit(20_000)
