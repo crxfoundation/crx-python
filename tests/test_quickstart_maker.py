@@ -7,7 +7,6 @@ import inspect
 import re
 import runpy
 import textwrap
-import threading
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -17,12 +16,14 @@ import pytest
 
 import crx
 import crx.quickstart_maker as qs
+from crx import _maker
 
 MAKER_KEY = "0x" + "11" * 32
 TAKER_KEY = "0x" + "22" * 32
 EXAMPLE = Path(__file__).parent.parent / "examples" / "maker.py"
 STAMP = re.compile(r"^\d\d:\d\d:\d\d ")
-OURS, FOREIGN, SHARED = "0x" + "a1" * 32, "0x" + "b1" * 32, "0x" + "c1" * 32
+OURS = "0x" + "a1" * 32
+TXH = "0x" + "55" * 32
 CHECK = datetime(2026, 10, 1, 9, 5, tzinfo=timezone.utc)
 
 
@@ -30,9 +31,10 @@ class FakeClient:
     """Stands in for crx.Client: the maker (no key argument) or the test taker (the key passed in)."""
 
     maker = taker = None
-    cid = None
-    asked = None
-    lose = None
+    order = []      # every call, both clients, in the order made
+    house = False   # the winning quote is the house desk's
+    lose = None     # the reason confirm() loses the quote for
+    status = "open"  # the trade status confirm() returns
 
     def __init__(self, *args, **kwargs):
         self.args, self.kwargs = args, kwargs
@@ -44,75 +46,63 @@ class FakeClient:
             self.address = "0x7638c8075e517393fa62008b5faa6c1ea832fe71"
             FakeClient.maker = self
 
+    def did(self, *call):
+        self.calls.append(call)
+        FakeClient.order.append(call[0])
+
     def deposit(self, amount):
-        self.calls.append(("deposit", amount))
+        self.did("deposit", amount)
         return SimpleNamespace(status="credited")
 
     def balance(self):
-        self.calls.append(("balance",))
+        self.did("balance")
         return SimpleNamespace(free="20000.000000")
 
     # the taker's calls
-    def quote(self, pair, side, notional, **kwargs):
-        self.calls.append(("quote", pair, side, notional))
-        FakeClient.cid = kwargs["client_rfq_id"]
-        FakeClient.asked.set()
-        return SimpleNamespace(rate=Decimal("18.09991"), house=False, rfq_id=OURS)
+    def ask(self, pair, side, notional, **kwargs):
+        self.did("ask", pair, side, notional, kwargs)
+        self.asked = SimpleNamespace(rfq_id=OURS, quote=self.winner)
+        return self.asked
+
+    def winner(self):
+        self.did("ask.quote")
+        return SimpleNamespace(rate=Decimal("18.12"), house=FakeClient.house, rfq_id=OURS)
 
     def trade(self, q):
-        self.calls.append(("trade", q.rfq_id))
-        return SimpleNamespace(status="open")
-
-    def rfq(self, rfq_id):
-        self.calls.append(("rfq", rfq_id))
-        if rfq_id == FOREIGN:
-            raise crx.AuthError("not entitled", status=401)
-        if rfq_id == SHARED:
-            return SimpleNamespace(client_rfq_id=None, house_rate=Decimal("18.1"))
-        n = sum(1 for c in self.calls if c == ("rfq", OURS))
-        return SimpleNamespace(client_rfq_id=FakeClient.cid, house_rate=Decimal("18.09991") if n >= 3 else None)
+        self.did("trade", q.rfq_id)
+        return SimpleNamespace(status="pending")
 
     # the maker's calls
     def rfqs(self, **kwargs):
-        stop = kwargs.pop("stop", None)
-        self.calls.append(("rfqs", kwargs, stop))
-
-        def gen():
-            yield SimpleNamespace(rfq_id=FOREIGN, pair="USD/MXN", side="sell", notional=Decimal("25000"))
-            yield SimpleNamespace(rfq_id=SHARED, pair="USD/MXN", side="sell", notional=Decimal("25000"))
-            while not FakeClient.asked.wait(0.01):
-                if stop is not None and stop.is_set():
-                    return
-            yield SimpleNamespace(rfq_id=OURS, pair="USD/MXN", side="sell", notional=Decimal("25000"))
-        return gen()
+        self.did("rfqs", kwargs)
+        return iter([SimpleNamespace(rfq_id=kwargs["only"].rfq_id, pair="USD/MXN", side="sell",
+                                     notional=Decimal("25000"))])
 
     def send_quote(self, rfq, rate):
-        self.calls.append(("send_quote", rfq.rfq_id, rate))
-        return SimpleNamespace(rfq_id=rfq.rfq_id, rate=rate)
+        self.did("send_quote", rfq.rfq_id, rate)
+        return SimpleNamespace(rfq_id=rfq.rfq_id, rate=Decimal(rate))
 
     def confirm(self, q, **kwargs):
-        self.calls.append(("confirm", q.rfq_id, kwargs))
+        self.did("confirm", q.rfq_id, kwargs)
+        if FakeClient.lose == "timeout":
+            raise crx.QuoteLost("no accept before the wait ended", reason="timeout")
         if FakeClient.lose:
-            raise crx.QuoteLost("the taker accepted another quote", reason="another_maker")
-        return SimpleNamespace(status="open", rfq_id=q.rfq_id, tx="0x" + "55" * 32)
+            raise crx.QuoteLost("the taker accepted another quote", reason=FakeClient.lose)
+        return SimpleNamespace(status=FakeClient.status, rfq_id=q.rfq_id, tx=TXH)
+
+    def drop_quote(self, q):
+        self.did("drop_quote", q.rfq_id)
 
     def next_check(self):
-        self.calls.append(("next_check",))
+        self.did("next_check")
         return CHECK
-
-    def positions(self):
-        self.calls.append(("positions",))
-        other = SimpleNamespace(rfq_id=FOREIGN, pair="USDMXN", side="buy", notional=5, rate="17", status="open")
-        mine = SimpleNamespace(rfq_id=OURS, pair="USDMXN", side="sell", notional=25000, rate="18.09991", status="open")
-        return [other, mine]
 
 
 @pytest.fixture
 def fake(monkeypatch):
     monkeypatch.setattr(crx, "Client", FakeClient)
-    monkeypatch.setattr(qs.time, "sleep", lambda _s: None)
-    FakeClient.maker = FakeClient.taker = FakeClient.cid = FakeClient.lose = None
-    FakeClient.asked = threading.Event()
+    FakeClient.maker = FakeClient.taker = FakeClient.lose = None
+    FakeClient.order, FakeClient.house, FakeClient.status = [], False, "open"
     return FakeClient
 
 
@@ -156,9 +146,20 @@ def test_the_contract_names_hold():
     src = inspect.getsource(qs.steps)
     for line in ('maker = crx.Client(network="testnet")',
                  'taker = crx.Client(os.environ["CRX_TAKER_PK"], network="testnet")',
-                 "maker.deposit(20_000)", "taker.deposit(20_000)", "for rfq in rfqs:",
-                 "q = maker.send_quote(rfq, near_mid(rfq))", "t = maker.confirm(q, timeout=60)"):
+                 "maker.deposit(20_000)", "taker.deposit(20_000)", 'RATE = "18.12"',
+                 'ask = taker.ask("USD/MXN", "buy", 25_000)', "for rfq in maker.rfqs(only=ask, wait=60):",
+                 "q = maker.send_quote(rfq, RATE)", "won = ask.quote()", "t = taker.trade(won)",
+                 "t = maker.confirm(q, timeout=60)", "maker.drop_quote(q)"):
         assert line in src
+
+
+@pytest.mark.parametrize("src", [EXAMPLE.read_text(), inspect.getsource(qs.steps)], ids=["example", "steps"])
+def test_the_reader_sees_no_thread_no_tag_and_no_rfq_read(src):
+    for gone in ("threading", "uuid", "random", "time.sleep", "Event", "taker_done", "taker_failed", "def ask",
+                 "client_rfq_id", ".rfq(", "else:", "finally:", "continue", "break"):
+        assert gone not in src
+    assert src.count("try:") == src.count("except ") == 1 and "except crx.QuoteLost as e:" in src
+    assert not any(hasattr(qs, name) for name in ("threading", "time", "uuid", "random"))
 
 
 def test_help_names_both_key_variables(capsys):
@@ -175,110 +176,87 @@ def test_unknown_argument_exits_2(fake):
     assert e.value.code == 2 and FakeClient.maker is None
 
 
-def test_quotes_only_its_own_takers_rfq(capsys, fake, keys):
+def test_the_taker_asks_the_maker_quotes_the_taker_accepts(capsys, fake, keys):
     assert qs.main([]) == 0
     m, t = FakeClient.maker, FakeClient.taker
     assert m.kwargs == {"network": "testnet"} and m.args == ()
     assert t.kwargs == {"network": "testnet"} and t.args == (TAKER_KEY,)
-    assert [c for c in m.calls if c[0] == "send_quote"] == [("send_quote", OURS, Decimal("18.09991"))]
-    stream = next(c for c in m.calls if c[0] == "rfqs")
-    assert stream[1] == {"wait": 60} and isinstance(stream[2], threading.Event)
-    assert ("confirm", OURS, {"timeout": 60}) in m.calls
-    assert ("quote", "USD/MXN", "buy", 25_000) in t.calls and ("trade", OURS) in t.calls
-    assert FakeClient.cid.startswith("maker-qs-")
+    assert FakeClient.order == ["deposit", "deposit", "balance", "balance", "ask", "rfqs", "send_quote",
+                                "ask.quote", "trade", "confirm"]
+    assert t.calls[2:] == [("ask", "USD/MXN", "buy", 25_000, {}), ("ask.quote",), ("trade", OURS)]
+    assert m.calls[2:] == [("rfqs", {"only": t.asked, "wait": 60}), ("send_quote", OURS, "18.12"),
+                           ("confirm", OURS, {"timeout": 60})]
     lines = capsys.readouterr().out.splitlines()
     assert all(STAMP.match(line) for line in lines)
-    assert lines[0].endswith(" 0x7638c8075e517393fa62008b5faa6c1ea832fe71 0x5b38da6a701c568545dcfcb03fcb875f56beddc4")
-    assert any(line.endswith(" maker: quoted 18.09991") for line in lines)
-    assert any(line.endswith(" maker: open") for line in lines)
-    assert any(line.endswith(" taker: open") for line in lines)
-    assert lines[-1].endswith(" USDMXN sell 25000 18.09991 open")
-    assert ("next_check",) not in m.calls
+    assert [line[9:] for line in lines] == [
+        "0x7638c8075e517393fa62008b5faa6c1ea832fe71 0x5b38da6a701c568545dcfcb03fcb875f56beddc4",
+        "20000.000000 20000.000000", "USD/MXN sell 25000", "maker: quoted 18.12",
+        "taker: winning quote 18.12 maker", "taker: pending", "maker: open"]
 
 
-def test_a_lost_quote_exits_1_with_its_code(capsys, fake, keys):
-    FakeClient.lose = True
+def test_a_lost_quote_exits_1_with_its_code_and_drops_nothing(capsys, fake, keys):
+    FakeClient.lose = "another_maker"
     assert qs.main([]) == 1
     assert capsys.readouterr().err.strip() == "quote_lost: the taker accepted another quote"
+    assert "drop_quote" not in FakeClient.order
 
 
-def test_a_taker_refusal_ends_the_run_at_once_with_its_own_error(capsys, fake, keys, monkeypatch):
+def test_no_accept_in_the_wait_drops_the_quote_and_exits_1(capsys, fake, keys):
+    FakeClient.lose = "timeout"
+    assert qs.main([]) == 1
+    assert capsys.readouterr().err.strip() == "quote_lost: no accept before the wait ended"
+    assert FakeClient.order[-2:] == ["confirm", "drop_quote"] and FakeClient.maker.calls[-1] == ("drop_quote", OURS)
+
+
+def test_a_winning_house_quote_is_not_accepted(capsys, fake, keys):
+    FakeClient.house, FakeClient.lose = True, "timeout"
+    assert qs.main([]) == 1
+    out = capsys.readouterr().out.splitlines()
+    assert out[-1].endswith(" taker: winning quote 18.12 house")
+    assert "trade" not in FakeClient.order and FakeClient.order[-1] == "drop_quote"
+
+
+def test_a_taker_refusal_ends_the_run_with_its_own_error(capsys, fake, keys, monkeypatch):
     def refused(self, *a, **k):
         raise crx.BelowMin("a pool wallet trades at least 25000 USD notional; got 10000")
 
-    monkeypatch.setattr(FakeClient, "quote", refused)
-    FakeClient.asked.wait = lambda timeout=None: False  # the taker's RFQ never opens
-    start = qs.time.monotonic()
+    monkeypatch.setattr(FakeClient, "ask", refused)
     assert qs.main([]) == 1
-    assert qs.time.monotonic() - start < 5
     out, err = capsys.readouterr()
     assert err.strip() == "below_min: a pool wallet trades at least 25000 USD notional; got 10000"
-    assert "maker role" not in err
-    assert any(line.endswith(" taker: below_min a pool wallet trades at least 25000 USD notional; got 10000")
-               for line in out.splitlines())
-    assert not any(c[0] == "send_quote" for c in FakeClient.maker.calls)
+    assert "Traceback" not in out + err and FakeClient.order[-1] == "balance"
 
 
-def test_a_taker_rfq_with_no_quote_gets_the_maker_role_hint(capsys, fake, keys, monkeypatch):
-    def unquoted(self, *a, **k):
-        raise crx.NoQuotes("no quote before the wait ended")
+def test_an_rfq_with_no_winner_exits_1(capsys, fake, keys, monkeypatch):
+    def unquoted(self):
+        raise crx.NoQuotes("no quote before the wait ended: no maker online, or the market just closed")
 
-    monkeypatch.setattr(FakeClient, "quote", unquoted)
-    FakeClient.asked.wait = lambda timeout=None: False
+    monkeypatch.setattr(FakeClient, "winner", unquoted)
     assert qs.main([]) == 1
-    assert capsys.readouterr().err.startswith("no_quotes: your test taker's RFQ did not reach the maker seat")
+    assert capsys.readouterr().err.startswith("no_quotes: no quote before the wait ended")
+    assert FakeClient.order[-1] == "send_quote"
 
 
-def test_rate_limits_in_the_match_loop_are_waited_out(capsys, fake, keys, monkeypatch):
-    real = FakeClient.rfq
-    hits = []
-
-    def limited(self, rfq_id):
-        hits.append(rfq_id)
-        if rfq_id == OURS and len([h for h in hits if h == OURS]) in (1, 2, 5):
-            raise crx.RateLimited("slow down", status=429)
-        return real(self, rfq_id)
-
-    monkeypatch.setattr(FakeClient, "rfq", limited)
-    assert qs.main([]) == 0
-    assert [c for c in FakeClient.maker.calls if c[0] == "send_quote"] == [("send_quote", OURS, Decimal("18.09991"))]
-
-
-def test_a_rate_limit_that_holds_exits_1(capsys, fake, keys, monkeypatch):
-    real = FakeClient.rfq
-
-    def limited(self, rfq_id):
-        if rfq_id == OURS:
-            raise crx.RateLimited("slow down", status=429)
-        return real(self, rfq_id)
-
-    monkeypatch.setattr(FakeClient, "rfq", limited)
+def test_an_rfq_that_never_reaches_the_maker_exits_1(capsys, fake, keys, monkeypatch):
+    monkeypatch.setattr(FakeClient, "rfqs", lambda self, **k: _maker._only(iter([]), k["only"].rfq_id, None))
     assert qs.main([]) == 1
-    assert capsys.readouterr().err.strip() == "rate_limited: slow down"
-    assert not any(c[0] == "send_quote" for c in FakeClient.maker.calls)
+    out, err = capsys.readouterr()
+    assert err.strip() == ("no_quotes: the RFQ did not reach this account before the wait ended: "
+                           "check its maker role and collateral")
+    assert "Traceback" not in out + err and FakeClient.order[-1] == "ask"
 
 
-def test_an_accepted_trade_that_landed_names_the_next_check_and_exits_0(capsys, fake, keys, monkeypatch):
-    def confirm(self, q, **kwargs):
-        return SimpleNamespace(status="pending", rfq_id=q.rfq_id, tx="0x" + "55" * 32)
-
-    def positions(self):
-        return [SimpleNamespace(rfq_id=OURS, pair="USDMXN", side="sell", notional=25000, rate="18.09991",
-                                status="pending")]
-
-    monkeypatch.setattr(FakeClient, "confirm", confirm)
-    monkeypatch.setattr(FakeClient, "positions", positions)
+def test_an_accepted_trade_that_landed_names_the_next_check_and_exits_0(capsys, fake, keys):
+    FakeClient.status = "pending"
     assert qs.main([]) == 0
     out, err = capsys.readouterr()
-    at = f"{CHECK.astimezone():%H:%M}"
     lines = out.splitlines()
     assert err == "" and all(STAMP.match(line) for line in lines)
-    assert any(line.endswith(f" maker: accepted; it opens at the next hourly check, {at}") for line in lines)
-    assert lines[-1].endswith(" USDMXN sell 25000 18.09991 pending")
+    assert lines[-2].endswith(" maker: pending")
+    assert lines[-1].endswith(f" maker: accepted; it opens at the next hourly check, {CHECK.astimezone():%H:%M}")
 
 
-@pytest.mark.parametrize("status, tx", [("refused", None), ("refused", "0x" + "55" * 32), ("pending", None),
-                                        ("sending", None)])
+@pytest.mark.parametrize("status, tx", [("refused", None), ("refused", TXH), ("pending", None), ("sending", None)])
 def test_a_trade_not_open_ends_cleanly(capsys, fake, keys, monkeypatch, status, tx):
     def confirm(self, q, **kwargs):
         return SimpleNamespace(status=status, rfq_id=q.rfq_id, tx=tx)
@@ -287,32 +265,7 @@ def test_a_trade_not_open_ends_cleanly(capsys, fake, keys, monkeypatch, status, 
     assert qs.main([]) == 1
     out, err = capsys.readouterr()
     assert err.strip() == f"not_open: the trade is {status}, not open"
-    assert "Traceback" not in out + err
-    assert ("positions",) not in FakeClient.maker.calls
-
-
-def test_an_open_trade_not_yet_listed_ends_without_error(capsys, fake, keys, monkeypatch):
-    monkeypatch.setattr(FakeClient, "positions", lambda self: [])
-    assert qs.main([]) == 0
-
-
-def test_no_rfq_for_the_taker_exits_1(capsys, fake, keys, monkeypatch):
-    monkeypatch.setattr(FakeClient, "rfqs", lambda self, **k: iter([]))
-    assert qs.main([]) == 1
-    assert capsys.readouterr().err.startswith("no_quotes: your test taker's RFQ did not reach the maker seat")
-
-
-def test_no_house_quote_exits_1(capsys, fake, keys, monkeypatch):
-    real = FakeClient.rfq
-
-    def never(self, rfq_id):
-        v = real(self, rfq_id)
-        return SimpleNamespace(client_rfq_id=v.client_rfq_id, house_rate=None)
-
-    monkeypatch.setattr(FakeClient, "rfq", never)
-    assert qs.main([]) == 1
-    assert capsys.readouterr().err.strip() == "no_quotes: no house quote to price from"
-    assert not any(c[0] == "send_quote" for c in FakeClient.maker.calls)
+    assert "Traceback" not in out + err and "next_check" not in FakeClient.order
 
 
 def test_unset_keys_are_asked_hidden_and_never_printed(monkeypatch, capsys, fake, no_keys):

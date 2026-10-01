@@ -21,8 +21,8 @@ from . import _eip712 as e7
 from ._bind import SIDE_WINDOW, Binder, obj, read_later, status_code, utc
 from ._http import Gateway
 from .errors import (
-    BadAnswer, BadRequest, CrxError, LegIdTaken, LegLive, NetworkError, QuoteLost, RateLimited, RefusedToSign,
-    ServerError, TradeUnknown, UnknownOrEnded, clean, from_gateway,
+    BadAnswer, BadRequest, CrxError, LegIdTaken, LegLive, NetworkError, NoQuotes, QuoteLost, RateLimited,
+    RefusedToSign, ServerError, TradeUnknown, UnknownOrEnded, clean, from_gateway,
 )
 from .models import Drop, MakerQuote, Rfq, Trade, _side_of, dec, ms_to_dt
 
@@ -126,14 +126,22 @@ def _opened(rows: list) -> Iterator[Rfq]:
                 yield r
 
 
-def stream(c: "Client", since: int | None, wait: float | None, poll: float, stop: Any = None) -> Iterator[Rfq]:
+def stream(
+    c: "Client", since: int | None, wait: float | None, poll: float, stop: Any = None, only: Any = None,
+) -> Iterator[Rfq]:
     """Open RFQs off the REST tape (``GET /trades``), oldest first, each once.
 
     Reads the tape from ``since`` (default: its start) up to its head at once, before
     it returns. From there it yields the RFQs still inside their quote window, then
     each new one. A gateway that does not answer, or answers 5xx or 429, is read again
     after ``poll`` s. Ends when ``wait`` s pass (None: never), or once ``stop`` is set.
+    ``only`` (an ``Ask``, or an RFQ id): see ``_only``.
     """
+    rid = None
+    if only is not None:
+        rid = _word(getattr(only, "rfq_id", only))
+        if rid is None:
+            raise BadRequest("only is an Ask, or an RFQ id")
     cursor = int(since or 0)
     end = None if wait is None else c._clock() + max(float(wait), 0.0)
     backlog: list[Rfq] = []
@@ -143,7 +151,20 @@ def stream(c: "Client", since: int | None, wait: float | None, poll: float, stop
         backlog += [r for r in _opened(rows) if _quotable(r, c.chain_key, c._clock() * 1000)]
         if len(rows) < PAGE:
             break
-    return _follow(c, cursor, backlog, end, poll, stop)
+    rfqs = _follow(c, cursor, backlog, end, poll, stop)
+    return rfqs if rid is None else _only(rfqs, rid, stop)
+
+
+def _only(rfqs: Iterator[Rfq], rfq_id: str, stop: Any) -> Iterator[Rfq]:
+    """The RFQ ``rfq_id`` alone off ``rfqs``, then the end. ``NoQuotes`` when ``rfqs`` ends
+    before it arrives, unless ``stop`` ended it."""
+    for r in rfqs:
+        if r.rfq_id == rfq_id:
+            yield r
+            return
+    if stop is None or not stop.is_set():
+        raise NoQuotes("the RFQ did not reach this account before the wait ended: "
+                       "check its maker role and collateral", details={"rfq_id": rfq_id})
 
 
 def _follow(

@@ -740,6 +740,127 @@ def test_old_gateway_answer_polls(make_client, venue, session, clock):
     assert q.quote_id == QID and len(trade_polls(session)) == 2
 
 
+# ---------- ask() ----------
+
+EXPIRY_MS = 1_900_000_000_000
+OPEN_BODY = (b'{"chain":"avax-fuji","pair":"USDMXN","side":"buy","notional":"25000","expiry":1900000000000,'
+             b'"im_bps":100,"client_rfq_id":"desk-1","wait":%s}')
+
+
+def test_quote_wire_body_is_unchanged(make_client, venue, session, clock):
+    make_client(clock=clock).quote("USD/MXN", "buy", 25_000, expiry=EXPIRY_MS, client_rfq_id="desk-1")
+    [post] = rfq_posts(session)
+    assert post["raw"] == OPEN_BODY % b"true" and post["timeout"] == 30
+
+
+def test_ask_sends_wait_false_and_returns_at_once(make_client, venue, session, clock):
+    from datetime import datetime, timezone
+    start = clock()
+    a = make_client(clock=clock).ask("USD/MXN", "buy", 25_000, expiry=EXPIRY_MS, client_rfq_id="desk-1")
+    [post] = rfq_posts(session)
+    assert post["raw"] == OPEN_BODY % b"false" and post["timeout"] == 10
+    assert trade_polls(session) == [] and clock() == start
+    assert isinstance(a, crx.Ask)
+    assert (a.rfq_id, a.pair, a.side, a.notional) == (RFQ, "USD/MXN", "buy", Decimal("25000"))
+    assert a.expiry == datetime.fromtimestamp(EXPIRY_MS / 1000, timezone.utc)
+    assert a.raw["leg_id"] == LEG and "Client" not in repr(a)
+    with pytest.raises(AttributeError):
+        a.rfq_id = QID
+
+
+def test_ask_quote_is_the_winner_and_trades(make_client, venue, session, clock):
+    c = make_client(clock=clock)
+    q = c.ask("USD/MXN", "buy", 25_000).quote()
+    assert (q.rfq_id, q.quote_id, q.rate, q.side, q.pair) == (RFQ, QID, Decimal("18.700000"), "buy", "USD/MXN")
+    assert (q.rfq["leg_id"], q.rfq["quote_expiry"]) == (LEG, venue.qe_ms)
+    assert len(trade_polls(session)) == 2  # no winner named, then the winner
+    assert f"/rfqs/{RFQ}/accept" not in session.paths()  # nothing accepted
+    t = c.trade(q)
+    assert (t.status, t.tx) == ("open", TXH) and sent_nothing(session)
+
+
+def test_ask_quote_is_the_quote_that_quote_returns(make_client, venue, session, clock):
+    c, t0 = make_client(clock=clock), clock()
+    asked = c.ask("USD/MXN", "buy", 25_000, expiry=EXPIRY_MS).quote()
+    venue.reset()
+    session.routes[("GET", f"/rfqs/{RFQ}")] = [{"quote": None, "quotes": []}, venue.view]
+    clock.t = t0
+    one_call = c.quote("USD/MXN", "buy", 25_000, expiry=EXPIRY_MS)  # an open answer without `quotes`: it polls
+    assert asked == one_call and asked.rfq == one_call.rfq
+
+
+def test_ask_quote_without_a_quote_is_no_quotes(make_client, venue, session, clock):
+    session.routes[("GET", f"/rfqs/{RFQ}")] = {"quote": None, "quotes": []}
+    a = make_client(clock=clock).ask("USD/MXN", "buy", 25_000)
+    start = clock()
+    with pytest.raises(crx.NoQuotes) as ei:
+        a.quote(wait=5)
+    assert ei.value.details == {"rfq_id": RFQ} and clock() - start == pytest.approx(5)
+
+
+def test_ask_quote_without_a_pick_takes_the_best_live_quote_at_the_end(make_client, venue, session, clock):
+    session.routes[("GET", f"/rfqs/{RFQ}")] = lambda req: {"quote": None, "quotes": [venue.row()]}
+    a = make_client(clock=clock).ask("USD/MXN", "buy", 25_000)
+    start = clock()
+    assert a.quote(wait=3).quote_id == QID and clock() - start == pytest.approx(3)
+
+
+def test_ask_gateway_refusal_raises_at_the_ask(make_client, session, markets):
+    session.routes[("GET", "/markets")] = open_market(markets, "USD/MXN")
+    session.routes[("POST", "/rfqs")] = (400, {"code": "pool_min_notional", "error": "pool min 25000"})
+    with pytest.raises(crx.BelowMin, match="pool min 25000"):
+        make_client().ask("USD/MXN", "buy", 10_000)
+
+
+@pytest.mark.parametrize("answer, err", [
+    ((429, {"code": "rate_limited", "error": "slow down"}), crx.RateLimited),
+    ((401, {"code": "unauthorized", "error": "not entitled"}), crx.AuthError),
+    ((503, {"code": "upstream", "error": "down"}), crx.ServerError),
+])
+def test_ask_quote_gateway_refusal_raises_its_class(make_client, venue, session, clock, answer, err):
+    a = make_client(clock=clock).ask("USD/MXN", "buy", 25_000)
+    session.routes[("GET", f"/rfqs/{RFQ}")] = answer
+    with pytest.raises(err):
+        a.quote()
+
+
+def naive_expiry():
+    from datetime import datetime
+    return datetime(2027, 1, 4)
+
+
+@pytest.mark.parametrize("args, kw, err", [
+    (("USD/XX", "buy", 25_000), {}, crx.BadRequest),
+    (("USD/MXN", "long", 25_000), {}, crx.BadRequest),
+    (("USD/MXN", "buy", -1), {}, crx.BadRequest),
+    (("USD/MXN", "buy", "1.0000001"), {}, crx.BadRequest),
+    (("USD/MXN", "buy", 5_000), {}, crx.BelowMin),
+    (("USD/JPY", "buy", 25_000), {}, crx.MarketPaused),
+    (("USD/MXN", "buy", 25_000), {"client_rfq_id": ""}, crx.BadRequest),
+    (("USD/MXN", "buy", 25_000), {"im_bps": 0}, crx.BadRequest),
+    (("USD/MXN", "buy", 25_000), {"expiry": naive_expiry()}, crx.BadRequest),
+    (("USD/MXN", "buy", 25_000), {"expiry": "tomorrow"}, crx.BadRequest),
+])
+def test_ask_makes_the_checks_of_quote(make_client, session, markets, args, kw, err):
+    session.routes[("GET", "/markets")] = open_market(markets, "USD/MXN")
+    c = make_client()
+    said = []
+    for call in (c.quote, c.ask):
+        with pytest.raises(err) as ei:
+            call(*args, **kw)
+        said.append((type(ei.value), str(ei.value), ei.value.details))
+    assert said[0] == said[1] and type(said[0][0]) is type and said[0][0] is err
+    assert session.paths("POST") == []
+
+
+def test_ask_needs_the_seat_key(make_client, session, monkeypatch):
+    for name in ("CRX_WALLET_PK", "CRX_WALLET_PK_FILE"):
+        monkeypatch.delenv(name, raising=False)
+    with pytest.raises(crx.ConfigError):
+        make_client(key=False).ask("USD/MXN", "buy", 25_000)
+    assert session.calls == []
+
+
 def test_paused_pair(make_client, session):
     with pytest.raises(crx.MarketPaused):
         make_client().quote("USD/JPY", "buy", 25_000)

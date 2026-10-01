@@ -62,6 +62,31 @@ class Quote:
 
 
 @dataclass(frozen=True)
+class Ask:
+    """Your open RFQ, as ``Client.ask`` opened it. ``quote()`` returns its winning quote.
+
+    ``side`` is your side in the base currency. ``expiry`` is the settlement instant.
+    """
+
+    rfq_id: str
+    pair: str
+    side: str
+    notional: Decimal
+    expiry: datetime | None
+    raw: dict = field(repr=False, compare=False)
+    rfq: dict = field(repr=False, compare=False)
+    _client: Any = field(repr=False, compare=False)
+
+    def quote(self, wait: float = 30.0) -> Quote:
+        """The winning quote, once the gateway names it after the 10 s window. Nothing is accepted.
+
+        Polls for ``wait`` s at most; the best live quote goes at the end. No quote
+        raises ``NoQuotes``. Pass the result to ``Client.trade``.
+        """
+        return self._client._winner(self.rfq, wait)
+
+
+@dataclass(frozen=True)
 class Trade:
     """``status`` is ``sending`` (CRX is sending the tx), ``open`` (the trade counts now),
     ``pending`` (not final yet; ``trade.opened`` or ``trade.refused`` follows) or ``refused``.

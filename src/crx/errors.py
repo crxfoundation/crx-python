@@ -101,7 +101,7 @@ class AboveMax(CrxError):
 
 
 class NoQuotes(CrxError):
-    """No maker quoted before the wait ended."""
+    """No maker quoted before the wait ended. From ``rfqs(only=)``: the RFQ did not arrive before it."""
 
     code = "no_quotes"
 

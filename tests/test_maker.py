@@ -176,6 +176,51 @@ def test_rfqs_break_stops_reading(maker, session):
     assert r.rfq_id == RFQ and n == 1
 
 
+OTHER = "0x" + "a2" * 32
+ASK = crx.Ask(rfq_id=RFQ, pair="USD/MXN", side="buy", notional=Decimal("25000"), expiry=None, raw={}, rfq={},
+              _client=None)
+
+
+@pytest.mark.parametrize("only", [ASK, RFQ, RFQ.upper()], ids=["ask", "rfq_id", "upper_case"])
+def test_rfqs_only_yields_that_rfq_then_ends(maker, session, only):
+    session.routes[("GET", "/trades")] = [
+        tape([opened(frame(rfq_id=OTHER), 1)], 1),
+        tape([opened(frame(rfq_id="0x" + "a3" * 32), 2), opened(frame(), 3), opened(frame(rfq_id=OTHER), 4)], 4),
+        tape([opened(frame(), 5)], 5),
+    ]
+    assert [r.rfq_id for r in maker.rfqs(only=only, wait=30)] == [RFQ]
+    assert len(session.calls) == 2  # the catch-up read, then the read that carried it: none after
+
+
+def test_rfqs_only_takes_the_rfq_from_the_catch_up_read(maker, session):
+    session.routes[("GET", "/trades")] = tape([opened(frame(rfq_id=OTHER), 1), opened(frame(), 2)], 2)
+    assert [r.rfq_id for r in maker.rfqs(only=ASK, wait=30)] == [RFQ] and len(session.calls) == 1
+
+
+def test_rfqs_only_raises_no_quotes_when_the_rfq_never_arrives(maker, session, clock):
+    session.routes[("GET", "/trades")] = tape([opened(frame(rfq_id=OTHER), 1)], 1)
+    start = clock()
+    with pytest.raises(crx.NoQuotes) as ei:
+        list(maker.rfqs(only=ASK, wait=3))
+    assert ei.value.details == {"rfq_id": RFQ} and "check its maker role and collateral" in str(ei.value)
+    assert clock() - start == 3
+
+
+def test_rfqs_only_ends_without_error_once_stop_is_set(maker, session):
+    import threading
+    stop = threading.Event()
+    stop.set()
+    session.routes[("GET", "/trades")] = tape([opened(frame(rfq_id=OTHER), 1)], 1)
+    assert list(maker.rfqs(only=ASK, stop=stop)) == []
+
+
+@pytest.mark.parametrize("only", ["", "0x12", RFQ + "00", 7, object()])
+def test_rfqs_only_refuses_what_names_no_rfq_before_any_call(maker, session, only):
+    with pytest.raises(crx.BadRequest, match="only is an Ask, or an RFQ id"):
+        maker.rfqs(only=only)
+    assert session.calls == []
+
+
 # ---------- send_quote ----------
 
 def quote_route(session, sep, answer=None, **edit):

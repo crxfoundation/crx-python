@@ -26,8 +26,8 @@ from .errors import (
     MarketPaused, NoQuotes, QuoteDropped, RefusedToSign, clean,
 )
 from .models import (
-    Balance, Deposit, Drop, Event, MakerQuote, Market, Position, Quote, Rfq, Trade, Viewer, Withdraw, dec, ms_to_dt,
-    side_word,
+    Ask, Balance, Deposit, Drop, Event, MakerQuote, Market, Position, Quote, Rfq, Trade, Viewer, Withdraw, dec,
+    ms_to_dt, side_word,
 )
 
 log = logging.getLogger("crx")
@@ -391,7 +391,7 @@ class Client:
         A maker seat also receives every open RFQ on the venue (``rfq.opened``, no
         owner named). By default an ``rfq.opened`` is kept only when it carries a
         ``client_rfq_id``: the gateway serves that field to the RFQ's taker alone.
-        ``quote()`` always sends one; an RFQ opened elsewhere without one shows
+        ``quote()`` and ``ask()`` always send one; an RFQ opened elsewhere without one shows
         its other events only. ``market=True`` keeps every ``rfq.opened``.
         """
         self._need_key()
@@ -449,6 +449,40 @@ class Client:
         A closed market still takes the RFQ: the gateway decides. Its refusal
         raises the matching error; no quote raises ``NoQuotes``.
         """
+        rfq, r = self._open(pair, side, notional, expiry, im_bps, client_rfq_id, True)
+        if not isinstance(r.get("quotes"), list):
+            return self._winner(rfq, wait)
+        q = self._pick(r)  # the answer came after the window
+        if q is None:
+            raise NoQuotes("no quote in the window: no maker online, or the market just closed",
+                           details={"rfq_id": rfq["rfq_id"]})
+        return self._quote_of(rfq, q)
+
+    def ask(
+        self,
+        pair: str,
+        side: str,
+        notional: Any,
+        *,
+        expiry: datetime | timedelta | int | None = None,
+        im_bps: int = 100,
+        client_rfq_id: str | None = None,
+    ) -> Ask:
+        """Open an RFQ and return at once. ``Ask.quote()`` returns the winning quote.
+
+        Takes the terms of ``quote()`` and makes the same checks. The gateway
+        answers before the 10 s window ends, with no quote.
+        """
+        rfq, r = self._open(pair, side, notional, expiry, im_bps, client_rfq_id, False)
+        return Ask(rfq_id=rfq["rfq_id"], pair=rfq["pair"], side=rfq["side"], notional=Decimal(rfq["notional"]),
+                   expiry=ms_to_dt(rfq["expiry"]), raw=r, rfq=rfq, _client=self)
+
+    def _open(
+        self, pair: str, side: str, notional: Any, expiry: datetime | timedelta | int | None, im_bps: int,
+        client_rfq_id: str | None, wait: bool,
+    ) -> tuple[dict, dict]:
+        """Check the terms and POST /rfqs. ``wait``: the gateway answers after the 10 s window,
+        with the winner; else at once. Returns (the RFQ's terms, the gateway's answer)."""
         self._need_seat()
         if client_rfq_id is not None and not _client_id(client_rfq_id):
             raise BadRequest("client_rfq_id must be 1 to 128 printable characters",
@@ -481,9 +515,10 @@ class Client:
         req = {
             "chain": self.chain_key, "pair": compact, "side": side, "notional": _plain(amount),
             "expiry": expiry_ms, "im_bps": im_bps, "client_rfq_id": client_rfq_id or f"sdk-{uuid.uuid4().hex[:12]}",
-            "wait": True,
+            "wait": wait,
         }
-        r = self._gw.request("POST", "/rfqs", body=req, timeout=max(self._gw._timeout, OPEN_TIMEOUT))
+        r = self._gw.request("POST", "/rfqs", body=req,
+                             timeout=max(self._gw._timeout, OPEN_TIMEOUT) if wait else None)
         try:
             rfq_id, leg_id, quote_expiry = str(r["rfq_id"]), str(r["leg_id"]), int(r["quote_expiry"])
             echo_im = int(r.get("im_bps", im_bps))
@@ -492,14 +527,11 @@ class Client:
         log.info("rfq %s opened: %s %s %s", rfq_id, slash, side, _plain(amount))
         rfq = {"rfq_id": rfq_id, "leg_id": leg_id, "quote_expiry": quote_expiry, "im_bps": echo_im,
                "pair": slash, "side": side, "notional": _plain(amount), "expiry": expiry_ms, "req_im_bps": im_bps}
-        if isinstance(r.get("quotes"), list):  # the answer came after the window
-            q = self._pick(r)
-            if q is None:
-                raise NoQuotes("no quote in the window: no maker online, or the market just closed",
-                               details={"rfq_id": rfq_id})
-        else:
-            q = self._await_quote(rfq_id, wait)
-        return self._quote_of(rfq, q)
+        return rfq, r
+
+    def _winner(self, rfq: dict, wait: float) -> Quote:
+        """The winning quote on the open RFQ ``rfq``, polled for ``wait`` s at most."""
+        return self._quote_of(rfq, self._await_quote(rfq["rfq_id"], wait))
 
     @staticmethod
     def _quote_of(rfq: dict, q: dict) -> Quote:
@@ -770,7 +802,7 @@ class Client:
 
     def rfqs(
         self, *, since: int | None = None, wait: float | None = None, poll: float = 1.0,
-        stop: threading.Event | None = None,
+        stop: threading.Event | None = None, only: Ask | str | None = None,
     ) -> Iterator[Rfq]:
         """Open RFQs you can quote, as they arrive: the ``rfq.opened`` frames of your tape.
 
@@ -780,9 +812,12 @@ class Client:
         (an ``Rfq.seq``), else from the start. Reads again every ``poll`` s: the tape shares
         a per-IP read budget of 5 requests a second. Ends after ``wait`` s, or once ``stop``
         (a ``threading.Event``) is set; by default it never ends. Break out of the loop to stop.
+
+        ``only`` (an ``Ask``, or an RFQ id) yields that RFQ alone, then ends. When ``wait``
+        ends before it arrives, ``NoQuotes`` raises.
         """
         self._need_seat()
-        return _maker.stream(self, since, wait, poll, stop)
+        return _maker.stream(self, since, wait, poll, stop, only)
 
     def rfq(self, rfq_id: str) -> Rfq:
         """One RFQ as your seat reads it. As its taker, ``quotes`` holds every desk's

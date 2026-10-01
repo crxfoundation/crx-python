@@ -70,6 +70,7 @@ print(w.status)  # accepted
 | `markets()` | Pairs, sessions, limits. No key needed. |
 | `next_check()` | The next hourly check, UTC. A `pending` trade with a landed `tx` opens there. No key needed. |
 | `quote(pair, side, notional)` | Opens an RFQ. Returns the best firm quote after the 10 s window. Accepts nothing. |
+| `ask(pair, side, notional)` | Opens an RFQ and returns at once. `.quote()` on the result returns the winning quote after the 10 s window. Accepts nothing. |
 | `trade(quote)` | Accepts and opens. CRX sends the tx and pays gas. `status`: `sending`, `open`, `pending` or `refused`. |
 | `deposit(amount)` | Approve, then deposit USDC. On testnet, mints the test USDC you lack. `status`: `credited`, `pending` or `failed`. |
 | `withdraw(amount)` | Signs a withdraw to your own wallet and sends it in one request. CRX sends the tx and pays gas. `status`: `sending`, `accepted`, `pending`, `paid`, `partial`, `refused` or `returned`. In your wallet within about 2 hours. |
@@ -94,11 +95,11 @@ Runs the maker Quickstart on Testnet with two accounts: your test taker asks, yo
 
 The trade reads `open`, or `pending`: accepted, the tx landed, and it opens at the next hourly check. The script exits 0 on both.
 
-Other desks ask on Testnet too, so the script quotes its own test taker's RFQ only. It matches `client_rfq_id`, which the gateway serves to an RFQ's own taker alone.
+Other desks ask on Testnet too, so the script quotes its own test taker's RFQ only: `rfqs(only=ask)`.
 
 | Call | Does |
 |---|---|
-| `rfqs()` | Streams the open RFQs you can quote. A seat with no collateral receives none. |
+| `rfqs()` | Streams the open RFQs you can quote. A seat with no collateral receives none. `only=` (an `Ask`, or an RFQ id) yields that RFQ alone. |
 | `rfq(rfq_id)` | One RFQ as your seat reads it. Its taker also reads every desk's quote: `house_rate` is the house desk's. |
 | `send_quote(rfq, rate)` | Signs and posts a firm quote. The gateway takes quotes for the first 10 s of an RFQ only. The taker gets the best quote only. Any maker quote outranks the house quote. |
 | `confirm(quote)` | Waits for the accept; signs your Side, unless the quote is binding. CRX sends the tx and pays gas. `status`: `open`, `sending`, `pending` or `refused`. |
@@ -135,7 +136,7 @@ Every error is a `crx.CrxError`. Branch on `.code`.
 |---|---|
 | `market_paused` | Pair not live. |
 | `below_min`, `above_max` | Notional out of range. |
-| `no_quotes` | No maker quoted in time. |
+| `no_quotes` | No maker quoted in time. From `rfqs(only=)`: the RFQ did not reach your seat in time. |
 | `quote_lost` | Your maker quote opened no trade. `reason`: `another_maker`, `expired`, `cancelled`, `round_closed`, `dropped` or `timeout`. |
 | `leg_live` | Your seat holds another live binding quote on the RFQ. Quote again, or `drop_quote(rfq, leg_id=err.leg_id)`. |
 | `leg_id_taken` | The quote's leg id is used. Quote again. |
