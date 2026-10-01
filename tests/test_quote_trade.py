@@ -81,7 +81,7 @@ class Venue:
              "leg_id": LEG, "join_ref": JOIN, "side": 1 if b["side"] == "buy" else -1,
              "pair_id": e7.h0x(e7.pair_id(b["pair"][:3] + "/" + b["pair"][3:])), "instrument_id": 1,
              "notional": f"{Decimal(b['notional']):.6f}", "premium_bps": 0, "expiry": b["expiry"],
-             "status": "live", "house": False}
+             "status": "quoted", "house": False}
         r.update(self.row_edit)
         return r
 
@@ -709,6 +709,29 @@ def test_waited_answer_without_a_pick_takes_the_best_live_quote(make_client, ven
     venue.waited_view = lambda: {"quote": None, "quotes": [venue.row()]}
     q = make_client(clock=clock).quote("USD/MXN", "buy", 25_000)
     assert q.quote_id == QID and trade_polls(session) == []
+
+
+def other_row(venue, status):
+    """A better-priced row in `status`; None leaves the status out."""
+    row = dict(venue.row(), quote_id="0x" + "66" * 32, rate="18.500000", status=status)
+    return {k: v for k, v in row.items() if v is not None}
+
+
+@pytest.mark.parametrize("status", ["dropped", "declined", "live", None])
+def test_pick_takes_only_a_quoted_row(make_client, venue, session, clock, status):
+    venue.waited = True
+    venue.waited_view = lambda: {"quote": None, "quotes": [other_row(venue, status), venue.row()]}
+    assert make_client(clock=clock).quote("USD/MXN", "buy", 25_000).quote_id == QID
+
+
+@pytest.mark.parametrize("waited", [True, False])
+@pytest.mark.parametrize("status", ["dropped", "declined"])
+def test_dropped_or_declined_rows_never_win(make_client, venue, session, clock, status, waited):
+    view = lambda: {"quote": None, "quotes": [other_row(venue, status)]}
+    venue.waited, venue.waited_view = waited, view
+    session.routes[("GET", f"/rfqs/{RFQ}")] = lambda req: view()
+    with pytest.raises(crx.NoQuotes):
+        make_client(clock=clock).quote("USD/MXN", "buy", 25_000, wait=3)
 
 
 def test_old_gateway_answer_polls(make_client, venue, session, clock):

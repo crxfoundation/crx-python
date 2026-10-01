@@ -485,13 +485,16 @@ class Client:
             raise BadAnswer("the quote row cannot be read") from None
 
     def _pick(self, view: dict) -> dict | None:
-        """The gateway's pick in a taker view, else its best live quote, else None."""
+        """The gateway's pick in a taker view, else its best live quote, else None.
+
+        A live quote is ``quoted`` and not past ``expires_at``: dropped and declined rows never win.
+        """
         if isinstance(view.get("quote"), dict):
             return view["quote"]
         now_ms = self._clock() * 1000
         live = [q for q in view.get("quotes") or [] if isinstance(q, dict)
                 and isinstance(q.get("expires_at"), int) and q["expires_at"] > now_ms
-                and str(q.get("status") or "").lower() not in ("expired", "accepted", "lapsed", "rejected", "filled")]
+                and q.get("status") == "quoted"]
         return live[0] if live else None
 
     def _await_quote(self, rfq_id: str, wait: float) -> dict:
