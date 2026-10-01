@@ -1,7 +1,8 @@
-"""EIP-712 digests the seat signs, rebuilt locally from the fields."""
+"""EIP-712 digests and typed data the seat signs, rebuilt locally from the fields."""
 
 from __future__ import annotations
 
+import re
 from decimal import Decimal
 from typing import Any
 
@@ -9,16 +10,45 @@ from eth_abi import encode
 from eth_utils import keccak, to_checksum_address
 
 DOMAIN_TYPEHASH = keccak(text="EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)")
-LEG_TYPEHASH = keccak(
-    text=(
-        "Leg(address seat,bytes32 legId,bytes32 joinRef,bytes32 pair,"
-        "uint8 instrumentId,int8 side,uint256 notional,uint64 rate,uint16 imBps,"
-        "int16 premiumBps,uint40 expiry,uint64 nonce,uint64 quoteExpiry)"
-    )
+LEG_TYPE = (
+    "Leg(address seat,bytes32 legId,bytes32 joinRef,bytes32 pair,"
+    "uint8 instrumentId,int8 side,uint256 notional,uint64 rate,uint16 imBps,"
+    "int16 premiumBps,uint40 expiry,uint64 nonce,uint64 quoteExpiry)"
 )
-SIDE_TYPEHASH = keccak(
-    text="Side(bytes32 pairC,bytes32 ownLegId,uint64 quoteExpiry,uint64 ownNonce,bytes32 ownSalt,bytes32 wrapsHash)"
+LEG_TYPEHASH = keccak(text=LEG_TYPE)
+SIDE_TYPE = "Side(bytes32 pairC,bytes32 ownLegId,uint64 quoteExpiry,uint64 ownNonce,bytes32 ownSalt,bytes32 wrapsHash)"
+SIDE_TYPEHASH = keccak(text=SIDE_TYPE)
+TRADE_TYPE = (
+    "Trade(string summary,string pair,string side,uint256 notionalE6,uint64 rateE6,int16 premiumBps,"
+    "uint16 exitBandBps,uint40 maturity,bytes32 pairC,bytes32 ownLegId,uint64 quoteExpiry,uint64 ownNonce,"
+    "bytes32 ownSalt,bytes32 wrapsHash)"
 )
+TRADE_TYPEHASH = keccak(text=TRADE_TYPE)
+WITHDRAW_TYPE = "WithdrawIntent(address account,uint256 amount,address recipient,uint64 nonce,uint64 deadline)"
+ALLOCATION_CONSENT_TYPE = (
+    "AllocationConsent(bytes32 oldId,bytes32 exitingSide,bytes32 remainingSide,bytes32 incomingSide,"
+    "uint64 nonce,uint64 deadline,bytes32 commitment,bytes32 wrapsHash,bytes32 salt)"
+)
+ALLOCATION_ACCEPTANCE_TYPE = (
+    "AllocationAcceptance(bytes32 oldId,bytes32 incomingSide,bytes32 incomingC,uint64 nonce,uint64 deadline,"
+    "bytes32 commitment,bytes32 wrapsHash)"
+)
+FAILOVER_CONSENT_TYPE = (
+    "FailoverConsent(bytes32 oldId,bytes32 closedOutSide,bytes32 remainingSide,bytes32 incomingSide,"
+    "bytes32 incomingC,uint64 nonce,uint64 openNonce,uint64 deadline,bytes32 commitment,bytes32 wrapsHash)"
+)
+# The structs a seat signs as typed data, by primary type.
+STRUCTS = {
+    "Trade": TRADE_TYPE, "Side": SIDE_TYPE, "Leg": LEG_TYPE, "WithdrawIntent": WITHDRAW_TYPE,
+    "AllocationConsent": ALLOCATION_CONSENT_TYPE, "AllocationAcceptance": ALLOCATION_ACCEPTANCE_TYPE,
+    "FailoverConsent": FAILOVER_CONSENT_TYPE,
+}
+DOMAIN_FIELDS = (
+    ("name", "string"), ("version", "string"), ("chainId", "uint256"), ("verifyingContract", "address"),
+)
+MAX_MATURITY = 253402300799  # 9999-12-31T23:59:59Z
+SUMMARY_MAX_LEN = 207
+SECP256K1_N = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
 QUOTE_TYPE = (
     "Quote(address seat,bytes32 legId,bytes32 pair,uint8 instrumentId,int8 side,uint256 notional,uint64 rate,"
     "uint16 imBps,int16 premiumBps,uint40 expiry,uint64 nonce,uint64 quoteExpiry,bytes32 salt,bytes32 wrapsHash,"
@@ -166,3 +196,324 @@ def selector(signature: str) -> bytes:
 
 def calldata(signature: str, types: list, args: list) -> str:
     return h0x(selector(signature) + encode(types, args))
+
+
+# ---------- exact amounts ----------
+
+_DECIMAL = re.compile(r"([0-9]+)(?:\.([0-9]+))?")
+_INT = re.compile(r"-?[0-9]+")
+_HEX = re.compile(r"0x[0-9a-fA-F]*")
+
+
+def e6(value: Any, bits: int = 128) -> int:
+    """An exact decimal amount as an integer at 6 decimals.
+
+    Takes a decimal string, an int or a finite Decimal. Refuses a float, a sign, more
+    than 6 decimals, and a result at or above ``2**bits``.
+    """
+    if isinstance(value, (bool, float)):
+        raise ValueError("an amount is a decimal string, not a float")
+    if isinstance(value, int):
+        value = str(value)
+    elif isinstance(value, Decimal):
+        if not value.is_finite():
+            raise ValueError("the amount is not finite")
+        value = format(value, "f")
+    m = _DECIMAL.fullmatch(value) if isinstance(value, str) else None
+    if m is None:
+        raise ValueError("the amount is not an unsigned decimal")
+    frac = m[2] or ""
+    if len(frac) > 6:
+        raise ValueError("the amount has more than 6 decimals")
+    v = int(m[1]) * 10**6 + int(frac.ljust(6, "0"))
+    if v >= 1 << bits:
+        raise ValueError(f"the amount is at or above 2^{bits}")
+    return v
+
+
+# ---------- the Trade summary (integers only) ----------
+
+def pair_text_ok(pair: Any) -> bool:
+    """True for exactly ``AAA/BBB``: three ASCII capitals, ``/``, three ASCII capitals."""
+    return (isinstance(pair, str) and len(pair) == 7 and pair[3] == "/"
+            and all("A" <= ch <= "Z" for ch in pair[:3] + pair[4:]))
+
+
+def _amount_text(v: int, group: bool) -> str:
+    whole, frac = divmod(v, 10**6)
+    s = str(whole)
+    if group:
+        head = len(s) % 3 or 3
+        s = " ".join([s[:head]] + [s[i:i + 3] for i in range(head, len(s), 3)])
+    return s + ("." + f"{frac:06d}".rstrip("0") if frac else "")
+
+
+def _pct_text(bps: int) -> str:
+    a = abs(bps)
+    return f"{a // 100}.{a % 100:02d}"
+
+
+def _date_text(ts: int) -> str:
+    """Unix seconds as ``YYYY-MM-DDTHH:MM:SSZ``: the civil date by integer arithmetic (Hinnant)."""
+    days, secs = divmod(ts, 86_400)
+    z = days + 719_468
+    era = z // 146_097
+    doe = z - era * 146_097
+    yoe = (doe - doe // 1460 + doe // 36_524 - doe // 146_096) // 365
+    doy = doe - (365 * yoe + yoe // 4 - yoe // 100)
+    mp = (5 * doy + 2) // 153
+    day = doy - (153 * mp + 2) // 5 + 1
+    month = mp + 3 if mp < 10 else mp - 9
+    year = yoe + era * 400 + (1 if month <= 2 else 0)
+    return f"{year:04d}-{month:02d}-{day:02d}T{secs // 3600:02d}:{secs // 60 % 60:02d}:{secs % 60:02d}Z"
+
+
+def _int_in(value: Any, lo: int, hi: int, what: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or not lo <= value <= hi:
+        raise ValueError(f"{what} is out of range")
+    return value
+
+
+def side_text(side: Any) -> str:
+    """+1 is ``buy``, -1 is ``sell``: the taker's side of the first currency."""
+    if side == 1 and not isinstance(side, bool):
+        return "buy"
+    if side == -1 and not isinstance(side, bool):
+        return "sell"
+    raise ValueError("the side is not buy or sell")
+
+
+def trade_summary(
+    pair: str, side: int, notional_e6: int, rate_e6: int, premium_bps: int, exit_band_bps: int, maturity: int,
+) -> str:
+    """The ``summary`` line of a ``Trade``. Raises ValueError on a value the guest refuses or cannot format."""
+    word = side_text(side)
+    _int_in(maturity, 0, MAX_MATURITY, "the maturity")
+    if not pair_text_ok(pair):
+        raise ValueError("the pair is not AAA/BBB")
+    _int_in(notional_e6, 0, (1 << 128) - 1, "the notional")
+    _int_in(rate_e6, 0, (1 << 64) - 1, "the rate")
+    _int_in(premium_bps, -(1 << 15), (1 << 15) - 1, "the premium")
+    _int_in(exit_band_bps, 0, (1 << 16) - 1, "the exit band")
+    base, quote = pair[:3], pair[4:]
+    up = ("none" if premium_bps == 0 else
+          f"{'taker' if premium_bps > 0 else 'maker'} pays {_pct_text(premium_bps)} %")
+    return (f"{word} {_amount_text(notional_e6, True)} {base} vs {quote} at {_amount_text(rate_e6, False)} {quote} "
+            f"per {base}, matures {_date_text(maturity)}, upfront {up}, "
+            f"counterparty exit within {_pct_text(exit_band_bps)} % of market")
+
+
+def v1_side(side: Any, pair: Any) -> str:
+    """A ``/v1`` side as the ``Trade`` side. ``buy_usd`` and ``sell_usd`` name USD: valid only when USD is the
+    pair's first currency."""
+    if not pair_text_ok(pair) or pair[:3] != "USD":
+        raise ValueError("a /v1 side names USD: the pair's first currency must be USD")
+    if side == "buy_usd":
+        return "buy"
+    if side == "sell_usd":
+        return "sell"
+    raise ValueError("a /v1 side is buy_usd or sell_usd")
+
+
+# ---------- typed data ----------
+
+def fields_of(primary: str) -> list[tuple[str, str]]:
+    """(name, type) of each member of a known struct, in order."""
+    body = STRUCTS[primary][len(primary) + 1:-1]
+    return [(n, t) for t, n in (p.split(" ") for p in body.split(","))]
+
+
+def domain_json(chain_id: int, core: str) -> dict:
+    """The CRX domain of one chain and core, in its JSON form."""
+    return {"name": "CRX", "version": "rulebook-1.0", "chainId": int(chain_id), "verifyingContract": address(core)}
+
+
+def typed_data(primary: str, chain_id: int, core: str, message: dict) -> dict:
+    """The ``eth_signTypedData_v4`` object of one struct: ``types`` with ``EIP712Domain``, the domain of
+    ``chain_id`` and ``core``, and ``message`` in its JSON form."""
+    return {
+        "types": {
+            "EIP712Domain": [{"name": n, "type": t} for n, t in DOMAIN_FIELDS],
+            primary: [{"name": n, "type": t} for n, t in fields_of(primary)],
+        },
+        "primaryType": primary,
+        "domain": domain_json(chain_id, core),
+        "message": message,
+    }
+
+
+def address(value: Any) -> str:
+    """A 20-byte address, lower case."""
+    if not isinstance(value, str) or len(value) != 42 or not _HEX.fullmatch(value):
+        raise ValueError("not a 20-byte address")
+    return value.lower()
+
+
+def word_of(kind: str, value: Any) -> Any:
+    """One member's value, parsed: an int, 32 bytes, a lower-case address or a string. Raises ValueError."""
+    if kind == "string":
+        if not isinstance(value, str):
+            raise ValueError("not a string")
+        return value
+    if kind == "address":
+        return address(value)
+    if kind == "bytes32":
+        if not isinstance(value, str) or len(value) != 66 or not _HEX.fullmatch(value):
+            raise ValueError("not 32 bytes of hex")
+        return bytes.fromhex(value[2:])
+    m = re.fullmatch(r"(u?)int([0-9]+)", kind)
+    if m is None:
+        raise ValueError(f"no rule for {kind}")
+    if isinstance(value, bool) or not (isinstance(value, int) or (isinstance(value, str) and _INT.fullmatch(value))):
+        raise ValueError("not an integer")
+    v, bits = int(value), int(m[2])
+    lo, hi = (0, (1 << bits) - 1) if m[1] else (-(1 << (bits - 1)), (1 << (bits - 1)) - 1)
+    if not lo <= v <= hi:
+        raise ValueError(f"out of {kind} range")
+    return v
+
+
+def struct_hash(primary: str, message: dict) -> bytes:
+    """``hashStruct`` of a flat struct: strings hashed, every other member as its ABI word."""
+    fields = fields_of(primary)
+    if not isinstance(message, dict) or set(message) != {n for n, _ in fields}:
+        raise ValueError(f"the {primary} message does not have its members")
+    kinds, words = ["bytes32"], [keccak(text=STRUCTS[primary])]
+    for name, kind in fields:
+        v = word_of(kind, message[name])
+        if kind == "string":
+            kinds.append("bytes32")
+            words.append(keccak(v.encode("utf-8")))
+        else:
+            kinds.append(kind)
+            words.append(to_checksum_address(v) if kind == "address" else v)
+    return keccak(encode(kinds, words))
+
+
+def typed_digest(td: dict) -> bytes:
+    """The EIP-712 digest of a typed-data object this module knows. Raises ValueError on any other shape."""
+    primary = td.get("primaryType") if isinstance(td, dict) else None
+    if primary not in STRUCTS or set(td) != {"types", "primaryType", "domain", "message"}:
+        raise ValueError("not a typed-data object of a known struct")
+    d = td["domain"]
+    if not isinstance(d, dict) or set(d) != {n for n, _ in DOMAIN_FIELDS}:
+        raise ValueError("the domain does not have its members")
+    sep = keccak(encode(
+        ["bytes32", "bytes32", "bytes32", "uint256", "address"],
+        [DOMAIN_TYPEHASH, keccak(text=word_of("string", d["name"])), keccak(text=word_of("string", d["version"])),
+         word_of("uint256", d["chainId"]), to_checksum_address(word_of("address", d["verifyingContract"]))],
+    ))
+    if td.get("types") != typed_data(primary, 1, "0x" + "00" * 20, {})["types"]:
+        raise ValueError("the types are not this struct's")
+    return keccak(b"\x19\x01" + sep + struct_hash(primary, td["message"]))
+
+
+def typed_mismatch(served: Any, own: dict) -> str | None:
+    """The first member where ``served`` differs from ``own``, by parsed value; None when they agree.
+
+    Compares ``primaryType``, ``types``, each domain member and each message member. A member the
+    served object lacks, adds or cannot parse is a difference.
+    """
+    if not isinstance(served, dict) or set(served) != set(own):
+        return "typed_data"
+    if served["primaryType"] != own["primaryType"]:
+        return "primaryType"
+    if served["types"] != own["types"]:
+        return "types"
+    parts = (("domain", DOMAIN_FIELDS), ("message", fields_of(own["primaryType"])))
+    for part, fields in parts:
+        s, o = served[part], own[part]
+        if not isinstance(s, dict) or set(s) != set(o):
+            return part
+        for name, kind in fields:
+            try:
+                same = word_of(kind, s[name]) == word_of(kind, o[name])
+            except ValueError:
+                same = False
+            if not same:
+                return f"{part}.{name}"
+    return None
+
+
+def trade_message(
+    pair: str, side: int, notional_e6: int, rate_e6: int, premium_bps: int, exit_band_bps: int, maturity: int,
+    pair_c: str, own_leg_id: str, quote_expiry: Any, own_nonce: Any, own_salt: str, wraps_hash: str,
+) -> dict:
+    """The ``Trade`` message, JSON form: integers as decimal strings, ``bytes32`` as lower-case hex.
+
+    The summary is formatted from the integers. Raises ValueError on a value the guest refuses.
+    """
+    summary = trade_summary(pair, side, notional_e6, rate_e6, premium_bps, exit_band_bps, maturity)
+    msg = {
+        "summary": summary, "pair": pair, "side": side_text(side), "notionalE6": str(notional_e6),
+        "rateE6": str(rate_e6), "premiumBps": str(premium_bps), "exitBandBps": str(exit_band_bps),
+        "maturity": str(maturity), "pairC": pair_c, "ownLegId": own_leg_id, "quoteExpiry": quote_expiry,
+        "ownNonce": own_nonce, "ownSalt": own_salt, "wrapsHash": wraps_hash,
+    }
+    for name, kind in fields_of("Trade")[8:]:
+        v = word_of(kind, msg[name])
+        msg[name] = h0x(v) if kind == "bytes32" else str(v)
+    return msg
+
+
+def trade_struct_hash(msg: dict) -> bytes:
+    return struct_hash("Trade", msg)
+
+
+def trade_digest(separator: bytes, msg: dict) -> bytes:
+    return keccak(b"\x19\x01" + separator + trade_struct_hash(msg))
+
+
+def side_message(t: dict) -> dict:
+    """The ``Side`` message of a template, JSON form."""
+    return {
+        "pairC": h0x(hx(t["pair_c"])), "ownLegId": h0x(hx(t["own_leg_id"])), "quoteExpiry": str(int(t["quote_expiry"])),
+        "ownNonce": str(int(t["own_nonce"])), "ownSalt": h0x(hx(t["own_salt"])), "wrapsHash": h0x(hx(t["wraps_hash"])),
+    }
+
+
+def leg_message(a: dict) -> dict:
+    """The ``Leg`` message of a half, JSON form: 6-decimal notional and rate, unix-second times."""
+    return {
+        "seat": address(a["seat"]), "legId": h0x(hx(a["leg_id"])), "joinRef": h0x(hx(a["join_ref"])),
+        "pair": h0x(hx(a["pair_id"])), "instrumentId": str(int(a["instrument_id"])), "side": str(int(a["side"])),
+        "notional": str(scaled6(a["notional"])), "rate": str(scaled6(a["rate"])), "imBps": str(int(a["im_bps"])),
+        "premiumBps": str(int(a["premium_bps"])), "expiry": str(int(a["expiry"]) // 1000),
+        "nonce": str(int(a["nonce"])), "quoteExpiry": str(int(a["quote_expiry"]) // 1000),
+    }
+
+
+def withdraw_message(w: dict) -> dict:
+    """The ``WithdrawIntent`` message, JSON form."""
+    return {
+        "account": address(w["account"]), "amount": str(int(w["amount"])), "recipient": address(w["recipient"]),
+        "nonce": str(int(w["nonce"])), "deadline": str(int(w["deadline"])),
+    }
+
+
+# ---------- signatures ----------
+
+def normalize_sig(sig: Any) -> bytes:
+    """A 65-byte ``r ‖ s ‖ v`` signature with low ``s`` and ``v`` 27 or 28.
+
+    ``v`` 0 or 1 becomes 27 or 28. A high ``s`` becomes ``n - s`` with ``v`` flipped. Raises ValueError
+    on another length, ``v`` outside {0, 1, 27, 28}, or ``r`` or ``s`` outside 1 to n - 1.
+    """
+    if isinstance(sig, str):
+        b = hx(sig)
+    elif isinstance(sig, (bytes, bytearray, memoryview)):
+        b = bytes(sig)
+    else:
+        raise ValueError("a signature is bytes or 0x-hex")
+    if len(b) != 65:
+        raise ValueError("a signature is 65 bytes")
+    r, s, v = int.from_bytes(b[:32], "big"), int.from_bytes(b[32:64], "big"), b[64]
+    if v in (0, 1):
+        v += 27
+    if v not in (27, 28):
+        raise ValueError("the signature's v is not 0, 1, 27 or 28")
+    if not (0 < r < SECP256K1_N and 0 < s < SECP256K1_N):
+        raise ValueError("the signature's r or s is out of range")
+    if s > SECP256K1_N // 2:
+        s, v = SECP256K1_N - s, 55 - v
+    return r.to_bytes(32, "big") + s.to_bytes(32, "big") + bytes([v])
