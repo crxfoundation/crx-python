@@ -155,6 +155,7 @@ Every error is a `crx.CrxError`. Branch on `.code`.
 | `market_paused` | Pair not live. |
 | `below_min`, `above_max` | Notional out of range. |
 | `no_quotes` | No maker quoted in time. From `rfqs(only=)`: the RFQ did not reach your seat in time. |
+| `rfq_cancelled` | The gateway cancelled the RFQ. `.reason`: `rate_out_of_band` (no quote inside the off-market band) or `mark_unavailable` (no market price). Ask again later. `except crx.NoQuotes` catches it too. |
 | `quote_lost` | Your maker quote opened no trade. `reason`: `another_maker`, `expired`, `cancelled`, `round_closed`, `dropped` or `timeout`. |
 | `leg_live` | Your seat holds another live binding quote on the RFQ. Quote again, or `drop_quote(rfq, leg_id=err.leg_id)`. |
 | `leg_id_taken` | The quote's leg id is used. Quote again. |

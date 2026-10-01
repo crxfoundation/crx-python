@@ -5,7 +5,7 @@ from .errors import (
     AboveMax, AlreadyAccepted, AuthError, BadAnswer, BadRequest, BelowMin, ConfigError, CrxError,
     InsufficientCollateral, LegIdTaken, LegLive, MarketClosed, MarketPaused, NetworkError, NoQuotes, NotWhitelisted,
     OwnRoundOpen, QuoteDropped, QuoteExpired, QuoteFillsFull, QuoteLost, QuoteNotYours, RateLimited, RefusedToSign,
-    Rejected, SeatNotReady, ServerError, TradeUnknown, TxFailed, UnknownOrEnded,
+    Rejected, RfqCancelled, SeatNotReady, ServerError, TradeUnknown, TxFailed, UnknownOrEnded,
 )
 from .models import (
     Ask, Balance, Deposit, Drop, Event, MakerQuote, Market, Position, Quote, Rfq, Trade, Viewer, Withdraw,
@@ -20,6 +20,6 @@ __all__ = [
     "CrxError", "AboveMax", "AlreadyAccepted", "AuthError", "BadAnswer", "BadRequest", "BelowMin", "ConfigError",
     "InsufficientCollateral", "LegIdTaken", "LegLive", "MarketClosed", "MarketPaused", "NetworkError", "NoQuotes",
     "NotWhitelisted", "OwnRoundOpen", "QuoteDropped", "QuoteExpired", "QuoteFillsFull", "QuoteLost", "QuoteNotYours",
-    "RateLimited", "RefusedToSign", "Rejected",
+    "RateLimited", "RefusedToSign", "Rejected", "RfqCancelled",
     "SeatNotReady", "ServerError", "TradeUnknown", "TxFailed", "UnknownOrEnded",
 ]

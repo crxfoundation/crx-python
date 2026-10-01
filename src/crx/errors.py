@@ -106,6 +106,19 @@ class NoQuotes(CrxError):
     code = "no_quotes"
 
 
+class RfqCancelled(NoQuotes):
+    """The gateway cancelled the RFQ before an accept. ``reason`` names why: ``rate_out_of_band`` when no
+    quote was inside the off-market band, ``mark_unavailable`` when no market price was read. The message
+    is the gateway's sentence, when it sent one."""
+
+    code = "rfq_cancelled"
+
+    @property
+    def reason(self) -> str | None:
+        v = self.details.get("reason")
+        return v if isinstance(v, str) else None
+
+
 class QuoteExpired(CrxError):
     """The quote or its round ended, or the maker refused it. Request a new quote."""
 

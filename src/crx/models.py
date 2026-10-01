@@ -81,7 +81,8 @@ class Ask:
         """The winning quote, once the gateway names it after the 10 s window. Nothing is accepted.
 
         Polls for ``wait`` s at most; the best live quote goes at the end. No quote
-        raises ``NoQuotes``. Pass the result to ``Client.trade``.
+        raises ``NoQuotes``; an RFQ the gateway cancelled raises ``RfqCancelled`` with its
+        ``reason``. Pass the result to ``Client.trade``.
         """
         return self._client._winner(self.rfq, wait)
 

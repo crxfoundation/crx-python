@@ -24,7 +24,7 @@ from . import _maker
 from .signer import LocalSigner, as_signer, sign_typed
 from .errors import (
     AboveMax, BadAnswer, BadRequest, BelowMin, ConfigError, CrxError,
-    MarketPaused, NoQuotes, QuoteDropped, RefusedToSign, clean,
+    MarketPaused, NoQuotes, QuoteDropped, RefusedToSign, RfqCancelled, clean,
 )
 from .models import (
     Ask, Balance, Deposit, Drop, Event, MakerQuote, Market, Position, Quote, Rfq, Trade, Viewer, Withdraw, dec,
@@ -59,6 +59,7 @@ DEFAULT_STATE_DIR = "~/.crx-quickstart"  # shared with the CRX quickstart script
 WAITING = ("", "sending", "pending")  # statuses _settle polls past
 WITHDRAW_TTL = 22 * 3600  # s; the gateway takes a deadline at most 23 h out
 OPEN_TIMEOUT = 30.0  # s; POST /rfqs answers after the 10 s window, the gateway stops at 30 s
+OPEN_STATUSES = ("open", "quoted")  # RFQ statuses that still take an accept
 
 
 def _amount(value: Any, what: str = "amount") -> Decimal:
@@ -131,6 +132,22 @@ def _side(side: str) -> str:
 def _no_worse(quote: Quote, other: Quote) -> bool:
     """True when ``other`` costs the taker no more than ``quote``: a buy pays no higher rate, a sell gets no lower."""
     return other.rate <= quote.rate if quote.side == "buy" else other.rate >= quote.rate
+
+
+def _ended(view: dict, rfq_id: str) -> CrxError | None:
+    """The error for an RFQ that ended before an accept; None while it is open. A view with no ``status``
+    reads as open. A cancelled RFQ carries the gateway's ``reason`` and ``message``."""
+    st = view.get("status")
+    if st is None or st in OPEN_STATUSES:
+        return None
+    details = {"rfq_id": rfq_id, "status": clean(st, 40)}
+    if st != "cancelled":
+        return NoQuotes(f"the RFQ is {clean(st, 40)}: it takes no accept", details=details)
+    reason, message = view.get("reason"), view.get("message")
+    reason = clean(reason, 64) if isinstance(reason, str) and reason else None
+    message = clean(message, 300) if isinstance(message, str) and message else None
+    details.update(reason=reason, message=message)
+    return RfqCancelled(message or f"the gateway cancelled the RFQ ({reason or 'no reason named'})", details=details)
 
 
 def _default_expiry(now: datetime) -> datetime:
@@ -468,12 +485,14 @@ class Client:
         An older gateway answers at once: then the SDK polls for ``wait`` s.
 
         A closed market still takes the RFQ: the gateway decides. Its refusal
-        raises the matching error; no quote raises ``NoQuotes``.
+        raises the matching error; no quote raises ``NoQuotes``. An RFQ the gateway
+        cancelled raises ``RfqCancelled`` (a ``NoQuotes``) with its ``reason``, e.g.
+        ``rate_out_of_band``: no quote was inside the off-market band.
         """
         rfq, r = self._open(pair, side, notional, expiry, im_bps, client_rfq_id, True)
         if not isinstance(r.get("quotes"), list):
             return self._winner(rfq, wait)
-        q = self._pick(r)  # the answer came after the window
+        q = self._pick(r, rfq["rfq_id"])  # the answer came after the window
         if q is None:
             raise NoQuotes("no quote in the window: no maker online, or the market just closed",
                            details={"rfq_id": rfq["rfq_id"]})
@@ -567,14 +586,17 @@ class Client:
         except (KeyError, TypeError, ValueError, ArithmeticError):
             raise BadAnswer("the quote row cannot be read") from None
 
-    def _pick(self, view: dict) -> dict | None:
-        """The gateway's pick in a taker view, else its best live quote, else None.
+    def _pick(self, view: dict, rfq_id: str) -> dict | None:
+        """The gateway's pick in a taker view, else its best live quote, else None. An RFQ that ended raises.
 
-        A live quote is ``quoted`` and not past ``expires_at``: dropped and declined rows never win.
-        A dropped pick counts as none.
+        A row counts only when ``quoted``: dropped, declined and expired rows never win. A live
+        quote is also not past ``expires_at``. A pick that is not ``quoted`` counts as none.
         """
+        err = _ended(view, rfq_id)
+        if err is not None:
+            raise err
         pick = view.get("quote")
-        if isinstance(pick, dict) and str(pick.get("status") or "").lower() != "dropped":
+        if isinstance(pick, dict) and pick.get("status") == "quoted":
             return pick
         now_ms = self._clock() * 1000
         live = [q for q in view.get("quotes") or [] if isinstance(q, dict)
@@ -584,16 +606,20 @@ class Client:
 
     def _await_quote(self, rfq_id: str, wait: float) -> dict:
         """Poll GET /rfqs/{id}: the gateway's pick once named, else the best live quote at the end.
-        A dropped pick counts as none: the best live quote then goes at once."""
+        A pick that is not ``quoted`` counts as none: the best live quote then goes at once.
+        An RFQ that ended raises at once."""
         deadline = self._clock() + max(float(wait), 0.0)
         while True:
             view = self._gw.request("GET", f"/rfqs/{rfq_id}")
+            err = _ended(view, rfq_id)
+            if err is not None:
+                raise err
             if isinstance(view.get("quote"), dict):
-                best = self._pick(view)
+                best = self._pick(view, rfq_id)
                 if best is not None:
                     return best
             if self._clock() >= deadline:
-                best = self._pick(view)
+                best = self._pick(view, rfq_id)
                 if best is not None:
                     return best
                 raise NoQuotes("no quote before the wait ended: no maker online, or the market just closed",

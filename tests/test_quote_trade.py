@@ -764,6 +764,81 @@ def test_dropped_or_declined_rows_never_win(make_client, venue, session, clock, 
         make_client(clock=clock).quote("USD/MXN", "buy", 25_000, wait=3)
 
 
+# ---------- an RFQ that ended: a cancel names its reason; rows are taken only while it is open ----------
+
+BAND_MSG = "every quote was more than 2.50 % from the market price"
+
+
+def ended_view(venue, status="cancelled", reason="rate_out_of_band", message=BAND_MSG):
+    """The gateway's view of an RFQ the off-market screen cancelled: no pick, the rows still read quoted."""
+    v = {"status": status, "quote": None, "quotes": [venue.row()]}
+    v.update({k: x for k, x in (("reason", reason), ("message", message)) if x is not None})
+    return v
+
+
+def ask_or_quote(c, path):
+    if path == "ask":
+        return c.ask("USD/MXN", "buy", 25_000).quote(wait=3)
+    return c.quote("USD/MXN", "buy", 25_000, wait=3)
+
+
+def serve(venue, session, path, view):
+    if path == "waited":
+        venue.waited, venue.waited_view = True, view
+    else:
+        session.routes[("GET", f"/rfqs/{RFQ}")] = lambda req: view()
+
+
+@pytest.mark.parametrize("path", ["waited", "polled", "ask"])
+def test_band_cancelled_rfq_raises_its_reason(make_client, venue, session, clock, path):
+    serve(venue, session, path, lambda: ended_view(venue))
+    c = make_client(clock=clock)
+    start = clock()
+    with pytest.raises(crx.RfqCancelled) as ei:
+        ask_or_quote(c, path)
+    e = ei.value
+    assert isinstance(e, crx.NoQuotes) and e.code == "rfq_cancelled" and e.reason == "rate_out_of_band"
+    assert str(e) == BAND_MSG
+    assert e.details == {"rfq_id": RFQ, "status": "cancelled", "reason": "rate_out_of_band", "message": BAND_MSG}
+    assert accepts(session) == [] and len(trade_polls(session)) == (0 if path == "waited" else 1) and clock() == start
+
+
+def test_cancel_without_a_reason(make_client, venue, session, clock):
+    serve(venue, session, "waited", lambda: ended_view(venue, reason=None, message=None))
+    with pytest.raises(crx.RfqCancelled, match="no reason named") as ei:
+        make_client(clock=clock).quote("USD/MXN", "buy", 25_000)
+    assert ei.value.reason is None and accepts(session) == []
+
+
+@pytest.mark.parametrize("status", ["expired", "accepted", "signing"])
+@pytest.mark.parametrize("path", ["waited", "polled"])
+def test_ended_rfq_is_no_quotes(make_client, venue, session, clock, status, path):
+    serve(venue, session, path, lambda: ended_view(venue, status, None, None))
+    with pytest.raises(crx.NoQuotes) as ei:
+        ask_or_quote(make_client(clock=clock), path)
+    assert type(ei.value) is crx.NoQuotes and ei.value.details == {"rfq_id": RFQ, "status": status}
+    assert accepts(session) == []
+
+
+@pytest.mark.parametrize("status", ["open", "quoted"])  # the positive control: the same rows, the RFQ open
+def test_open_rfq_still_falls_back_to_a_quoted_row(make_client, venue, session, clock, status):
+    serve(venue, session, "waited", lambda: ended_view(venue, status, None, None))
+    assert make_client(clock=clock).quote("USD/MXN", "buy", 25_000).quote_id == QID
+
+
+@pytest.mark.parametrize("live", [True, False])
+@pytest.mark.parametrize("pick", ["expired", "declined", "accepted", None])
+def test_a_pick_not_quoted_never_wins(make_client, venue, session, clock, pick, live):
+    serve(venue, session, "waited", lambda: {"quote": other_row(venue, pick),
+                                             "quotes": [venue.row() if live else other_row(venue, pick)]})
+    c = make_client(clock=clock)
+    if live:
+        assert c.quote("USD/MXN", "buy", 25_000).quote_id == QID
+    else:
+        with pytest.raises(crx.NoQuotes):
+            c.quote("USD/MXN", "buy", 25_000)
+
+
 def test_old_gateway_answer_polls(make_client, venue, session, clock):
     # An open answer without `quotes`: an older gateway answered at once.
     q = make_client(clock=clock).quote("USD/MXN", "buy", 25_000)
