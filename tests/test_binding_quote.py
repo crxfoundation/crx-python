@@ -217,3 +217,40 @@ def test_dropped_pick_is_skipped(make_client, session, health, markets, clock, l
     else:
         with pytest.raises(crx.NoQuotes):
             c.quote("USD/MXN", "buy", 25_000, wait=3)
+
+
+# ---------- trade templates where the maker's quote binds ----------
+
+
+@pytest.mark.parametrize("mode", ["one_call", "legacy"])
+def test_trade_template_in_quote_mode(make_client, session, health, markets, clock, account, mode):
+    venue = venue_in(mode, session, health, markets, clock)
+    venue.kind = "trade"
+    c = make_client(clock=clock)
+    assert c.trade(c.quote("USD/MXN", "sell", 25_000)).status == "open"
+    msg = venue.template["typed_data"]["message"]
+    assert msg["side"] == "sell" and msg["summary"].startswith("sell 25 000 USD vs MXN at 18.7 MXN per USD")
+    assert recovers(venue, venue.template, venue.side_sig) == account.address
+
+
+def test_dropped_quote_best_signs_its_own_trade(make_client, session, health, markets, clock, account):
+    venue = venue_in("one_call", session, health, markets, clock)
+    venue.kind = "trade"
+    drops(venue, session, {"quote_id": QID2, "rate": "18.650000"})
+    c = make_client(clock=clock)
+    t = c.trade(c.quote("USD/MXN", "buy", 25_000))
+    assert (t.status, t.quote_id) == ("open", QID2)
+    assert venue.template["typed_data"]["message"]["rateE6"] == "18650000"  # the best quote's rate, not the first
+    assert recovers(venue, venue.template, accepts(session)[-1]["sig"]) == account.address
+
+
+def test_stale_trade_template_is_checked_again(make_client, session, health, markets, clock, account):
+    venue = venue_in("one_call", session, health, markets, clock)
+    venue.kind = "trade"
+    c = make_client(clock=clock)
+    q = c.quote("USD/MXN", "buy", 25_000)
+    venue.stale = 1
+    venue.on_stale = lambda: setattr(venue, "typed_edit", lambda td: td["message"].update(rateE6="18800000"))
+    with pytest.raises(crx.TradeUnknown, match="differs at message.rateE6"):
+        c.trade(q)  # the first Trade was signed and posted: never "nothing happened"
+    assert len([b for b in accepts(session) if "sig" in b]) == 1
