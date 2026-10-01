@@ -33,12 +33,14 @@ from .models import (
 log = logging.getLogger("crx")
 
 # settle_wait: s that trade(), deposit() and withdraw() poll their own status at most.
+# check_minute: the minute past each hour of the hourly check.
 NETWORKS = {
     "testnet": {
         "chain": "avax-fuji",
         "base_url": "https://api.sandbox.crxfx.com",
         "rpc_url": "https://api.avax-test.network/ext/bc/C/rpc",
         "settle_wait": 30.0,
+        "check_minute": 5,
     },
     # Ethereum mainnet. Off unless the caller opts in; no default URLs.
     "mainnet": {
@@ -46,6 +48,7 @@ NETWORKS = {
         "base_url": None,
         "rpc_url": None,
         "settle_wait": 90.0,
+        "check_minute": 35,
     },
 }
 _ALIASES = {"fuji": "testnet"}
@@ -176,6 +179,7 @@ class Client:
         self.network = name
         self.chain_key = net["chain"]
         self._settle_wait = net["settle_wait"]
+        self._check_minute = net["check_minute"]
         gw_url = base_url or os.environ.get("CRX_BASE") or net["base_url"]
         rpc = rpc_url or os.environ.get("CRX_RPC") or net["rpc_url"]
         if name == "mainnet":
@@ -299,6 +303,15 @@ class Client:
     def health(self) -> dict:
         """The gateway's /health answer."""
         return self._gw.request("GET", "/health", auth=False)
+
+    def next_check(self) -> datetime:
+        """The time of the next hourly check, UTC: :05 past the hour on testnet, :35 on mainnet.
+
+        A ``pending`` trade with a landed ``tx`` opens at this check. No call is made.
+        """
+        now = datetime.fromtimestamp(self._clock(), timezone.utc)
+        at = now.replace(minute=self._check_minute, second=0, microsecond=0)
+        return at if at > now else at + timedelta(hours=1)
 
     def markets(self) -> list[Market]:
         """Every pair: session open, paused, notional limits."""

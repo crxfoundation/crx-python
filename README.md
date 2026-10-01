@@ -68,6 +68,7 @@ print(w.status)  # accepted
 |---|---|
 | `health()` | Gateway status. No key needed. |
 | `markets()` | Pairs, sessions, limits. No key needed. |
+| `next_check()` | The next hourly check, UTC. A `pending` trade with a landed `tx` opens there. No key needed. |
 | `quote(pair, side, notional)` | Opens an RFQ. Returns the best firm quote after the 10 s window. Accepts nothing. |
 | `trade(quote)` | Accepts and opens. CRX sends the tx and pays gas. `status`: `sending`, `open`, `pending` or `refused`. |
 | `deposit(amount)` | Approve, then deposit USDC. On testnet, mints the test USDC you lack. `status`: `credited`, `pending` or `failed`. |
@@ -90,6 +91,8 @@ CRX_WALLET_PK=0x... CRX_TAKER_PK=0x... python -m crx.quickstart_maker
 ```
 
 Runs the maker Quickstart on Testnet with two accounts: your test taker asks, you quote, sign and open the trade. Without a key, it asks for it and hides the input. Same script: `examples/maker.py`.
+
+The trade reads `open`, or `pending`: accepted, the tx landed, and it opens at the next hourly check. The script exits 0 on both.
 
 Other desks ask on Testnet too, so the script quotes its own test taker's RFQ only. It matches `client_rfq_id`, which the gateway serves to an RFQ's own taker alone.
 

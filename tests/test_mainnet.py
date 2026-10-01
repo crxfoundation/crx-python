@@ -128,3 +128,11 @@ def test_withdraw_wait_cap_per_network(session, tmp_path, account, health, netwo
     assert out.status == "sending" and clock() - t0 == wait and g.signer == account.address
     assert sum(1 for x in session.calls if x["path"] == "/balance") == 1 + wait + 1
     assert crx.NETWORKS[network]["settle_wait"] == wait
+
+
+@pytest.mark.parametrize("now, at", [("08:30:00", "08:35:00"), ("08:35:00", "09:35:00"), ("08:40:00", "09:35:00")])
+def test_mainnet_next_check_is_35_past_the_hour(session, tmp_path, account, now, at):
+    from datetime import datetime, timezone
+    c = main(session, tmp_path, account, allow_mainnet=True)
+    c._clock = lambda: datetime.fromisoformat(f"2026-10-01T{now}+00:00").timestamp()
+    assert c.next_check() == datetime.fromisoformat(f"2026-10-01T{at}+00:00")

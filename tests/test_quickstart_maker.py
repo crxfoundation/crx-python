@@ -8,6 +8,7 @@ import re
 import runpy
 import textwrap
 import threading
+from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
@@ -22,6 +23,7 @@ TAKER_KEY = "0x" + "22" * 32
 EXAMPLE = Path(__file__).parent.parent / "examples" / "maker.py"
 STAMP = re.compile(r"^\d\d:\d\d:\d\d ")
 OURS, FOREIGN, SHARED = "0x" + "a1" * 32, "0x" + "b1" * 32, "0x" + "c1" * 32
+CHECK = datetime(2026, 10, 1, 9, 5, tzinfo=timezone.utc)
 
 
 class FakeClient:
@@ -93,6 +95,10 @@ class FakeClient:
         if FakeClient.lose:
             raise crx.QuoteLost("the taker accepted another quote", reason="another_maker")
         return SimpleNamespace(status="open", rfq_id=q.rfq_id, tx="0x" + "55" * 32)
+
+    def next_check(self):
+        self.calls.append(("next_check",))
+        return CHECK
 
     def positions(self):
         self.calls.append(("positions",))
@@ -187,6 +193,7 @@ def test_quotes_only_its_own_takers_rfq(capsys, fake, keys):
     assert any(line.endswith(" maker: open") for line in lines)
     assert any(line.endswith(" taker: open") for line in lines)
     assert lines[-1].endswith(" USDMXN sell 25000 18.09991 open")
+    assert ("next_check",) not in m.calls
 
 
 def test_a_lost_quote_exits_1_with_its_code(capsys, fake, keys):
@@ -251,10 +258,30 @@ def test_a_rate_limit_that_holds_exits_1(capsys, fake, keys, monkeypatch):
     assert not any(c[0] == "send_quote" for c in FakeClient.maker.calls)
 
 
-@pytest.mark.parametrize("status", ["refused", "pending", "sending"])
-def test_a_trade_not_open_ends_cleanly(capsys, fake, keys, monkeypatch, status):
+def test_an_accepted_trade_that_landed_names_the_next_check_and_exits_0(capsys, fake, keys, monkeypatch):
     def confirm(self, q, **kwargs):
-        return SimpleNamespace(status=status, rfq_id=q.rfq_id, tx=None)
+        return SimpleNamespace(status="pending", rfq_id=q.rfq_id, tx="0x" + "55" * 32)
+
+    def positions(self):
+        return [SimpleNamespace(rfq_id=OURS, pair="USDMXN", side="sell", notional=25000, rate="18.09991",
+                                status="pending")]
+
+    monkeypatch.setattr(FakeClient, "confirm", confirm)
+    monkeypatch.setattr(FakeClient, "positions", positions)
+    assert qs.main([]) == 0
+    out, err = capsys.readouterr()
+    at = f"{CHECK.astimezone():%H:%M}"
+    lines = out.splitlines()
+    assert err == "" and all(STAMP.match(line) for line in lines)
+    assert any(line.endswith(f" maker: accepted; it opens at the next hourly check, {at}") for line in lines)
+    assert lines[-1].endswith(" USDMXN sell 25000 18.09991 pending")
+
+
+@pytest.mark.parametrize("status, tx", [("refused", None), ("refused", "0x" + "55" * 32), ("pending", None),
+                                        ("sending", None)])
+def test_a_trade_not_open_ends_cleanly(capsys, fake, keys, monkeypatch, status, tx):
+    def confirm(self, q, **kwargs):
+        return SimpleNamespace(status=status, rfq_id=q.rfq_id, tx=tx)
 
     monkeypatch.setattr(FakeClient, "confirm", confirm)
     assert qs.main([]) == 1

@@ -855,3 +855,17 @@ def test_rpc_on_wrong_chain_refused(make_client, session):
     with pytest.raises(crx.ConfigError, match="RPC"):
         make_client().deposit(1000)
     assert session.paths("POST") == []
+
+
+@pytest.mark.parametrize("now, at", [
+    ("2026-10-01T08:00:00", "2026-10-01T08:05:00"),
+    ("2026-10-01T08:04:59", "2026-10-01T08:05:00"),
+    ("2026-10-01T08:05:00", "2026-10-01T09:05:00"),
+    ("2026-10-01T23:58:30", "2026-10-02T00:05:00"),
+])
+def test_next_check_is_the_next_05_past_the_hour_on_testnet(make_client, session, now, at):
+    from datetime import datetime, timezone
+    t = datetime.fromisoformat(now).replace(tzinfo=timezone.utc).timestamp()
+    got = make_client(key=False, clock=Clock(t)).next_check()
+    assert got == datetime.fromisoformat(at).replace(tzinfo=timezone.utc) and got.tzinfo is not None
+    assert session.calls == []

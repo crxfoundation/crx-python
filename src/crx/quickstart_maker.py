@@ -130,9 +130,14 @@ def steps():
             "your test taker's RFQ did not reach the maker seat: "
             "check its maker role and collateral")
 
-    # 7. Your trade, from the maker's side.
+    # 7. Your trade, from the maker's side. Pending: accepted, the tx
+    #    landed, and it opens at the next hourly check.
     asker.join(60)
-    if t.status != "open":
+    if t.status == "pending" and t.tx:
+        log("maker: accepted; it opens at the next hourly check,",
+            f"{maker.next_check().astimezone():%H:%M}")
+        # 22:32:41 maker: accepted; it opens at the next hourly check, 23:05
+    elif t.status != "open":
         raise crx.CrxError(
             f"the trade is {t.status}, not open", code="not_open")
     for p in maker.positions():
