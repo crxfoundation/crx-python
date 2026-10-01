@@ -53,8 +53,8 @@ TESTNET_CHAIN_IDS = {43113, 84532, 11142220}
 MAINNET_CHAIN_IDS = {1}
 DEFAULT_STATE_DIR = "~/.crx-quickstart"  # shared with the CRX quickstart scripts: one Side nonce floor per seat
 WAITING = ("", "sending", "pending")  # statuses _settle polls past
-DEAD_QUOTE = ("expired", "accepted", "lapsed", "rejected", "filled", "dropped")  # quote row statuses never taken
 WITHDRAW_TTL = 22 * 3600  # s; the gateway takes a deadline at most 23 h out
+OPEN_TIMEOUT = 30.0  # s; POST /rfqs answers after the 10 s window, the gateway stops at 30 s
 
 
 def _amount(value: Any, what: str = "amount") -> Decimal:
@@ -430,8 +430,11 @@ class Client:
 
         ``client_rfq_id`` is 1 to 128 printable ASCII characters.
 
+        One call: the gateway answers after the 10 s window with the winner.
+        An older gateway answers at once: then the SDK polls for ``wait`` s.
+
         A closed market still takes the RFQ: the gateway decides. Its refusal
-        raises the matching error; no quote before ``wait`` ends raises ``NoQuotes``.
+        raises the matching error; no quote raises ``NoQuotes``.
         """
         self._need_seat()
         if client_rfq_id is not None and not _client_id(client_rfq_id):
@@ -465,8 +468,9 @@ class Client:
         req = {
             "chain": self.chain_key, "pair": compact, "side": side, "notional": _plain(amount),
             "expiry": expiry_ms, "im_bps": im_bps, "client_rfq_id": client_rfq_id or f"sdk-{uuid.uuid4().hex[:12]}",
+            "wait": True,
         }
-        r = self._gw.request("POST", "/rfqs", body=req)
+        r = self._gw.request("POST", "/rfqs", body=req, timeout=max(self._gw._timeout, OPEN_TIMEOUT))
         try:
             rfq_id, leg_id, quote_expiry = str(r["rfq_id"]), str(r["leg_id"]), int(r["quote_expiry"])
             echo_im = int(r.get("im_bps", im_bps))
@@ -475,7 +479,14 @@ class Client:
         log.info("rfq %s opened: %s %s %s", rfq_id, slash, side, _plain(amount))
         rfq = {"rfq_id": rfq_id, "leg_id": leg_id, "quote_expiry": quote_expiry, "im_bps": echo_im,
                "pair": slash, "side": side, "notional": _plain(amount), "expiry": expiry_ms, "req_im_bps": im_bps}
-        return self._quote_of(rfq, self._await_quote(rfq_id, wait))
+        if isinstance(r.get("quotes"), list):  # the answer came after the window
+            q = self._pick(r)
+            if q is None:
+                raise NoQuotes("no quote in the window: no maker online, or the market just closed",
+                               details={"rfq_id": rfq_id})
+        else:
+            q = self._await_quote(rfq_id, wait)
+        return self._quote_of(rfq, q)
 
     @staticmethod
     def _quote_of(rfq: dict, q: dict) -> Quote:
@@ -490,25 +501,33 @@ class Client:
         except (KeyError, TypeError, ValueError, ArithmeticError):
             raise BadAnswer("the quote row cannot be read") from None
 
+    def _pick(self, view: dict) -> dict | None:
+        """The gateway's pick in a taker view, else its best live quote, else None.
+
+        A live quote is ``quoted`` and not past ``expires_at``: dropped and declined rows never win.
+        A dropped pick counts as none.
+        """
+        pick = view.get("quote")
+        if isinstance(pick, dict) and str(pick.get("status") or "").lower() != "dropped":
+            return pick
+        now_ms = self._clock() * 1000
+        live = [q for q in view.get("quotes") or [] if isinstance(q, dict)
+                and isinstance(q.get("expires_at"), int) and q["expires_at"] > now_ms
+                and q.get("status") == "quoted"]
+        return live[0] if live else None
+
     def _await_quote(self, rfq_id: str, wait: float) -> dict:
         """Poll GET /rfqs/{id}: the gateway's pick once named, else the best live quote at the end.
         A dropped pick counts as none: the best live quote then goes at once."""
         deadline = self._clock() + max(float(wait), 0.0)
-        best = None
         while True:
             view = self._gw.request("GET", f"/rfqs/{rfq_id}")
-            now_ms = self._clock() * 1000
-            live = [q for q in view.get("quotes") or [] if isinstance(q, dict)
-                    and isinstance(q.get("expires_at"), int) and q["expires_at"] > now_ms
-                    and str(q.get("status") or "").lower() not in DEAD_QUOTE]
-            best = live[0] if live else None
-            pick = view.get("quote")
-            if isinstance(pick, dict):
-                if str(pick.get("status") or "").lower() != "dropped":
-                    return pick
+            if isinstance(view.get("quote"), dict):
+                best = self._pick(view)
                 if best is not None:
                     return best
             if self._clock() >= deadline:
+                best = self._pick(view)
                 if best is not None:
                     return best
                 raise NoQuotes("no quote before the wait ended: no maker online, or the market just closed",

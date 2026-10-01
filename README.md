@@ -68,7 +68,7 @@ print(w.status)  # accepted
 |---|---|
 | `health()` | Gateway status. No key needed. |
 | `markets()` | Pairs, sessions, limits. No key needed. |
-| `quote(pair, side, notional)` | Opens an RFQ. Returns the best firm quote. Accepts nothing. |
+| `quote(pair, side, notional)` | Opens an RFQ. Returns the best firm quote after the 10 s window. Accepts nothing. |
 | `trade(quote)` | Accepts and opens. CRX sends the tx and pays gas. `status`: `sending`, `open`, `pending` or `refused`. |
 | `deposit(amount)` | Approve, then deposit USDC. On testnet, mints the test USDC you lack. `status`: `credited`, `pending` or `failed`. |
 | `withdraw(amount)` | Signs a withdraw to your own wallet and sends it in one request. CRX sends the tx and pays gas. `status`: `sending`, `accepted`, `pending`, `paid`, `partial`, `refused` or `returned`. In your wallet within about 2 hours. |
@@ -79,7 +79,7 @@ print(w.status)  # accepted
 | `remove_viewer(addr)` | Takes that access back. |
 | `viewers()` | Wallets that can read your seat. |
 
-`quote()` also takes `expiry=` (datetime, timedelta or unix ms), `im_bps=` and `wait=` (seconds).
+`quote()` also takes `expiry=` (datetime, timedelta or unix ms), `im_bps=` and `wait=` (seconds to poll an older gateway that answers at once).
 
 ## Maker
 
