@@ -16,7 +16,7 @@ import getpass
 import os
 import sys
 import warnings
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import crx
 
@@ -42,13 +42,16 @@ def steps():
     b = c.balance()
     log(b.free, b.as_of)  # 11:21:15 20000.000000 2026-09-30 15:21:07+00:00
 
-    # 4. Request a quote. Settlement: 15 Dec 2026, 15:00 in São Paulo.
+    # 4. Request a quote. Settlement: in 30 days, 15:00 in São Paulo.
+    day = datetime.now(timezone.utc) + timedelta(days=30)
+    while day.weekday() >= 5:  # a weekend rolls to Monday
+        day += timedelta(days=1)
     q = c.quote(
         "USD/BRL", "buy", 25_000,
-        expiry=datetime(2026, 12, 15, 18, 0, tzinfo=timezone.utc),
+        expiry=datetime(day.year, day.month, day.day, 18, 0, tzinfo=timezone.utc),
     )
     log(q.pair, q.rate)  # 11:21:26 USD/BRL 5.2562
-    log(q.expiry)  # 11:21:26 2026-12-15 18:00:00+00:00
+    log(q.expiry)  # 11:21:26 2026-10-30 18:00:00+00:00
     log(q.expires_at)  # 11:21:26 2026-09-30 15:30:45+00:00
 
     # 5. Accept within 120 s of your request. Signs your confirmation.

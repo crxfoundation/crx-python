@@ -7,7 +7,7 @@ import inspect
 import re
 import runpy
 import textwrap
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -95,7 +95,7 @@ def test_steps_are_the_example_line_for_line():
     steps = textwrap.dedent("\n".join(body[first:]))
     assert example[example.index("# 1. Connect"):].rstrip("\n") == steps.rstrip("\n")
     assert inspect.getsource(qs.log) in example
-    assert example.startswith("from datetime import datetime, timezone\n\nimport crx\n")
+    assert example.startswith("from datetime import datetime, timedelta, timezone\n\nimport crx\n")
 
 
 def test_help_names_the_key_variable(capsys):
@@ -119,7 +119,7 @@ def test_key_from_env_runs_every_step_without_asking(monkeypatch, capsys, fake):
     assert qs.main([]) == 0
     c = FakeClient.last
     assert c.kwargs == {"network": "testnet"} and c.args == ()
-    expiry = datetime(2026, 12, 15, 18, 0, tzinfo=timezone.utc)
+    expiry = c.calls[2][4]["expiry"]
     assert c.calls == [
         ("deposit", 20_000),
         ("balance",),
@@ -133,9 +133,34 @@ def test_key_from_env_runs_every_step_without_asking(monkeypatch, capsys, fake):
     assert len(lines) == 10 and all(STAMP.match(line) for line in lines)
     assert lines[0].endswith(" 0x7638c8075e517393fa62008b5faa6c1ea832fe71")
     assert lines[3][9:] == "USD/BRL 5.2562"
-    assert lines[4].endswith(" 2026-12-15 18:00:00+00:00")
+    assert lines[4].endswith(f" {expiry}")
     assert lines[7].endswith(" USDBRL buy 25000 5.2562 open")
     assert lines[9].endswith(" accepted")
+
+
+# A week from Monday at four times of day, past the old fixed expiry date.
+STARTS = [datetime(2026, 12, 14, h, m, tzinfo=timezone.utc) + timedelta(days=i)
+          for i in range(7) for h, m in ((0, 0), (17, 59), (18, 1), (23, 59))]
+
+
+@pytest.mark.parametrize("start", STARTS, ids=lambda t: t.strftime("%a-%H%M"))
+def test_the_expiry_is_30_days_out_on_a_weekday_at_18_utc(monkeypatch, fake, markets, start):
+    """The quote's expiry follows the run date: the SDK's default day, at 15:00 in São Paulo."""
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return start.astimezone(tz) if tz else start.replace(tzinfo=None)
+
+    monkeypatch.setattr(qs, "datetime", Clock)
+    monkeypatch.setenv("CRX_WALLET_PK", KEY)
+    assert qs.main([]) == 0
+    expiry = next(c[4]["expiry"] for c in FakeClient.last.calls if c[0] == "quote")
+    tenor = next(m["tenor"] for m in markets["markets"] if m["pair"] == "USD/BRL")
+    assert expiry > start and expiry.weekday() < 5
+    assert expiry.utcoffset() == timedelta(0) and (expiry.hour, expiry.minute, expiry.second) == (18, 0, 0)
+    assert expiry.date() == crx.client._default_expiry(start).date()
+    assert tenor["min_secs"] <= (expiry - start).total_seconds() <= tenor["max_secs"]
 
 
 def test_the_deposit_covers_the_ask(monkeypatch, fake):
