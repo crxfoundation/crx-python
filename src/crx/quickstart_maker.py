@@ -61,7 +61,7 @@ def steps():
     log("maker: quoted", q.rate)  # 12:36:52 maker: quoted 18.12
 
     # 6. Your test taker gets the winning quote: any maker quote
-    #    outranks the house quote. It accepts yours only.
+    #    outranks the CRX desk's quote. It accepts yours only.
     won = ask.quote()
     mine = won.quote_id == q.quote_id
     log("taker: winning quote", won.rate, "yours" if mine else "not yours")
