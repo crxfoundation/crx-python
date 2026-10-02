@@ -119,6 +119,32 @@ class RfqCancelled(NoQuotes):
         return v if isinstance(v, str) else None
 
 
+class Declined(CrxError):
+    """The gateway declined the accept before it reserved anything: no trade, nothing armed or sent.
+    ``details`` holds the gateway's fields. Ask for a new quote."""
+
+    code = "declined"
+
+
+class RateOutOfBand(Declined):
+    """The quote's rate is outside the off-market band of the market price. ``details``: ``pair``, ``rate``,
+    ``mark``, ``band_bps``."""
+
+    code = "rate_out_of_band"
+
+
+class MarkUnavailable(Declined):
+    """The gateway has no market price to test the rate against. Retry shortly."""
+
+    code = "mark_unavailable"
+
+
+class PositionMatured(Declined):
+    """The position reached its maturity: it settles on its fixing and takes no close."""
+
+    code = "position_matured"
+
+
 class QuoteExpired(CrxError):
     """The quote or its round ended, or the maker refused it. Request a new quote."""
 
@@ -271,6 +297,9 @@ _BY_GATEWAY_CODE: dict[str, type[CrxError]] = {
     "rfq_expired": QuoteExpired,
     "round_closed": QuoteExpired,
     "rate_limited": RateLimited,
+    "rate_out_of_band": RateOutOfBand,
+    "mark_unavailable": MarkUnavailable,
+    "position_matured": PositionMatured,
     "bad_request": BadRequest,
     "unprocessable_entity": BadRequest,
     "viewer_invalid": BadRequest,

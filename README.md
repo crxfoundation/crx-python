@@ -71,7 +71,7 @@ print(w.status)  # accepted
 | `next_check()` | The next hourly check, UTC. A `pending` trade with a landed `tx` opens there. No key needed. |
 | `quote(pair, side, notional)` | Opens an RFQ. Returns the best firm quote after the 10 s window. Accepts nothing. |
 | `ask(pair, side, notional)` | Opens an RFQ and returns at once. `.quote()` on the result returns the winning quote after the 10 s window. Accepts nothing. |
-| `trade(quote)` | Accepts and opens. CRX sends the tx and pays gas. `status`: `sending`, `open`, `pending` or `refused`. |
+| `trade(quote)` | Accepts and opens. CRX sends the tx and pays gas. `status`: `sending`, `open`, `pending` or `refused`. `pending` with no `tx`: no status within the wait. |
 | `deposit(amount)` | Approve, then deposit USDC. On testnet, mints the test USDC you lack. `status`: `credited`, `pending` or `failed`. |
 | `withdraw(amount)` | Signs a withdraw to your own wallet and sends it in one request. CRX sends the tx and pays gas. `status`: `sending`, `accepted`, `pending`, `paid`, `partial`, `refused` or `returned`. In your wallet within about 2 hours. |
 | `balance()` | Collateral, free, margin, withdraw state. |
@@ -93,7 +93,7 @@ CRX_WALLET_PK=0x... CRX_TAKER_PK=0x... python -m crx.quickstart_maker
 
 Runs the maker Quickstart on Testnet with two accounts: your test taker asks, you quote, sign and open the trade. Without a key, it asks for it and hides the input. Same script: `examples/maker.py`.
 
-The trade reads `open`, or `pending`: accepted, the tx landed, and it opens at the next hourly check. The script exits 0 on both.
+The trade reads `open`, or `pending` with a `tx`: accepted, the tx landed, and it opens at the next hourly check. The script exits 0 on both.
 
 Other desks ask on Testnet too, so the script quotes its own test taker's RFQ only: `rfqs(only=ask, wait=10)`.
 
@@ -155,6 +155,7 @@ Every error is a `crx.CrxError`. Branch on `.code`.
 | `market_paused` | Pair not live. |
 | `below_min`, `above_max` | Notional out of range. |
 | `no_quotes` | No maker quoted in time. From `rfqs(only=)`: the RFQ did not reach your seat in time. |
+| `rate_out_of_band`, `mark_unavailable` | The gateway declined the accept: the quote's rate is outside the off-market band, or no market price was read. Nothing was reserved or sent. Ask for a new quote. `except crx.Declined` catches both. |
 | `rfq_cancelled` | The gateway cancelled the RFQ. `.reason`: `rate_out_of_band` (no quote inside the off-market band) or `mark_unavailable` (no market price). Ask again later. `except crx.NoQuotes` catches it too. |
 | `quote_lost` | Your maker quote opened no trade. `reason`: `another_maker`, `expired`, `cancelled`, `round_closed`, `dropped` or `timeout`. |
 | `leg_live` | Your seat holds another live binding quote on the RFQ. Quote again, or `drop_quote(rfq, leg_id=err.leg_id)`. |

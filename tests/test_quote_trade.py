@@ -63,6 +63,7 @@ class Venue:
         self.kind = "side"          # the template's digest_kind; None: no such member
         self.typed = None           # serve typed_data: None = on a trade template only
         self.typed_edit = None      # callable(typed_data): changes the served typed_data
+        self.im_echo = None         # the im_bps the RFQ answer echoes; None: the request's
         # (trade_status, trade_tx) served one per poll once the Side is in; the last repeats.
         self.script = [("sending", None), ("open", TXH)]
         session.routes[("GET", "/markets")] = open_market(markets, pair)
@@ -74,7 +75,7 @@ class Venue:
     def open_rfq(self, req):
         self.rfq_body = req["body"]
         self.qe_ms = int(self.clock() * 1000) + 3_600_000
-        opened = {"rfq_id": RFQ, "leg_id": LEG, "quote_expiry": self.qe_ms, "im_bps": req["body"]["im_bps"],
+        opened = {"rfq_id": RFQ, "leg_id": LEG, "quote_expiry": self.qe_ms, "im_bps": self.im(),
                   "side": 1 if req["body"]["side"] == "buy" else -1, "expiry": req["body"]["expiry"],
                   "status": "open", "kind": "open", "join_ref": None}
         if not self.waited:
@@ -93,11 +94,14 @@ class Venue:
         r.update(self.row_edit)
         return r
 
+    def im(self):
+        return self.rfq_body["im_bps"] if self.im_echo is None else self.im_echo
+
     def taker_arm(self, seat):
         """The taker half the gateway builds: its own seat and credential, the quote's joined terms."""
         q = self.row()
         return {"seat": seat, "leg_id": LEG, "join_ref": JOIN, "pair_id": q["pair_id"], "instrument_id": 1,
-                "side": q["side"], "notional": q["notional"], "rate": q["rate"], "im_bps": self.rfq_body["im_bps"],
+                "side": q["side"], "notional": q["notional"], "rate": q["rate"], "im_bps": self.im(),
                 "premium_bps": q["premium_bps"], "expiry": q["expiry"]}
 
     def pick(self):
@@ -1550,3 +1554,124 @@ def test_local_key_never_mints(make_client, venue, session, clock, account):
     c = make_client(clock=clock)
     assert c.trade(c.quote("USD/MXN", "buy", 25_000)).status == "open"
     assert gate.mints == 0 and gate.tokened() == [] and "/session" not in session.paths()
+
+
+# ---------- the accept's band decline: typed, nothing reserved, never "may still open" ----------
+
+DECLINE = {
+    "rate_out_of_band": (422, {"pair": "USD/MXN", "rate": "18.700000", "mark": "17.900000", "band_bps": 250},
+                         crx.RateOutOfBand),
+    "mark_unavailable": (503, {"pair": "USD/MXN"}, crx.MarkUnavailable),
+    "position_matured": (409, {}, crx.PositionMatured),
+}
+
+
+def declines(venue, session, code, signed_only=True):
+    """The accept answers the gateway's band decline ``code``: on a signed post, or on any post."""
+    status, details, _ = DECLINE[code]
+
+    def accept(req):
+        if signed_only and "sig" not in req["body"]:
+            return venue.accept(req)
+        return (status, {"code": code, "error": f"declined: {code}", "details": details})
+    session.routes[("POST", f"/rfqs/{RFQ}/accept")] = accept
+
+
+@pytest.mark.parametrize("code", list(DECLINE))
+@pytest.mark.parametrize("kind", ["trade", "side"])
+def test_accept_decline_is_typed(make_client, venue, session, clock, kind, code):
+    venue.kind = kind
+    declines(venue, session, code)
+    c = make_client(clock=clock)
+    q = c.quote("USD/MXN", "buy", 25_000)
+    polls, start = len(trade_polls(session)), clock()
+    with pytest.raises(DECLINE[code][2]) as ei:
+        c.trade(q)
+    e = ei.value
+    assert isinstance(e, crx.Declined) and not isinstance(e, crx.TradeUnknown)
+    assert (e.code, e.status, e.gateway_code, e.details) == (code, DECLINE[code][0], code, DECLINE[code][1])
+    assert len(trade_polls(session)) == polls and clock() == start  # no status polls: nothing was reserved
+    assert f"/rfqs/{RFQ}/side" not in session.paths("POST") and sent_nothing(session)
+
+
+@one_call_only
+@pytest.mark.parametrize("code", ["upstream", None])  # the positive control: any other 5xx may hold the signature
+def test_other_5xx_on_the_signed_accept_reads_status(make_client, venue, session, clock, code):
+    def accept(req):
+        if "sig" in req["body"]:
+            venue.side_sig = req["body"]["sig"]
+            return (503, {"code": code, "error": "down"} if code else "<html>down</html>")
+        return venue.accept(req)
+    session.routes[("POST", f"/rfqs/{RFQ}/accept")] = accept
+    c = make_client(clock=clock)
+    assert c.trade(c.quote("USD/MXN", "buy", 25_000)).status == "open"
+
+
+@one_call_only
+@pytest.mark.parametrize("code", list(DECLINE))
+def test_decline_on_the_unsigned_ask_is_typed(make_client, venue, session, clock, code):
+    venue.winner = False  # the row carries no template: the SDK asks for one first
+    declines(venue, session, code, signed_only=False)
+    c = make_client(clock=clock)
+    q = c.quote("USD/MXN", "buy", 25_000, wait=1)
+    with pytest.raises(DECLINE[code][2]):
+        c.trade(q)
+    assert accepts(session) == [{"quote_id": QID}]
+
+
+# ---------- check_terms: each term of the taker's own request, one test each ----------
+
+TERMS = {  # key: (a served quote row whose template and typed_data agree with it, the request's value)
+    "side": ({"side": -1}, None),
+    "expiry": ({"expiry": "+86400000"}, None),
+    "premium_bps": ({"premium_bps": 1}, None),
+    "im_bps": (None, 10_000),
+    "instrument_id": ({"instrument_id": 2}, None),
+    "pair_id": ({"pair_id": e7.h0x(e7.pair_id("USD/BRL"))}, None),
+    "notional": ({"notional": "250000.000000"}, None),
+}
+
+
+@pytest.mark.parametrize("kind", ["trade", "side"])
+@pytest.mark.parametrize("key", list(TERMS))
+def test_each_term_is_the_requests(make_client, venue, session, clock, key, kind):
+    venue.kind = kind
+    edit, im = TERMS[key]
+    if edit is not None:
+        if edit.get("expiry") == "+86400000":
+            edit = {"expiry": lambda: venue.rfq_body["expiry"] + 86_400_000}
+        row = venue.row
+        venue.row = lambda: dict(row(), **{k: v() if callable(v) else v for k, v in edit.items()})
+    if im is not None:
+        venue.im_echo = im
+    c = make_client(clock=clock)
+    q = c.quote("USD/MXN", "buy", 25_000)
+    if kind == "trade" and venue.mode == "one_call":
+        assert q.raw["side_template"]["typed_data"]["message"]["summary"]  # a template the SDK would sign
+    with pytest.raises(crx.RefusedToSign, match=f"the quote's {key} is not this request's"):
+        c.trade(q)
+    assert accepts(session) == [] and f"/rfqs/{RFQ}/side" not in session.paths("POST")
+
+
+# ---------- a named pick and a dropped quote's best must be live ----------
+
+@pytest.mark.parametrize("edit", [{"expires_at": 1}, {"status": "expired"}, {"expires_at": "99999999999999"}])
+def test_a_named_pick_must_be_live(make_client, venue, session, clock, edit):
+    def view():
+        pick = {k: v for k, v in dict(venue.row(), **edit).items() if v is not None}
+        return {"quote": pick, "quotes": [pick]}
+    serve(venue, session, "waited", view)
+    with pytest.raises(crx.NoQuotes):
+        make_client(clock=clock).quote("USD/MXN", "buy", 25_000)
+
+
+@pytest.mark.parametrize("edit", [{"expires_at": 1}, {"status": "dropped"}, {"status": None}])
+def test_a_dropped_quotes_best_must_be_live(make_client, venue, session, clock, edit):
+    def accept(req):
+        best = {k: v for k, v in dict(venue.row(), quote_id="0x" + "66" * 32, **edit).items() if v is not None}
+        return (409, {"code": "quote_dropped", "error": "the maker dropped this quote", "details": {"best": best}})
+    session.routes[("POST", f"/rfqs/{RFQ}/accept")] = accept
+    c = make_client(clock=clock)
+    with pytest.raises(crx.QuoteDropped) as ei:
+        c.trade(c.quote("USD/MXN", "buy", 25_000))
+    assert ei.value.best is None and len(accepts(session)) == 1

@@ -25,7 +25,7 @@ from . import _eip712 as e7
 from ._http import Gateway
 from .signer import as_signer, sign_typed
 from .errors import (
-    BadAnswer, CrxError, NetworkError, OwnRoundOpen, QuoteDropped, QuoteExpired, QuoteNotYours, RateLimited,
+    BadAnswer, CrxError, Declined, NetworkError, OwnRoundOpen, QuoteDropped, QuoteExpired, QuoteNotYours, RateLimited,
     RefusedToSign, TradeUnknown, clean, from_gateway, gateway_code,
 )
 
@@ -34,7 +34,9 @@ SIDE_WINDOW = 630  # s: the core takes a Side quote_expiry at most 600 s past it
 NEW_QUOTE = "not opened; request a new quote"
 MAX_POSTS = 3  # accept bodies per trade; a re-post of the same body after 409 rejected does not count
 # Accept refusals that reserve nothing and send nothing, even after a signed post.
-NOTHING_SENT = (QuoteExpired, OwnRoundOpen, QuoteNotYours, RateLimited)
+NOTHING_SENT = (QuoteExpired, OwnRoundOpen, QuoteNotYours, RateLimited, Declined)
+# The gateway's band declines: answered before the accept reserves anything, whatever the HTTP status.
+DECLINES = ("rate_out_of_band", "mark_unavailable", "position_matured")
 
 
 def utc(ts: float) -> str:
@@ -366,6 +368,8 @@ class Binder:
                 except NetworkError:
                     r = None
                 posts += 1
+                if status_code(r)[1] in DECLINES:
+                    raise accept_refused(r)
                 if r is None or r.status_code >= 500:
                     return {}, t, self.now()
                 if r.status_code == 200:

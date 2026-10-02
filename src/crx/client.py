@@ -150,6 +150,12 @@ def _ended(view: dict, rfq_id: str) -> CrxError | None:
     return RfqCancelled(message or f"the gateway cancelled the RFQ ({reason or 'no reason named'})", details=details)
 
 
+def _live(row: Any, now_ms: float) -> bool:
+    """A quote row that can still win: ``quoted`` and not past ``expires_at``."""
+    return (isinstance(row, dict) and row.get("status") == "quoted" and isinstance(row.get("expires_at"), int)
+            and not isinstance(row.get("expires_at"), bool) and row["expires_at"] > now_ms)
+
+
 def _default_expiry(now: datetime) -> datetime:
     """One month out, a weekend rolled to Monday."""
     t = now + timedelta(days=30)
@@ -589,19 +595,17 @@ class Client:
     def _pick(self, view: dict, rfq_id: str) -> dict | None:
         """The gateway's pick in a taker view, else its best live quote, else None. An RFQ that ended raises.
 
-        A row counts only when ``quoted``: dropped, declined and expired rows never win. A live
-        quote is also not past ``expires_at``. A pick that is not ``quoted`` counts as none.
+        A row counts only when live: ``quoted`` and not past ``expires_at``. Dropped, declined and
+        expired rows never win. A pick that is not live counts as none.
         """
         err = _ended(view, rfq_id)
         if err is not None:
             raise err
-        pick = view.get("quote")
-        if isinstance(pick, dict) and pick.get("status") == "quoted":
-            return pick
         now_ms = self._clock() * 1000
-        live = [q for q in view.get("quotes") or [] if isinstance(q, dict)
-                and isinstance(q.get("expires_at"), int) and q["expires_at"] > now_ms
-                and q.get("status") == "quoted"]
+        pick = view.get("quote")
+        if _live(pick, now_ms):
+            return pick
+        live = [q for q in view.get("quotes") or [] if _live(q, now_ms)]
         return live[0] if live else None
 
     def _await_quote(self, rfq_id: str, wait: float) -> dict:
@@ -662,9 +666,9 @@ class Client:
             raise
 
     def _best_of(self, dropped: Quote, e: QuoteDropped) -> Quote | None:
-        """The best live quote a quote_dropped answer names: another quote on the same RFQ, else None."""
+        """The best live quote a quote_dropped answer names: another live quote on the same RFQ, else None."""
         row = e.details.get("best")
-        if not isinstance(row, dict) or str(row.get("rfq_id") or dropped.rfq_id) != dropped.rfq_id:
+        if not _live(row, self._clock() * 1000) or str(row.get("rfq_id") or dropped.rfq_id) != dropped.rfq_id:
             return None
         if str(row.get("quote_id")) == dropped.quote_id:
             return None
