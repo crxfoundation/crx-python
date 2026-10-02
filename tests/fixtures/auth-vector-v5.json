@@ -1,0 +1,157 @@
+{
+ "about": "REST auth vectors, v5 (FINAL: matches crx-api http/auth.rs LoginWords::message, envelope_key and check_stamp at imbps-m7 c045cb81). Spec: SPEC-v5.md \u00a710. EIP-191 personal_sign over the message lines joined by \\n, no trailing newline. Body = keccak256 of the exact request bytes. Keys are public anvil test keys: never fund them. Computed by eth_account 0.14 and viem 2.57.2 (byte-equal); digests and signatures also equal under cast 1.5.1.",
+ "shape": "signer_line",
+ "shape_note": "8 lines: CRX-REST-LOGIN, Audience, Method, Path, Custody, Signer, Timestamp, Body. Signer = x-crx-signer when sent (a delegate), else the custody.",
+ "empty_body_hash": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+ "cases": [
+  {
+   "id": "A1",
+   "note": "self-custody POST /rfqs with a body: no x-crx-signer (Signer = custody), no x-crx-nonce",
+   "method": "POST",
+   "path": "/rfqs",
+   "body": "{\"pair\":\"USD/BRL\",\"side\":1,\"notional\":\"5000000\",\"expiry\":1798732800000,\"client_rfq_id\":\"r-1\"}",
+   "body_hash": "0x6740d32c631177dece9c45fad3aee08491a4c5b0b05f8383eff3a2d9e26f282d",
+   "headers": {
+    "x-crx-address": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+    "x-crx-ts": "1790000000000",
+    "x-crx-sig": "0xded2a9a802179ca685176c575c48a4ff0afaa98c76093c0e957dc37598d7a2d009bc0b2b51b68719dbf563ab9609469a232ebbc95538f738c51ff423aead8aa11b"
+   },
+   "message": "CRX-REST-LOGIN\nAudience: crx-gateway\nMethod: POST\nPath: /rfqs\nCustody: 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266\nSigner: 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266\nTimestamp: 1790000000000\nBody: 0x6740d32c631177dece9c45fad3aee08491a4c5b0b05f8383eff3a2d9e26f282d",
+   "message_lines": 8,
+   "eip191_digest": "0x4db53999b137df9833ba6046107cebac041525dbee13f90c8f0837d88773f04b",
+   "replay_key": "env:0x4db53999b137df9833ba6046107cebac041525dbee13f90c8f0837d88773f04b",
+   "signature": "0xded2a9a802179ca685176c575c48a4ff0afaa98c76093c0e957dc37598d7a2d009bc0b2b51b68719dbf563ab9609469a232ebbc95538f738c51ff423aead8aa11b",
+   "recovered": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+   "signer_line": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+   "expect": "accepted"
+  },
+  {
+   "id": "A2",
+   "note": "self-custody GET /balance, no body: signs keccak of zero bytes",
+   "method": "GET",
+   "path": "/balance",
+   "body": "",
+   "body_hash": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+   "headers": {
+    "x-crx-address": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+    "x-crx-ts": "1790000000001",
+    "x-crx-sig": "0x2f9f24a2fc8f5f2c845c89832a403987d3d2bfd3d6bf50e52bd323b91f3bfb254d6c530e06e564996110022378a1c7802ee0c5584befbf9b8b2693dac3ac8e4f1b"
+   },
+   "message": "CRX-REST-LOGIN\nAudience: crx-gateway\nMethod: GET\nPath: /balance\nCustody: 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266\nSigner: 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266\nTimestamp: 1790000000001\nBody: 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+   "message_lines": 8,
+   "eip191_digest": "0x753aa41fb1d46706d99adbc2b06aa9762b1429354126fa0b818355cdff8cd61e",
+   "replay_key": "env:0x753aa41fb1d46706d99adbc2b06aa9762b1429354126fa0b818355cdff8cd61e",
+   "signature": "0x2f9f24a2fc8f5f2c845c89832a403987d3d2bfd3d6bf50e52bd323b91f3bfb254d6c530e06e564996110022378a1c7802ee0c5584befbf9b8b2693dac3ac8e4f1b",
+   "recovered": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+   "signer_line": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+   "expect": "accepted"
+  },
+  {
+   "id": "A3",
+   "note": "a delegate signs for a custody: x-crx-signer names the delegate and the Signer line carries it",
+   "method": "POST",
+   "path": "/rfqs/0x00000000000000000000000000000000000000000000000000000000000000aa/accept",
+   "body": "{\"quote_id\":\"q-1\",\"sig\":\"0x00\"}",
+   "body_hash": "0xaacc5b8ddd9cfbb42586b1aa9cee1f11542df0ec5b98671fb915b5a374718799",
+   "headers": {
+    "x-crx-address": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+    "x-crx-ts": "1790000000002",
+    "x-crx-sig": "0xab3e8eb4c3b73903f5c71eb87f9dacaf4523a5cc91d289987cf6d5080f2056096f85ac3be17392c7888a5f3492d6395fe767fc6fcaa7f01b3bc03ed9ad7a944b1c",
+    "x-crx-signer": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8"
+   },
+   "message": "CRX-REST-LOGIN\nAudience: crx-gateway\nMethod: POST\nPath: /rfqs/0x00000000000000000000000000000000000000000000000000000000000000aa/accept\nCustody: 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266\nSigner: 0x70997970c51812dc3a010c7d01b50e0d17dc79c8\nTimestamp: 1790000000002\nBody: 0xaacc5b8ddd9cfbb42586b1aa9cee1f11542df0ec5b98671fb915b5a374718799",
+   "message_lines": 8,
+   "eip191_digest": "0xb517931fdbafda4a6480a75a663efaac20ba156241f9b34d5e2a8f242017b9ed",
+   "replay_key": "env:0xb517931fdbafda4a6480a75a663efaac20ba156241f9b34d5e2a8f242017b9ed",
+   "signature": "0xab3e8eb4c3b73903f5c71eb87f9dacaf4523a5cc91d289987cf6d5080f2056096f85ac3be17392c7888a5f3492d6395fe767fc6fcaa7f01b3bc03ed9ad7a944b1c",
+   "recovered": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+   "signer_line": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+   "expect": "accepted"
+  },
+  {
+   "id": "R1",
+   "note": "A1 resent byte for byte inside the window: the same digest, so the replay cache refuses it",
+   "method": "POST",
+   "path": "/rfqs",
+   "body": "{\"pair\":\"USD/BRL\",\"side\":1,\"notional\":\"5000000\",\"expiry\":1798732800000,\"client_rfq_id\":\"r-1\"}",
+   "body_hash": "0x6740d32c631177dece9c45fad3aee08491a4c5b0b05f8383eff3a2d9e26f282d",
+   "headers": {
+    "x-crx-address": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+    "x-crx-ts": "1790000000000",
+    "x-crx-sig": "0xded2a9a802179ca685176c575c48a4ff0afaa98c76093c0e957dc37598d7a2d009bc0b2b51b68719dbf563ab9609469a232ebbc95538f738c51ff423aead8aa11b"
+   },
+   "message": "CRX-REST-LOGIN\nAudience: crx-gateway\nMethod: POST\nPath: /rfqs\nCustody: 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266\nSigner: 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266\nTimestamp: 1790000000000\nBody: 0x6740d32c631177dece9c45fad3aee08491a4c5b0b05f8383eff3a2d9e26f282d",
+   "message_lines": 8,
+   "eip191_digest": "0x4db53999b137df9833ba6046107cebac041525dbee13f90c8f0837d88773f04b",
+   "replay_key": "env:0x4db53999b137df9833ba6046107cebac041525dbee13f90c8f0837d88773f04b",
+   "signature": "0xded2a9a802179ca685176c575c48a4ff0afaa98c76093c0e957dc37598d7a2d009bc0b2b51b68719dbf563ab9609469a232ebbc95538f738c51ff423aead8aa11b",
+   "recovered": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+   "signer_line": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+   "expect": "refused: replay"
+  },
+  {
+   "id": "R2",
+   "note": "A1 one millisecond later: a new digest, accepted",
+   "method": "POST",
+   "path": "/rfqs",
+   "body": "{\"pair\":\"USD/BRL\",\"side\":1,\"notional\":\"5000000\",\"expiry\":1798732800000,\"client_rfq_id\":\"r-1\"}",
+   "body_hash": "0x6740d32c631177dece9c45fad3aee08491a4c5b0b05f8383eff3a2d9e26f282d",
+   "headers": {
+    "x-crx-address": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+    "x-crx-ts": "1790000000001",
+    "x-crx-sig": "0x12e290a3401507b11d4a63704eb6c4b13a6d7e19456ef8eeaefc249f7f07790e6d2d414699f217b3613fdabbd20480d0de175914e658dac6c180e21c10bb3c8d1b"
+   },
+   "message": "CRX-REST-LOGIN\nAudience: crx-gateway\nMethod: POST\nPath: /rfqs\nCustody: 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266\nSigner: 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266\nTimestamp: 1790000000001\nBody: 0x6740d32c631177dece9c45fad3aee08491a4c5b0b05f8383eff3a2d9e26f282d",
+   "message_lines": 8,
+   "eip191_digest": "0x07b1d82eaf3afea179d5353d7eb602aff1cd4fdd40d56757b9d2cdb4628c5465",
+   "replay_key": "env:0x07b1d82eaf3afea179d5353d7eb602aff1cd4fdd40d56757b9d2cdb4628c5465",
+   "signature": "0x12e290a3401507b11d4a63704eb6c4b13a6d7e19456ef8eeaefc249f7f07790e6d2d414699f217b3613fdabbd20480d0de175914e658dac6c180e21c10bb3c8d1b",
+   "recovered": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+   "signer_line": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+   "expect": "accepted"
+  },
+  {
+   "id": "N1",
+   "note": "a delegate signs but sends no x-crx-signer: the gateway builds Signer = the custody, the signature recovers the delegate, recovered != Signer: 401",
+   "method": "POST",
+   "path": "/rfqs",
+   "body": "{\"pair\":\"USD/BRL\",\"side\":1,\"notional\":\"5000000\",\"expiry\":1798732800000,\"client_rfq_id\":\"r-2\"}",
+   "body_hash": "0x4f159a3e1d8c08b7571562d1435afe4d9b57fb22ad539ab0b4adfb5e4ff2b41b",
+   "headers": {
+    "x-crx-address": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+    "x-crx-ts": "1790000000003",
+    "x-crx-sig": "0x4d95ee7c1f35b19bdafca1bad2eed83cb56b27be21bb0504bd79ab8a9b4bc218301f83aad64b8acb541957ae4496973a1e7bc206b31d646f670fe8e34f63a2db1c"
+   },
+   "message": "CRX-REST-LOGIN\nAudience: crx-gateway\nMethod: POST\nPath: /rfqs\nCustody: 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266\nSigner: 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266\nTimestamp: 1790000000003\nBody: 0x4f159a3e1d8c08b7571562d1435afe4d9b57fb22ad539ab0b4adfb5e4ff2b41b",
+   "message_lines": 8,
+   "eip191_digest": "0xd4f2de0dd051c4f9b1fe8e137afae0b8d09fcdd8de1081cfe0037eaaac5a646f",
+   "replay_key": "env:0xd4f2de0dd051c4f9b1fe8e137afae0b8d09fcdd8de1081cfe0037eaaac5a646f",
+   "signature": "0x4d95ee7c1f35b19bdafca1bad2eed83cb56b27be21bb0504bd79ab8a9b4bc218301f83aad64b8acb541957ae4496973a1e7bc206b31d646f670fe8e34f63a2db1c",
+   "recovered": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+   "signer_line": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+   "expect": "refused: 401, recovered != Signer"
+  }
+ ],
+ "legacy": {
+  "id": "L1",
+  "note": "an old client still sends x-crx-nonce: the 9-line message with the Nonce line, unchanged",
+  "method": "POST",
+  "path": "/rfqs",
+  "body": "{\"pair\":\"USD/BRL\",\"side\":1,\"notional\":\"5000000\",\"expiry\":1798732800000,\"client_rfq_id\":\"r-1\"}",
+  "headers": {
+   "x-crx-address": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+   "x-crx-signer": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+   "x-crx-ts": "1790000000000",
+   "x-crx-nonce": "n-1",
+   "x-crx-sig": "0xd382bbb890c0bba494aecc6fafae4d6c7606224312a38782dd378ab3b325bde970d65b0ce654965ffd8e5cac17d7e5fa238468b1c5dc206678a628bfc92a769f1c"
+  },
+  "message": "CRX-REST-LOGIN\nAudience: crx-gateway\nMethod: POST\nPath: /rfqs\nCustody: 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266\nSigner: 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266\nTimestamp: 1790000000000\nNonce: n-1\nBody: 0x6740d32c631177dece9c45fad3aee08491a4c5b0b05f8383eff3a2d9e26f282d",
+  "message_lines": 9,
+  "eip191_digest": "0xe8cfbe1a6f27e3f2183315b82872143bc9906f6e83fd195a09965fcd4dd5eb37",
+  "signature": "0xd382bbb890c0bba494aecc6fafae4d6c7606224312a38782dd378ab3b325bde970d65b0ce654965ffd8e5cac17d7e5fa238468b1c5dc206678a628bfc92a769f1c",
+  "expect": "accepted"
+ },
+ "control": {
+  "gold_v2_message": "CRX-REST-LOGIN\nAudience: crx-gateway\nMethod: POST\nPath: /rfqs\nCustody: 0xc923cbb9f2ff5c7c1fd4e2b9f0e63c4f2a3d5b61\nSigner: 0xc923cbb9f2ff5c7c1fd4e2b9f0e63c4f2a3d5b61\nTimestamp: 1758000000000\nNonce: n-golden-1\nBody: 0x1f6b57cd4acacc839d00c4689dc35934865531c966a9c708efc2fdc1cec5ed98"
+ }
+}

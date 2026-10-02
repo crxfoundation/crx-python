@@ -106,6 +106,14 @@ class Clock:
         self.t += s
 
 
+@pytest.fixture(autouse=True)
+def fresh_stamp():
+    """Each test starts with no REST stamp: the next call is stamped at its clock's now."""
+    crx._http._last_stamp = 0
+    yield
+    crx._http._last_stamp = 0
+
+
 @pytest.fixture
 def health():
     return fixture("health.json")

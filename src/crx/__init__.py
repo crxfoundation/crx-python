@@ -4,9 +4,9 @@ from .client import NETWORKS, Client
 from .errors import (
     AboveMax, AlreadyAccepted, AuthError, BadAnswer, BadRequest, BelowMin, ConfigError, CrxError, Declined,
     InsufficientCollateral, LegIdTaken, LegLive, MarkUnavailable, MarketClosed, MarketPaused, NetworkError, NoQuotes,
-    NotWhitelisted, OwnRoundOpen, PositionMatured, QuoteDropped, QuoteExpired, QuoteFillsFull, QuoteLost,
-    QuoteNotYours, RateLimited, RateOutOfBand, RefusedToSign, Rejected, RfqCancelled, SeatNotReady, ServerError,
-    TradeUnknown, TxFailed, UnknownOrEnded,
+    NotWhitelisted, OwnRoundOpen, PositionMatured, QuoteDropped, QuoteExpired, QuoteFillsFull, QuoteFormatOutdated,
+    QuoteLost, QuoteNotYours, RateLimited, RateOutOfBand, RefusedToSign, Rejected, RfqCancelled, SeatNotReady,
+    ServerError, TradeUnknown, TxFailed, UnknownOrEnded,
 )
 from .models import (
     Ask, Balance, Deposit, Drop, Event, MakerQuote, Market, Position, Quote, Rfq, Trade, Viewer, Withdraw,
@@ -21,7 +21,7 @@ __all__ = [
     "CrxError", "AboveMax", "AlreadyAccepted", "AuthError", "BadAnswer", "BadRequest", "BelowMin", "ConfigError",
     "Declined", "MarkUnavailable", "PositionMatured", "RateOutOfBand",
     "InsufficientCollateral", "LegIdTaken", "LegLive", "MarketClosed", "MarketPaused", "NetworkError", "NoQuotes",
-    "NotWhitelisted", "OwnRoundOpen", "QuoteDropped", "QuoteExpired", "QuoteFillsFull", "QuoteLost", "QuoteNotYours",
-    "RateLimited", "RefusedToSign", "Rejected", "RfqCancelled",
+    "NotWhitelisted", "OwnRoundOpen", "QuoteDropped", "QuoteExpired", "QuoteFillsFull", "QuoteFormatOutdated",
+    "QuoteLost", "QuoteNotYours", "RateLimited", "RefusedToSign", "Rejected", "RfqCancelled",
     "SeatNotReady", "ServerError", "TradeUnknown", "TxFailed", "UnknownOrEnded",
 ]

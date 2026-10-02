@@ -13,10 +13,10 @@ from pathlib import Path
 from typing import Any, Callable, Iterator
 
 import requests
-from eth_utils import is_checksum_address, is_hex_address, keccak, to_checksum_address
+from eth_utils import is_checksum_address, is_hex_address, to_checksum_address
 
 from . import _eip712 as e7
-from ._bind import Binder, utc
+from ._bind import Binder
 from ._chain import Rpc, send_tx
 from ._http import Gateway
 from ._keys import load_account
@@ -55,7 +55,7 @@ NETWORKS = {
 _ALIASES = {"fuji": "testnet"}
 TESTNET_CHAIN_IDS = {43113, 84532, 11142220}
 MAINNET_CHAIN_IDS = {1}
-DEFAULT_STATE_DIR = "~/.crx-quickstart"  # shared with the CRX quickstart scripts: one Side nonce floor per seat
+DEFAULT_STATE_DIR = "~/.crx-quickstart"  # shared with the CRX quickstart scripts: one nonce floor per seat
 WAITING = ("", "sending", "pending")  # statuses _settle polls past
 WITHDRAW_TTL = 22 * 3600  # s; the gateway takes a deadline at most 23 h out
 OPEN_TIMEOUT = 30.0  # s; POST /rfqs answers after the 10 s window, the gateway stops at 30 s
@@ -322,11 +322,6 @@ class Client:
         self._chain, self._sep = dict(c, chain_id=chain_id), sep
         return self._chain
 
-    def _sign_mode(self) -> str:
-        """``quote`` where the maker's quote is its trade signature, else ``side``: /health
-        ``chains[].sign_mode``, read once per client. A missing field is ``side``."""
-        return "quote" if self._chain_info().get("sign_mode") == "quote" else "side"
-
     def _chain_ready(self) -> dict:
         """The chain, with the RPC checked: right chain id, and the core is a contract."""
         c = self._chain_info()
@@ -358,7 +353,11 @@ class Client:
         return at if at > now else at + timedelta(hours=1)
 
     def markets(self) -> list[Market]:
-        """Every pair: session open, paused, notional limits."""
+        """Every pair: session open, paused, notional limits, the premium cap.
+
+        A pair is paused on this chain when /markets lists no row for the chain, or the row
+        reads ``paused: true``. A row with no ``paused`` reads as not paused.
+        """
         body = self._gw.request("GET", "/markets", auth=False)
         rows = body.get("markets")
         if not isinstance(rows, list):
@@ -372,10 +371,15 @@ class Client:
             nb = session.get("next_boundary") if isinstance(session.get("next_boundary"), dict) else {}
             notional = m.get("notional") if isinstance(m.get("notional"), dict) else {}
             tenor = m.get("tenor") if isinstance(m.get("tenor"), dict) else {}
+            caps = [c.get("max_premium_bps") for c in on]
+            cap = min(caps) if caps and all(type(v) is int and v >= 0 for v in caps) else None
+            pair = m["pair"]
+            slash = e7.pair_text_ok(pair)
             out.append(Market(
-                pair=m["pair"], pair_id=str(m.get("pair_id") or ""), base=str(m.get("base") or ""),
-                quote=str(m.get("quote") or ""), open=session.get("open") is True,
-                paused=not on or any(c.get("paused") is not False for c in on),
+                pair=pair, pair_id=e7.h0x(e7.pair_id(pair)) if slash else str(m.get("pair_id") or ""),
+                base=pair[:3] if slash else str(m.get("base") or ""),
+                quote=pair[4:] if slash else str(m.get("quote") or ""), open=session.get("open") is True,
+                paused=not on or any(c.get("paused") is True for c in on), max_premium_bps=cap,
                 min_notional=dec(notional.get("min")), max_notional=dec(notional.get("max")),
                 next_open=ms_to_dt(nb.get("at")) if nb.get("kind") == "open" else None,
                 min_tenor_s=tenor.get("min_secs"), max_tenor_s=tenor.get("max_secs"), raw=m,
@@ -475,7 +479,7 @@ class Client:
         notional: Any,
         *,
         expiry: datetime | timedelta | int | None = None,
-        im_bps: int = 100,
+        premium_bps: int = 0,
         wait: float = 30.0,
         client_rfq_id: str | None = None,
     ) -> Quote:
@@ -484,6 +488,10 @@ class Client:
         ``side`` is your side in the base currency. ``expiry`` is the settlement
         instant: a datetime, a timedelta from now, or unix ms. Default: one
         month out, off the weekend.
+
+        ``premium_bps`` is the upfront premium, -10000 to 10000: above 0 the taker
+        pays, below 0 the maker pays. Default 0. ``trade()`` signs only when the
+        served premium is this one and within the market's cap (``Market.max_premium_bps``).
 
         ``client_rfq_id`` is 1 to 128 printable ASCII characters.
 
@@ -495,7 +503,7 @@ class Client:
         cancelled raises ``RfqCancelled`` (a ``NoQuotes``) with its ``reason``, e.g.
         ``rate_out_of_band``: no quote was inside the off-market band.
         """
-        rfq, r = self._open(pair, side, notional, expiry, im_bps, client_rfq_id, True)
+        rfq, r = self._open(pair, side, notional, expiry, premium_bps, client_rfq_id, True)
         if not isinstance(r.get("quotes"), list):
             return self._winner(rfq, wait)
         q = self._pick(r, rfq["rfq_id"])  # the answer came after the window
@@ -511,7 +519,7 @@ class Client:
         notional: Any,
         *,
         expiry: datetime | timedelta | int | None = None,
-        im_bps: int = 100,
+        premium_bps: int = 0,
         client_rfq_id: str | None = None,
     ) -> Ask:
         """Open an RFQ and return at once. ``Ask.quote()`` returns the winning quote.
@@ -519,12 +527,12 @@ class Client:
         Takes the terms of ``quote()`` and makes the same checks. The gateway
         answers before the 10 s window ends, with no quote.
         """
-        rfq, r = self._open(pair, side, notional, expiry, im_bps, client_rfq_id, False)
+        rfq, r = self._open(pair, side, notional, expiry, premium_bps, client_rfq_id, False)
         return Ask(rfq_id=rfq["rfq_id"], pair=rfq["pair"], side=rfq["side"], notional=Decimal(rfq["notional"]),
                    expiry=ms_to_dt(rfq["expiry"]), raw=r, rfq=rfq, _client=self)
 
     def _open(
-        self, pair: str, side: str, notional: Any, expiry: datetime | timedelta | int | None, im_bps: int,
+        self, pair: str, side: str, notional: Any, expiry: datetime | timedelta | int | None, premium_bps: int,
         client_rfq_id: str | None, wait: bool,
     ) -> tuple[dict, dict]:
         """Check the terms and POST /rfqs. ``wait``: the gateway answers after the 10 s window,
@@ -556,23 +564,23 @@ class Client:
             expiry_ms = expiry
         else:
             raise BadRequest("expiry is a datetime, a timedelta or unix ms")
-        if not (isinstance(im_bps, int) and 1 <= im_bps <= 10_000):
-            raise BadRequest("im_bps is an integer from 1 to 10000")
+        if isinstance(premium_bps, bool) or not (isinstance(premium_bps, int) and -10_000 <= premium_bps <= 10_000):
+            raise BadRequest("premium_bps is an integer from -10000 to 10000")
         req = {
             "chain": self.chain_key, "pair": compact, "side": side, "notional": _plain(amount),
-            "expiry": expiry_ms, "im_bps": im_bps, "client_rfq_id": client_rfq_id or f"sdk-{uuid.uuid4().hex[:12]}",
-            "wait": wait,
+            "expiry": expiry_ms, "client_rfq_id": client_rfq_id or f"sdk-{uuid.uuid4().hex[:12]}", "wait": wait,
         }
+        if premium_bps:
+            req["premium_bps"] = premium_bps
         r = self._gw.request("POST", "/rfqs", body=req,
                              timeout=max(self._gw._timeout, OPEN_TIMEOUT) if wait else None)
-        try:
-            rfq_id, leg_id, quote_expiry = str(r["rfq_id"]), str(r["leg_id"]), int(r["quote_expiry"])
-            echo_im = int(r.get("im_bps", im_bps))
-        except (KeyError, TypeError, ValueError):
-            raise BadAnswer("/rfqs sent an answer this SDK cannot read") from None
+        rfq_id, leg_id, qe_max = _word(r.get("rfq_id")), _word(r.get("leg_id")), r.get("quote_expiry_max")
+        if rfq_id is None or leg_id is None or type(qe_max) is not int:
+            raise BadAnswer("/rfqs sent an answer this SDK cannot read")
         log.info("rfq %s opened: %s %s %s", rfq_id, slash, side, _plain(amount))
-        rfq = {"rfq_id": rfq_id, "leg_id": leg_id, "quote_expiry": quote_expiry, "im_bps": echo_im,
-               "pair": slash, "side": side, "notional": _plain(amount), "expiry": expiry_ms, "req_im_bps": im_bps}
+        rfq = {"rfq_id": rfq_id, "leg_id": leg_id, "quote_expiry_max": qe_max, "pair": slash, "side": side,
+               "notional": _plain(amount), "expiry": expiry_ms, "premium_bps": premium_bps,
+               "max_premium_bps": m.max_premium_bps}
         return rfq, r
 
     def _winner(self, rfq: dict, wait: float) -> Quote:
@@ -581,13 +589,13 @@ class Client:
 
     @staticmethod
     def _quote_of(rfq: dict, q: dict) -> Quote:
-        """A quote row on the RFQ ``rfq`` as a ``Quote``."""
+        """A quote row on the RFQ ``rfq`` as a ``Quote``: the rate and expires_at from the row, the terms
+        from the RFQ's own ask."""
         try:
             return Quote(
                 rfq_id=rfq["rfq_id"], quote_id=str(q["quote_id"]), pair=rfq["pair"], side=rfq["side"],
-                notional=Decimal(str(q["notional"])), rate=Decimal(str(q["rate"])),
-                expiry=ms_to_dt(q["expiry"]) or ms_to_dt(rfq["expiry"]), expires_at=ms_to_dt(q.get("expires_at")),
-                house=q.get("house") is True, raw=q, rfq=rfq, expiry_ms=rfq["expiry"],
+                notional=Decimal(rfq["notional"]), rate=Decimal(str(q["rate"])), expiry=ms_to_dt(rfq["expiry"]),
+                expires_at=ms_to_dt(q.get("expires_at")), raw=q, rfq=rfq, expiry_ms=rfq["expiry"],
             )
         except (KeyError, TypeError, ValueError, ArithmeticError):
             raise BadAnswer("the quote row cannot be read") from None
@@ -631,13 +639,14 @@ class Client:
             self._sleep(1.0)
 
     def trade(self, quote: Quote) -> Trade:
-        """Accept a quote and open the trade: you sign your template. CRX sends the tx and pays gas.
+        """Accept a quote and open the trade: you sign a readable ``Trade``. CRX sends the tx and pays gas.
 
-        The template is a readable ``Trade`` (``digest_kind`` ``trade``) or a ``Side``. The quote
-        carries it. The SDK rebuilds and checks it, signs its own typed data,
-        and posts the accept with the signature: one call. When the template is stale,
-        the gateway answers with a fresh one, which is checked and signed in turn.
-        A gateway that takes the leg body only gets that body, then the Side.
+        The quote carries the trade template. The SDK builds its own ``Trade`` from your
+        ask and the quote's rate, compares the served one with it member by member, checks
+        the domain, the leg id's quote end and the nonce, signs its own typed data, and
+        posts the accept with the signature: one call. Any difference raises
+        ``RefusedToSign`` and nothing is signed. When the template is stale, the gateway
+        answers with a fresh one, which is checked and signed in turn.
 
         When the maker dropped the quote, the gateway names the best live quote on the
         same RFQ. The SDK accepts it once when its rate is no worse than ``quote.rate``.
@@ -681,45 +690,19 @@ class Client:
         """Accept one quote, then read the trade status."""
         rfq = quote.rfq
         rfq_id = quote.rfq_id
-        nonce = int.from_bytes(keccak(bytes.fromhex(self.address[2:]) + rfq_id.encode())[-8:], "big")
-        try:
-            arm = b.leg(quote.raw, rfq["leg_id"], nonce, rfq["quote_expiry"], rfq["im_bps"])
-        except KeyError:
-            raise RefusedToSign("refused to sign: the quote row lacks a term") from None
-        want = {
-            "pair_id": e7.pair_id(rfq["pair"]), "instrument_id": 1, "side": 1 if rfq["side"] == "buy" else -1,
-            "notional": Decimal(rfq["notional"]), "expiry": int(rfq["expiry"]) // 1000,
-            "im_bps": rfq["req_im_bps"], "premium_bps": 0,
+        ask = {
+            "pair": rfq["pair"], "side": 1 if rfq["side"] == "buy" else -1, "notional": rfq["notional"],
+            "expiry": rfq["expiry"], "premium_bps": rfq["premium_bps"], "rate": quote.rate,
+            "quote_expiry_max": rfq["quote_expiry_max"], "max_premium_bps": rfq.get("max_premium_bps"),
+            "leg_id": rfq.get("leg_id"),
         }
-        b.check_terms(arm, want)
         base = dict(rfq_id=rfq_id, quote_id=quote.quote_id, pair=quote.pair, side=quote.side,
                     notional=quote.notional, rate=quote.rate)
-        # Where the maker's quote binds it (sign_mode "quote"), no maker Side follows and nothing lapses.
-        lapse = self._sign_mode() == "side"
-        exp = quote.raw.get("expires_at")
-        template = quote.raw.get("side_template")
-        one = b.accept_side(rfq_id, quote.quote_id, arm, template if isinstance(template, dict) else None, exp,
-                            rfq["pair"])
-        if one is not None:
-            r, side, answered = one
-            if lapse:
-                maker_by = min((exp if isinstance(exp, int) else 10**13) / 1000, answered + 120) + 5
-                log.info("rfq %s @ %s: side signed and posted with the accept, nonce %s; the maker signs by %s",
-                         rfq_id, quote.rate, clean(side["own_nonce"]), utc(maker_by))
-            else:
-                log.info("rfq %s @ %s: side signed and posted with the accept, nonce %s; the maker's quote binds",
-                         rfq_id, quote.rate, clean(side["own_nonce"]))
-        else:
-            sig = b.sign_leg(arm)
-            r, answered = b.accept(rfq_id, exp, {"quote_id": quote.quote_id, "leg": arm, "sig": sig})
-            log.info("rfq %s accepted @ %s", rfq_id, quote.rate)
-            side = r.get("side")
-            try:
-                opened = min(int(side["own_nonce"]) / 1000, answered)
-            except (KeyError, TypeError, ValueError):
-                raise RefusedToSign("refused to sign: the template cannot be read") from None
-            maker_by = min((exp if isinstance(exp, int) else 10**13) / 1000, opened + 120) + 5 if lapse else None
-            b.bind(rfq_id, arm, side, maker_by, log.info, rfq["pair"])
+        template = quote.raw.get("trade_template")
+        r, t, _ = b.accept_trade(rfq_id, quote.quote_id, ask, template if isinstance(template, dict) else None,
+                                 quote.raw.get("expires_at"))
+        log.info("rfq %s @ %s: trade signed and posted with the accept, nonce %s", rfq_id, quote.rate,
+                 clean(t["typed_data"]["message"]["ownNonce"]))
         status, view = self._settle(lambda: self._gw.request("GET", f"/rfqs/{rfq_id}"), "trade_status")
         tx = _word(view.get("trade_tx"))
         log.info("rfq %s %s: tx %s", rfq_id, status, tx)
@@ -815,6 +798,7 @@ class Client:
         nonce = self.balance().withdraw_nonce
         if nonce is None:
             raise RefusedToSign("/balance names no withdraw nonce for this seat; nothing signed")
+        # The chain pays the account only. ``recipient`` is a member with drop_withdraw_recipient off only.
         w = {"account": self.address, "amount": e7.scaled6(amount), "recipient": self.address,
              "nonce": nonce, "deadline": int(self._clock()) + WITHDRAW_TTL}
         digest = e7.withdraw_digest(self._sep, w)
@@ -876,49 +860,41 @@ class Client:
 
     def rfq(self, rfq_id: str) -> Rfq:
         """One RFQ as your seat reads it. As its taker, ``quotes`` holds every desk's
-        quote (``house_rate`` names the house desk's) and ``client_rfq_id`` is yours.
-        As a maker, ``quotes`` holds your own quotes only."""
+        quote and ``client_rfq_id`` is yours. As a maker, ``quotes`` holds your own quotes only."""
         self._need_seat()
         return _maker.read(self, rfq_id)
 
-    def send_quote(
-        self, rfq: Rfq, rate: Any, *, client_quote_id: str | None = None, expires_in: float | None = None,
-    ) -> MakerQuote:
-        """Post a firm quote at ``rate`` on ``rfq``: you sign your Leg. The taker gets the best quote only.
+    def send_quote(self, rfq: Rfq, rate: Any, *, client_quote_id: str | None = None) -> MakerQuote:
+        """Post a binding quote at ``rate`` on ``rfq``: you sign a ``Quote``. The taker gets the best quote only.
 
-        The Leg carries the RFQ's terms, your own side (the opposite of the taker's) and
-        your nonce from ``client_quote_id`` (a fresh one by default). ``expires_in`` ends
-        the quote that many seconds from now; by default it lives as long as the RFQ.
-        A refusal raises its error: ``InsufficientCollateral``, ``QuoteExpired`` when the
-        RFQ ended, ``NotWhitelisted``. Pass the result to ``confirm``.
+        The quote carries the RFQ's terms and your own side (the opposite of the taker's).
+        It is your trade signature: nothing is signed after the accept. It binds you until
+        the RFQ's ``quote_expiry_max`` (at least 60 s out, else ``QuoteLost``), the end its
+        leg id carries; ``drop_quote`` ends it sooner. A later quote on the same RFQ replaces
+        the earlier one on the same leg. ``client_quote_id`` (optional) names the quote on
+        your tape; the gateway defaults it to the quote id.
 
-        Where ``rfq.sign_mode`` is ``quote``, you sign a binding quote instead: it is your
-        trade signature, and nothing is signed after the accept. It binds you until the
-        RFQ's ``quote_expiry_max`` (at least 60 s out, else ``QuoteLost``); ``drop_quote``
-        ends it. A later quote on the same RFQ replaces the earlier one on the same leg.
-        ``expires_in`` ends the quote's book life, at the quote expiry at most. Refusals:
-        ``LegLive`` (the seat holds another live leg on the RFQ: quote again, or drop it),
-        ``LegIdTaken`` (quote again), ``QuoteFillsFull``.
-
-        On a binding quote ``client_quote_id`` is no retry key: the same id again is refused
-        (409 ``nonce_collision``). After a network error the quote may rest:
-        ``drop_quote(rfq)`` ends it.
+        Refusals: ``InsufficientCollateral``; ``QuoteExpired`` when the RFQ ended;
+        ``NotWhitelisted``; ``LegLive`` (your seat holds another live leg on the RFQ: quote
+        again, or drop it); ``LegIdTaken`` (quote again); ``QuoteFillsFull``;
+        ``QuoteFormatOutdated`` (the gateway takes a newer quote format: update the SDK).
+        After a network error the quote may rest: ``drop_quote(rfq)`` ends it.
+        Pass the result to ``confirm``.
         """
         self._need_seat()
         self._need_local_key("send_quote()")
-        return _maker.send(self, rfq, rate, client_quote_id, expires_in)
+        return _maker.send(self, rfq, rate, client_quote_id)
 
     def confirm(self, quote: MakerQuote, *, timeout: float | None = None, poll: float = 1.0) -> Trade:
-        """Wait for the taker's accept, sign your Side, and open the trade. CRX sends the tx and pays gas.
+        """Wait for the taker's accept of your binding quote, then for the trade. You sign nothing more.
+        CRX sends the tx and pays gas.
 
         Waits at most ``timeout`` s for the accept; by default until the RFQ's quote window
         closes. Returns once the trade is ``open`` or ``refused``; ``sending`` or ``pending``
         when neither shows within 30 s (testnet) or 90 s (mainnet).
 
-        On a binding quote nothing is signed: the call waits for the accept and the trade.
-
         No trade raises ``QuoteLost``; ``reason`` is ``another_maker``, ``expired``,
-        ``cancelled``, ``round_closed``, ``dropped`` or ``timeout``.
+        ``cancelled``, ``dropped`` or ``timeout``.
         """
         self._need_seat()
         self._need_local_key("confirm()")

@@ -29,6 +29,10 @@ def side_word(side: Any) -> str | None:
 
 @dataclass(frozen=True)
 class Market:
+    """One pair on this client's chain. ``pair_id`` is keccak256 of ``pair``. ``paused`` is True when the
+    pair is not offered on this chain, or its chain row reads ``paused: true``; a row with no ``paused``
+    reads as not paused. ``max_premium_bps`` is the chain's premium cap; None when not served."""
+
     pair: str
     pair_id: str
     base: str
@@ -41,6 +45,7 @@ class Market:
     min_tenor_s: int | None
     max_tenor_s: int | None
     raw: dict = field(repr=False, compare=False)
+    max_premium_bps: int | None = None
 
 
 @dataclass(frozen=True)
@@ -55,7 +60,6 @@ class Quote:
     rate: Decimal
     expiry: datetime
     expires_at: datetime | None
-    house: bool
     raw: dict = field(repr=False, compare=False)
     rfq: dict = field(repr=False, compare=False)
     expiry_ms: int = field(repr=False, default=0)
@@ -185,6 +189,7 @@ class Rfq:
     ``side`` is this seat's own side in the base currency: a maker's side is the
     opposite of the taker's. ``taker_side`` is the taker's side. ``expiry`` is the
     settlement instant. ``closes_at`` is the end of the quote window: no accept after it.
+    ``quote_expiry_max`` is the latest quote end the gateway takes: a quote binds until it.
     ``client_rfq_id`` is served to the RFQ's own taker only. ``quotes`` holds the quote
     rows ``Client.rfq()`` reads: every desk's quote for the RFQ's taker, the seat's own
     quotes for a maker. ``seq`` is the tape position of an ``rfq.opened`` frame.
@@ -195,12 +200,10 @@ class Rfq:
     side: str | None
     notional: Decimal | None
     expiry: datetime | None
-    quote_expiry: datetime | None
-    im_bps: int | None
+    quote_expiry_max: datetime | None
     premium_bps: int | None
     kind: str
     status: str | None
-    opened_at: datetime | None
     closes_at: datetime | None
     client_rfq_id: str | None
     seq: int | None
@@ -208,47 +211,29 @@ class Rfq:
     raw: dict = field(repr=False, compare=False, default_factory=dict)
 
     @property
+    def own(self) -> bool:
+        """True on this seat's own RFQ: the gateway serves ``client_rfq_id`` to the RFQ's taker only."""
+        cid = self.raw.get("client_rfq_id")
+        return isinstance(cid, str) and cid != ""
+
+    @property
     def taker_side(self) -> str | None:
-        """The taker's side. The taker's own view carries no ``join_ref``: it has no counterparty yet."""
+        """The taker's side."""
         if self.side is None:
             return None
-        if self.raw.get("join_ref") is None:
+        if self.own:
             return self.side
         return "sell" if self.side == "buy" else "buy"
-
-    @property
-    def sign_mode(self) -> str:
-        """What a maker signs on this RFQ: ``quote`` (a binding quote, nothing after the accept)
-        or ``side`` (a Leg, then a Side after the accept). An RFQ that names none is ``side``."""
-        return "quote" if self.raw.get("sign_mode") == "quote" else "side"
-
-    @property
-    def house_rate(self) -> Decimal | None:
-        """The rate of the best live house quote in ``quotes``; None when no house quote shows.
-
-        Only the RFQ's taker reads other desks' quotes.
-        """
-        now_ms = datetime.now(timezone.utc).timestamp() * 1000
-        for q in self.quotes:
-            if not isinstance(q, dict) or q.get("house") is not True:
-                continue
-            exp = q.get("expires_at")
-            if str(q.get("status") or "").lower() != "quoted" or not isinstance(exp, int) or exp <= now_ms:
-                continue
-            rate = dec(q.get("rate"))
-            if rate is not None and rate > 0:
-                return rate
-        return None
 
 
 @dataclass(frozen=True)
 class MakerQuote:
-    """Your firm quote on an open RFQ, as ``Client.send_quote`` posted it. Pass it to ``Client.confirm``.
+    """Your binding quote on an open RFQ, as ``Client.send_quote`` posted it. Pass it to ``Client.confirm``.
 
     ``side`` is your own side. ``expiry`` is the settlement instant. ``expires_at`` is
-    the quote's own expiry. ``leg`` is the half you signed: your Leg, or the terms of
-    your binding quote. ``sign_mode`` is ``quote`` for a binding quote, else ``side``.
-    A binding quote binds you until ``quote_expiry``: ``Client.drop_quote`` ends it.
+    the quote's own expiry, as the gateway answers it. ``leg`` is the half you signed.
+    The quote binds you until ``quote_expiry``, the end its leg id carries:
+    ``Client.drop_quote`` ends it sooner.
     """
 
     rfq_id: str
@@ -259,11 +244,10 @@ class MakerQuote:
     rate: Decimal
     expiry: datetime | None
     expires_at: datetime | None
-    client_quote_id: str
+    client_quote_id: str | None
     raw: dict = field(repr=False, compare=False)
     leg: dict = field(repr=False, compare=False)
     rfq: Rfq = field(repr=False, compare=False)
-    sign_mode: str = "side"
 
     @property
     def leg_id(self) -> str:
@@ -272,8 +256,9 @@ class MakerQuote:
 
     @property
     def quote_expiry(self) -> datetime | None:
-        """The last instant the signed half is good for."""
-        return ms_to_dt(self.leg.get("quote_expiry"))
+        """The quote end: the last instant the signed half is good for, from its leg id."""
+        end = self.leg.get("quote_expiry")
+        return ms_to_dt(end * 1000) if isinstance(end, int) and not isinstance(end, bool) else None
 
 
 @dataclass(frozen=True)

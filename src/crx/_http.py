@@ -7,7 +7,6 @@ import logging
 import re
 import threading
 import time
-import uuid
 from typing import Any
 from urllib.parse import urlencode, urlsplit
 
@@ -28,14 +27,30 @@ def host_of(url: str) -> str:
     return clean(urlsplit(url).hostname or "?", 100)
 
 
-def rest_message(method: str, path: str, custody: str, signer: str, ts: int, nonce: str, raw: bytes) -> str:
-    return "\n".join(
-        [
-            "CRX-REST-LOGIN", "Audience: crx-gateway", f"Method: {method}", f"Path: {path}",
-            f"Custody: {custody}", f"Signer: {signer}", f"Timestamp: {ts}", f"Nonce: {nonce}",
-            f"Body: 0x{keccak(raw).hex()}",
-        ]
-    )
+# auth shape (SPEC v5 §10, `_tools_auth_v5` `shape`). ``signer_line``: 8 lines, the Signer line names the
+# signing address. ``no_signer_line``: 7 lines, the gateway recovers the signer.
+AUTH_SHAPE = "signer_line"
+_STAMP_LOCK = threading.Lock()
+_last_stamp = 0
+
+
+def stamp(now_ms: int) -> int:
+    """The call's timestamp, unix ms: max(now, the last one + 1), process wide. Each signed call is unique."""
+    global _last_stamp
+    with _STAMP_LOCK:
+        _last_stamp = max(int(now_ms), _last_stamp + 1)
+        return _last_stamp
+
+
+def rest_message(method: str, path: str, custody: str, signer: str, ts: int, raw: bytes) -> str:
+    """The CRX-REST-LOGIN message: lines joined by ``\\n``, no trailing newline. ``Body`` is keccak256 of
+    the exact body bytes. Addresses are lower case."""
+    lines = ["CRX-REST-LOGIN", "Audience: crx-gateway", f"Method: {method}", f"Path: {path}",
+             f"Custody: {custody.lower()}"]
+    if AUTH_SHAPE == "signer_line":
+        lines.append(f"Signer: {signer.lower()}")
+    lines += [f"Timestamp: {ts}", f"Body: 0x{keccak(raw).hex()}"]
+    return "\n".join(lines)
 
 
 def takes_session(method: str, path: str) -> bool:
@@ -46,7 +61,7 @@ def takes_session(method: str, path: str) -> bool:
 class Gateway:
     """``login``: custodian mode. One ``POST /session`` (one EIP-191 sign) yields a token for the
     calls that take one, until the token's life ends or the gateway refuses it (restart, revoke).
-    A gateway with session tokens off gets the five signed headers on every call."""
+    A gateway with session tokens off gets the signed headers on every call."""
 
     def __init__(
         self, base_url: str, account: Any, session: requests.Session, timeout: float = 10, login: bool = False,
@@ -80,20 +95,21 @@ class Gateway:
         return host_of(self.base_url)
 
     def headers(self, method: str, path: str, raw: bytes = b"") -> dict[str, str]:
-        """Signed headers. The last line of the message is keccak256 of the exact body bytes sent.
-
-        Custody is ``custody`` when set, else the signer.
+        """Signed headers: ``x-crx-address`` (the custody), ``x-crx-ts`` and ``x-crx-sig``. A signer that is not
+        the custody (``account=``) also sends ``x-crx-signer``. The message's last line is keccak256 of the
+        exact body bytes sent.
         """
         if self._signer is None:
             raise ConfigError("this call needs the seat key: set CRX_WALLET_PK or pass key=")
         signer = self._signer.address.lower()
         custody = self.custody or signer
-        ts, nonce = int(time.time() * 1000), uuid.uuid4().hex
-        msg = rest_message(method, path, custody, signer, ts, nonce, raw)
-        return {
-            "x-crx-address": custody, "x-crx-signer": signer, "x-crx-ts": str(ts),
-            "x-crx-nonce": nonce, "x-crx-sig": sign_login(self._signer, msg),
-        }
+        ts = stamp(int(self._clock() * 1000))
+        msg = rest_message(method, path, custody, signer, ts, raw)
+        out = {"x-crx-address": custody, "x-crx-ts": str(ts)}
+        if signer != custody:
+            out["x-crx-signer"] = signer
+        out["x-crx-sig"] = sign_login(self._signer, msg)
+        return out
 
     def _uses_session(self, method: str, path: str) -> bool:
         return self.login and self.custody is None and not self._sessions_off and takes_session(method, path)

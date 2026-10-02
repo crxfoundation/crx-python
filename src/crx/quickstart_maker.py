@@ -3,10 +3,9 @@
 Two Testnet accounts: account 1 quotes (the maker), account 2 asks (the test
 taker). The test taker opens one RFQ. The maker reads that RFQ off its stream
 and quotes it. The test taker accepts the winning quote, and the maker confirms
-the trade. The RFQ names what a maker signs, and the calls follow it: a Leg and
-then a Side, or one binding quote. Each line starts with the local time. The
-steps are line for line the ones ``examples/maker.py`` and the maker Quickstart
-page print.
+the trade. The maker signs one binding quote and nothing after the accept. Each
+line starts with the local time. The steps are line for line the ones
+``examples/maker.py`` and the maker Quickstart page print.
 
 The maker key comes from ``CRX_WALLET_PK`` or ``CRX_WALLET_PK_FILE``, the test
 taker key from ``CRX_TAKER_PK``. With one unset, the script asks for it and does
@@ -62,11 +61,12 @@ def steps():
     log("maker: quoted", q.rate)  # 12:36:52 maker: quoted 18.12
 
     # 6. Your test taker gets the winning quote: any maker quote
-    #    outranks the house quote. It accepts a maker's only.
+    #    outranks the house quote. It accepts yours only.
     won = ask.quote()
-    log("taker: winning quote", won.rate, "house" if won.house else "maker")
-    # 12:37:03 taker: winning quote 18.12 maker
-    if not won.house:
+    mine = won.quote_id == q.quote_id
+    log("taker: winning quote", won.rate, "yours" if mine else "not yours")
+    # 12:37:03 taker: winning quote 18.12 yours
+    if mine:
         t = taker.trade(won)  # POST /rfqs/{rfq_id}/accept
         log("taker:", t.status)  # 12:37:34 taker: pending
 

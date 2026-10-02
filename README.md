@@ -81,7 +81,9 @@ print(w.status)  # accepted
 | `remove_viewer(addr)` | Takes that access back. |
 | `viewers()` | Wallets that can read your seat. |
 
-`quote()` also takes `expiry=` (datetime, timedelta or unix ms), `im_bps=` and `wait=` (seconds to poll an older gateway that answers at once).
+`quote()` also takes `expiry=` (datetime, timedelta or unix ms), `premium_bps=` (the upfront premium, default 0; `trade()` signs only when it is within the market's `max_premium_bps`) and `wait=` (seconds to poll an older gateway that answers at once).
+
+`markets()`: a chain row with no `paused` reads as not paused.
 
 ## Maker
 
@@ -100,12 +102,12 @@ Other desks ask on Testnet too, so the script quotes its own test taker's RFQ on
 | Call | Does |
 |---|---|
 | `rfqs()` | Streams the open RFQs you can quote. A seat with no collateral receives none. `only=` (an `Ask`, or an RFQ id) yields that RFQ alone. |
-| `rfq(rfq_id)` | One RFQ as your seat reads it. Its taker also reads every desk's quote: `house_rate` is the house desk's. |
-| `send_quote(rfq, rate)` | Signs and posts a firm quote. The gateway takes quotes for the first 10 s of an RFQ only. The taker gets the best quote only. Any maker quote outranks the house quote. |
-| `confirm(quote)` | Waits for the accept; signs your Side, unless the quote is binding. CRX sends the tx and pays gas. `status`: `open`, `sending`, `pending` or `refused`. |
+| `rfq(rfq_id)` | One RFQ as your seat reads it. Its taker also reads every desk's quote. |
+| `send_quote(rfq, rate)` | Signs and posts a binding quote. The gateway takes quotes for the first 10 s of an RFQ only. The taker gets the best quote only. Any maker quote outranks the house quote. |
+| `confirm(quote)` | Waits for the accept. You sign nothing more. CRX sends the tx and pays gas. `status`: `open`, `sending`, `pending` or `refused`. |
 | `drop_quote(quote)` | Ends your binding quote at once. |
 
-`rfq.sign_mode` names what you sign. `side`: a Leg at the quote, a Side after the accept. `quote`: a binding quote, and nothing after the accept. A binding quote is your trade signature until its `quote_expiry`, or until you drop it. A later quote on the same RFQ replaces the earlier one.
+Your quote is a signed `Quote`: your trade signature until the RFQ's `quote_expiry_max`, or until you drop it. You sign nothing after the accept. A later quote on the same RFQ replaces the earlier one.
 
 ## Custodian signer
 
@@ -157,7 +159,8 @@ Every error is a `crx.CrxError`. Branch on `.code`.
 | `no_quotes` | No maker quoted in time. From `rfqs(only=)`: the RFQ did not reach your seat in time. |
 | `rate_out_of_band`, `mark_unavailable` | The gateway declined the accept: the quote's rate is outside the off-market band, or no market price was read. Nothing was reserved or sent. Ask for a new quote. `except crx.Declined` catches both. |
 | `rfq_cancelled` | The gateway cancelled the RFQ. `.reason`: `rate_out_of_band` (no quote inside the off-market band) or `mark_unavailable` (no market price). Ask again later. `except crx.NoQuotes` catches it too. |
-| `quote_lost` | Your maker quote opened no trade. `reason`: `another_maker`, `expired`, `cancelled`, `round_closed`, `dropped` or `timeout`. |
+| `quote_lost` | Your maker quote opened no trade. `reason`: `another_maker`, `expired`, `cancelled`, `dropped` or `timeout`. |
+| `quote_format_outdated` | The gateway takes a newer quote format. Update the SDK. Nothing was written. |
 | `leg_live` | Your seat holds another live binding quote on the RFQ. Quote again, or `drop_quote(rfq, leg_id=err.leg_id)`. |
 | `leg_id_taken` | The quote's leg id is used. Quote again. |
 | `quote_fills_full` | The gateway takes no more of your quotes for now. |
@@ -184,11 +187,11 @@ Every error is a `crx.CrxError`. Branch on `.code`.
 ## Safety
 
 - The SDK rebuilds every digest and transaction before it signs. A mismatch raises `refused_to_sign`.
-- A trade carries a readable `summary` line. The SDK builds its own typed data from your request and the quote, compares it with the gateway's member by member, and signs its own.
+- A trade carries a readable `summary` line. The SDK builds its own `Trade` from your request and the quote's rate, compares it with the gateway's member by member, checks the domain, the quote end in your leg id and the nonce, and signs its own.
 - Every signature leaves with low `s` and `v` 27 or 28. One that does not recover to the seat raises `refused_to_sign`.
 - Testnet by default. `network="mainnet"` (Ethereum, chain 1) is off until you pass `allow_mainnet=True` or set `CRX_ALLOW_MAINNET=1`. It has no default URLs.
 - Keep DEBUG logging off in production: urllib3 then logs request paths, and an RPC key can sit in the path.
-- A Side nonce floor lives in `~/.crx-quickstart/`, shared with the quickstart scripts. `CRX_STATE_DIR` moves it.
+- A nonce floor lives in `~/.crx-quickstart/`, shared with the quickstart scripts. `CRX_STATE_DIR` moves it.
 
 ## Settings
 

@@ -1,4 +1,4 @@
-"""EIP-712 digests and typed data the seat signs, rebuilt locally from the fields."""
+"""EIP-712 digests and typed data the seat signs, rebuilt locally from the fields (SPEC v5)."""
 
 from __future__ import annotations
 
@@ -9,63 +9,109 @@ from typing import Any
 from eth_abi import encode
 from eth_utils import keccak, to_checksum_address
 
+# Switches (SPEC v5 §9). On: the v5 format. Off: the member goes back in its v4 place.
+# drop_quote_expiry: no `quoteExpiry` in Trade, Quote and the Leg words.
+DROP_QUOTE_EXPIRY = True
+# drop_withdraw_recipient: no `recipient` in WithdrawIntent.
+DROP_WITHDRAW_RECIPIENT = True
+# derive_maker_nonce: the Quote nonce is the u64, big endian, of leg_id bytes 16..24; the body sends no nonce.
+DERIVE_MAKER_NONCE = True
+
 DOMAIN_TYPEHASH = keccak(text="EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)")
-LEG_TYPE = (
-    "Leg(address seat,bytes32 legId,bytes32 joinRef,bytes32 pair,"
-    "uint8 instrumentId,int8 side,uint256 notional,uint64 rate,uint16 imBps,"
-    "int16 premiumBps,uint40 expiry,uint64 nonce,uint64 quoteExpiry)"
-)
-LEG_TYPEHASH = keccak(text=LEG_TYPE)
-SIDE_TYPE = "Side(bytes32 pairC,bytes32 ownLegId,uint64 quoteExpiry,uint64 ownNonce,bytes32 ownSalt,bytes32 wrapsHash)"
-SIDE_TYPEHASH = keccak(text=SIDE_TYPE)
-TRADE_TYPE = (
-    "Trade(string summary,string pair,string side,uint256 notionalE6,uint64 rateE6,int16 premiumBps,"
-    "uint16 exitBandBps,uint40 maturity,bytes32 pairC,bytes32 ownLegId,uint64 quoteExpiry,uint64 ownNonce,"
-    "bytes32 ownSalt,bytes32 wrapsHash)"
-)
-TRADE_TYPEHASH = keccak(text=TRADE_TYPE)
-WITHDRAW_TYPE = "WithdrawIntent(address account,uint256 amount,address recipient,uint64 nonce,uint64 deadline)"
-ALLOCATION_CONSENT_TYPE = (
-    "AllocationConsent(bytes32 oldId,bytes32 exitingSide,bytes32 remainingSide,bytes32 incomingSide,"
-    "uint64 nonce,uint64 deadline,bytes32 commitment,bytes32 wrapsHash,bytes32 salt)"
-)
-ALLOCATION_ACCEPTANCE_TYPE = (
-    "AllocationAcceptance(bytes32 oldId,bytes32 incomingSide,bytes32 incomingC,uint64 nonce,uint64 deadline,"
-    "bytes32 commitment,bytes32 wrapsHash)"
-)
-FAILOVER_CONSENT_TYPE = (
-    "FailoverConsent(bytes32 oldId,bytes32 closedOutSide,bytes32 remainingSide,bytes32 incomingSide,"
-    "bytes32 incomingC,uint64 nonce,uint64 openNonce,uint64 deadline,bytes32 commitment,bytes32 wrapsHash)"
-)
-# The structs a seat signs as typed data, by primary type.
-STRUCTS = {
-    "Trade": TRADE_TYPE, "Side": SIDE_TYPE, "Leg": LEG_TYPE, "WithdrawIntent": WITHDRAW_TYPE,
-    "AllocationConsent": ALLOCATION_CONSENT_TYPE, "AllocationAcceptance": ALLOCATION_ACCEPTANCE_TYPE,
-    "FailoverConsent": FAILOVER_CONSENT_TYPE,
-}
 DOMAIN_FIELDS = (
     ("name", "string"), ("version", "string"), ("chainId", "uint256"), ("verifyingContract", "address"),
 )
 MAX_MATURITY = 253402300799  # 9999-12-31T23:59:59Z
-SUMMARY_MAX_LEN = 207
+SUMMARY_MAX_LEN = 162
 SECP256K1_N = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
-QUOTE_TYPE = (
-    "Quote(address seat,bytes32 legId,bytes32 pair,uint8 instrumentId,int8 side,uint256 notional,uint64 rate,"
-    "uint16 imBps,int16 premiumBps,uint40 expiry,uint64 nonce,uint64 quoteExpiry,bytes32 salt,bytes32 wrapsHash,"
-    "bytes32 takerRef)"
-)
-QUOTE_TYPEHASH = keccak(text=QUOTE_TYPE)
-EMPTY_WRAPS_HASH = bytes.fromhex("569e75fc77c1a856f6daaf9e69d8a9566ca34aa47f9133711ce065a571af0cfd")  # no wraps
-WITHDRAW_TYPEHASH = keccak(
-    text="WithdrawIntent(address account,uint256 amount,address recipient,uint64 nonce,uint64 deadline)"
-)
-ARM_WORDS = [
-    "address", "bytes32", "bytes32", "uint8", "int8", "uint256",
-    "uint64", "uint16", "int16", "uint64", "uint64", "uint64",
-]
-WITHDRAW_ITEM = ["address", "uint256", "address", "uint64", "uint64"]
+TAKER_REF_TAG = b"CRX/takerRef/v1"
 WITHDRAW_KIND = 5
 
+TERMS_FIELDS = (
+    ("takerSide", "bytes32"), ("makerSide", "bytes32"), ("notional", "uint256"), ("premiumBps", "int16"),
+    ("nonce", "uint64"), ("pair", "bytes32"), ("side", "int8"), ("settlement", "uint40"), ("rate", "uint64"),
+)
+ALLOCATION_CONSENT_FIELDS = (
+    ("oldId", "bytes32"), ("exitingSide", "bytes32"), ("remainingSide", "bytes32"), ("incomingSide", "bytes32"),
+    ("nonce", "uint64"), ("deadline", "uint64"), ("commitment", "bytes32"), ("salt", "bytes32"),
+)
+FAILOVER_CONSENT_FIELDS = (
+    ("oldId", "bytes32"), ("closedOutSide", "bytes32"), ("remainingSide", "bytes32"), ("incomingSide", "bytes32"),
+    ("incomingC", "bytes32"), ("nonce", "uint64"), ("openNonce", "uint64"), ("deadline", "uint64"),
+    ("commitment", "bytes32"),
+)
+ALLOCATION_ACCEPTANCE_FIELDS = (
+    ("oldId", "bytes32"), ("incomingSide", "bytes32"), ("incomingC", "bytes32"), ("nonce", "uint64"),
+    ("deadline", "uint64"), ("commitment", "bytes32"),
+)
+# Hidden words (SPEC v5 §4): committed as keccak256(abi.encode(words) ‖ salt), never signed as a struct.
+ALLOCATION_ITEM_FIELDS = (
+    ("oldId", "bytes32"), ("exitingSide", "bytes32"), ("remainingSide", "bytes32"), ("incoming", "address"),
+    ("incomingSide", "bytes32"), ("closeRate", "uint256"), ("spread", "uint256"), ("nonce", "uint64"),
+    ("deadline", "uint64"), ("pairId", "bytes32"), ("side", "int8"), ("notional", "uint256"),
+    ("settlement", "uint40"),
+)
+CLOSEOUT_ITEM_FIELDS = (
+    ("oldId", "bytes32"), ("closedOutSide", "bytes32"), ("remainingSide", "bytes32"), ("incoming", "address"),
+    ("incomingSide", "bytes32"), ("feedId", "bytes32"), ("closeTime", "uint64"), ("spread", "uint256"),
+    ("nonce", "uint64"), ("deadline", "uint64"), ("openNonce", "uint64"), ("subsidyMaxUsd", "uint256"),
+)
+
+
+# ---------- the member lists, under the switches ----------
+
+def leg_fields() -> list[tuple[str, str]]:
+    """The hidden words of a Leg half (the C half), in order: 9 in v5."""
+    f = [("seat", "address"), ("legId", "bytes32"), ("pair", "bytes32"), ("side", "int8"), ("notional", "uint256"),
+         ("rate", "uint64"), ("premiumBps", "int16"), ("expiry", "uint40"), ("nonce", "uint64")]
+    return f if DROP_QUOTE_EXPIRY else f + [("quoteExpiry", "uint64")]
+
+
+def trade_fields() -> list[tuple[str, str]]:
+    """The ``Trade`` members, in order: 11 in v5."""
+    head = [("summary", "string"), ("pair", "string"), ("side", "string"), ("notionalE6", "uint256"),
+            ("rateE6", "uint64"), ("premiumBps", "int16"), ("maturity", "uint40"), ("pairC", "bytes32"),
+            ("ownLegId", "bytes32")]
+    return head + ([] if DROP_QUOTE_EXPIRY else [("quoteExpiry", "uint64")]) + [("ownNonce", "uint64"),
+                                                                              ("ownSalt", "bytes32")]
+
+
+def quote_fields() -> list[tuple[str, str]]:
+    """The ``Quote`` members: the Leg words, ``salt``, ``takerRef``."""
+    return leg_fields() + [("salt", "bytes32"), ("takerRef", "bytes32")]
+
+
+def withdraw_fields_of() -> list[tuple[str, str]]:
+    """The ``WithdrawIntent`` members: 4 in v5."""
+    f = [("account", "address"), ("amount", "uint256"), ("recipient", "address"), ("nonce", "uint64"),
+         ("deadline", "uint64")]
+    return [m for m in f if not (DROP_WITHDRAW_RECIPIENT and m[0] == "recipient")]
+
+
+def structs() -> dict[str, list[tuple[str, str]]]:
+    """Every struct this module hashes, by primary type, under the current switches."""
+    return {
+        "Trade": trade_fields(), "Quote": quote_fields(), "WithdrawIntent": withdraw_fields_of(),
+        "Terms": list(TERMS_FIELDS), "AllocationConsent": list(ALLOCATION_CONSENT_FIELDS),
+        "FailoverConsent": list(FAILOVER_CONSENT_FIELDS), "AllocationAcceptance": list(ALLOCATION_ACCEPTANCE_FIELDS),
+    }
+
+
+def type_string(primary: str) -> str:
+    """The EIP-712 type string of a known struct, e.g. ``Trade(string summary,...)``."""
+    return primary + "(" + ",".join(f"{t} {n}" for n, t in fields_of(primary)) + ")"
+
+
+def typehash(primary: str) -> bytes:
+    return keccak(text=type_string(primary))
+
+
+def fields_of(primary: str) -> list[tuple[str, str]]:
+    """(name, type) of each member of a known struct, in order. KeyError for any other name."""
+    return structs()[primary]
+
+
+# ---------- small helpers ----------
 
 def hx(value: str) -> bytes:
     """0x-hex to bytes."""
@@ -100,102 +146,138 @@ def domain_separator(chain_id: int, core: str) -> bytes:
     )
 
 
-def leg_struct_hash(a: dict) -> bytes:
-    return keccak(
-        encode(
-            ["bytes32", "address", "bytes32", "bytes32", "bytes32", "uint8", "int8",
-             "uint256", "uint64", "uint16", "int16", "uint40", "uint64", "uint64"],
-            [
-                LEG_TYPEHASH, to_checksum_address(a["seat"]), hx(a["leg_id"]), hx(a["join_ref"]), hx(a["pair_id"]),
-                int(a["instrument_id"]), int(a["side"]), scaled6(a["notional"]), scaled6(a["rate"]),
-                int(a["im_bps"]), int(a["premium_bps"]), int(a["expiry"]) // 1000, int(a["nonce"]),
-                int(a["quote_expiry"]) // 1000,
-            ],
-        )
-    )
-
-
-def leg_digest(separator: bytes, a: dict) -> bytes:
-    return keccak(b"\x19\x01" + separator + leg_struct_hash(a))
-
-
-def arm_words(a: dict, nonce: Any, quote_expiry: Any) -> list:
-    """The twelve words a half commits to: 6-dp notional and rate, unix-second times."""
-    return [
-        to_checksum_address(a["seat"]), hx(a["leg_id"]), hx(a["pair_id"]), int(a["instrument_id"]), int(a["side"]),
-        scaled6(a["notional"]), scaled6(a["rate"]), int(a["im_bps"]), int(a["premium_bps"]),
-        int(a["expiry"]) // 1000, int(nonce), int(quote_expiry),
-    ]
-
-
-def half_commitment(words: list, salt: str) -> bytes:
-    return keccak(encode(ARM_WORDS, words) + hx(salt))
-
-
-def pair_commitment(c_taker: bytes, c_maker: bytes) -> bytes:
-    return keccak(b"\x03" + c_taker + c_maker)
-
-
-def side_digest(separator: bytes, t: dict) -> bytes:
-    struct = keccak(
-        encode(
-            ["bytes32", "bytes32", "bytes32", "uint64", "uint64", "bytes32", "bytes32"],
-            [SIDE_TYPEHASH, hx(t["pair_c"]), hx(t["own_leg_id"]), int(t["quote_expiry"]), int(t["own_nonce"]),
-             hx(t["own_salt"]), hx(t["wraps_hash"])],
-        )
-    )
-    return keccak(b"\x19\x01" + separator + struct)
-
-
-def leg_id_for(random24: bytes, quote_expiry: int) -> str:
-    """A binding quote's leg id: 24 random bytes, then ``quote_expiry`` (unix s) as 8 bytes big-endian."""
-    if len(random24) != 24:
-        raise ValueError("the leg id takes 24 random bytes")
-    return h0x(random24 + int(quote_expiry).to_bytes(8, "big"))
-
-
-def leg_id_tail(leg_id: str) -> int:
-    """The ``quote_expiry`` (unix s) a binding quote's leg id ends with."""
-    return int.from_bytes(hx(leg_id)[-8:], "big")
-
-
-def quote_struct_hash(words: list, salt: str, taker_ref: str) -> bytes:
-    """The ``Quote`` struct hash: the twelve arm words, the salt, the empty wrap set, the RFQ's taker_ref."""
-    return keccak(
-        encode(
-            ["bytes32", *ARM_WORDS, "bytes32", "bytes32", "bytes32"],
-            [QUOTE_TYPEHASH, *words, hx(salt), EMPTY_WRAPS_HASH, hx(taker_ref)],
-        )
-    )
-
-
-def quote_digest(separator: bytes, words: list, salt: str, taker_ref: str) -> bytes:
-    return keccak(b"\x19\x01" + separator + quote_struct_hash(words, salt, taker_ref))
-
-
-def withdraw_fields(w: dict) -> list:
-    return [
-        to_checksum_address(w["account"]), int(w["amount"]), to_checksum_address(w["recipient"]),
-        int(w["nonce"]), int(w["deadline"]),
-    ]
-
-
-def withdraw_digest(separator: bytes, w: dict) -> bytes:
-    struct = keccak(encode(["bytes32"] + WITHDRAW_ITEM, [WITHDRAW_TYPEHASH, *withdraw_fields(w)]))
-    return keccak(b"\x19\x01" + separator + struct)
-
-
-def withdraw_item(w: dict) -> bytes:
-    """The chain item id of a withdraw intent: keccak256 of kind 5 and the five fields, ABI-encoded."""
-    return keccak(encode(["uint256"] + WITHDRAW_ITEM, [WITHDRAW_KIND, *withdraw_fields(w)]))
-
-
 def selector(signature: str) -> bytes:
     return keccak(text=signature)[:4]
 
 
 def calldata(signature: str, types: list, args: list) -> str:
     return h0x(selector(signature) + encode(types, args))
+
+
+# ---------- leg ids, the Quote and the hidden words ----------
+
+def leg_id_for(random24: bytes, quote_end: int) -> str:
+    """A leg id: 24 random bytes, then the quote end (unix s) as 8 bytes big endian."""
+    if len(random24) != 24:
+        raise ValueError("the leg id takes 24 random bytes")
+    return h0x(random24 + int(quote_end).to_bytes(8, "big"))
+
+
+def leg_id_tail(leg_id: str) -> int:
+    """The quote end (unix s) a leg id ends with: bytes 24 to 31, big endian."""
+    b = hx(leg_id)
+    if len(b) != 32:
+        raise ValueError("a leg id is 32 bytes")
+    return int.from_bytes(b[24:], "big")
+
+
+def maker_nonce(leg_id: str) -> int:
+    """The Quote nonce a leg id gives: the u64, big endian, of bytes 16 to 23."""
+    b = hx(leg_id)
+    if len(b) != 32:
+        raise ValueError("a leg id is 32 bytes")
+    return int.from_bytes(b[16:24], "big")
+
+
+def taker_ref(taker_seat: str, taker_leg_id: str) -> bytes:
+    """keccak256("CRX/takerRef/v1" ‖ taker seat ‖ taker leg id), packed: the RFQ's ``taker_ref``."""
+    return keccak(TAKER_REF_TAG + hx(address(taker_seat)) + hx(taker_leg_id))
+
+
+def leg_words(half: dict) -> list:
+    """The Leg words of a half, in ``leg_fields`` order: 6-decimal notional and rate, unix-second expiry.
+
+    ``half``: ``seat``, ``leg_id``, ``pair_id``, ``side``, ``notional`` and ``rate`` (decimal strings),
+    ``premium_bps``, ``expiry`` (unix ms), ``nonce``; ``quote_expiry`` (unix s) with drop_quote_expiry off.
+    """
+    words = [
+        to_checksum_address(half["seat"]), hx(half["leg_id"]), hx(half["pair_id"]), int(half["side"]),
+        scaled6(half["notional"]), scaled6(half["rate"]), int(half["premium_bps"]), int(half["expiry"]) // 1000,
+        int(half["nonce"]),
+    ]
+    return words if DROP_QUOTE_EXPIRY else words + [int(half["quote_expiry"])]
+
+
+def half_commitment(words: list, salt: str) -> bytes:
+    """A Leg half's commitment: keccak256(abi.encode(Leg words) ‖ salt)."""
+    return keccak(encode([t for _, t in leg_fields()], words) + hx(salt))
+
+
+def pair_commitment(c_taker: bytes, c_maker: bytes) -> bytes:
+    return keccak(b"\x03" + c_taker + c_maker)
+
+
+def hidden_commitment(fields: Any, message: dict, salt: str) -> bytes:
+    """keccak256(abi.encode(words) ‖ salt) of hidden words in their JSON form (an AllocationItem, a CloseoutItem)."""
+    kinds, words = [], []
+    for name, kind in fields:
+        v = word_of(kind, message[name])
+        kinds.append(kind)
+        words.append(to_checksum_address(v) if kind == "address" else v)
+    return keccak(encode(kinds, words) + hx(salt))
+
+
+def quote_struct_hash(words: list, salt: str, taker_ref_: str) -> bytes:
+    """The ``Quote`` struct hash: the typehash, the Leg words, the salt, the RFQ's taker_ref."""
+    return keccak(
+        encode(
+            ["bytes32", *[t for _, t in leg_fields()], "bytes32", "bytes32"],
+            [typehash("Quote"), *words, hx(salt), hx(taker_ref_)],
+        )
+    )
+
+
+def quote_digest(separator: bytes, words: list, salt: str, taker_ref_: str) -> bytes:
+    return keccak(b"\x19\x01" + separator + quote_struct_hash(words, salt, taker_ref_))
+
+
+def quote_message(words: list, salt: str, taker_ref_: str) -> dict:
+    """The ``Quote`` message of Leg words, JSON form."""
+    msg = {}
+    for (name, kind), v in zip(leg_fields(), words):
+        msg[name] = v.lower() if kind == "address" else h0x(v) if kind == "bytes32" else str(v)
+    msg["salt"] = h0x(hx(salt))
+    msg["takerRef"] = h0x(hx(taker_ref_))
+    return msg
+
+
+def terms_id(message: dict) -> bytes:
+    """The Terms id (unsigned): the ``Terms`` struct hash of its JSON message."""
+    return struct_hash("Terms", message)
+
+
+# ---------- the withdraw intent ----------
+
+def withdraw_fields(w: dict) -> list:
+    """The intent's words: account, amount, nonce, deadline (and the recipient with its switch off)."""
+    vals = {
+        "account": to_checksum_address(w["account"]), "amount": int(w["amount"]), "nonce": int(w["nonce"]),
+        "deadline": int(w["deadline"]),
+    }
+    if not DROP_WITHDRAW_RECIPIENT:
+        vals["recipient"] = to_checksum_address(w["recipient"])
+    return [vals[n] for n, _ in withdraw_fields_of()]
+
+
+def withdraw_digest(separator: bytes, w: dict) -> bytes:
+    kinds = [t for _, t in withdraw_fields_of()]
+    struct = keccak(encode(["bytes32", *kinds], [typehash("WithdrawIntent"), *withdraw_fields(w)]))
+    return keccak(b"\x19\x01" + separator + struct)
+
+
+def withdraw_item(w: dict) -> bytes:
+    """The chain item id of a withdraw intent: keccak256(uint256(5) ‖ abi.encode(the intent's words))."""
+    kinds = [t for _, t in withdraw_fields_of()]
+    return keccak(encode(["uint256", *kinds], [WITHDRAW_KIND, *withdraw_fields(w)]))
+
+
+def withdraw_message(w: dict) -> dict:
+    """The ``WithdrawIntent`` message, JSON form."""
+    msg = {"account": address(w["account"]), "amount": str(int(w["amount"]))}
+    if not DROP_WITHDRAW_RECIPIENT:
+        msg["recipient"] = address(w["recipient"])
+    msg.update(nonce=str(int(w["nonce"])), deadline=str(int(w["deadline"])))
+    return msg
 
 
 # ---------- exact amounts ----------
@@ -283,9 +365,7 @@ def side_text(side: Any) -> str:
     raise ValueError("the side is not buy or sell")
 
 
-def trade_summary(
-    pair: str, side: int, notional_e6: int, rate_e6: int, premium_bps: int, exit_band_bps: int, maturity: int,
-) -> str:
+def trade_summary(pair: str, side: int, notional_e6: int, rate_e6: int, premium_bps: int, maturity: int) -> str:
     """The ``summary`` line of a ``Trade``. Raises ValueError on a value the guest refuses or cannot format."""
     word = side_text(side)
     _int_in(maturity, 0, MAX_MATURITY, "the maturity")
@@ -294,13 +374,11 @@ def trade_summary(
     _int_in(notional_e6, 0, (1 << 128) - 1, "the notional")
     _int_in(rate_e6, 0, (1 << 64) - 1, "the rate")
     _int_in(premium_bps, -(1 << 15), (1 << 15) - 1, "the premium")
-    _int_in(exit_band_bps, 0, (1 << 16) - 1, "the exit band")
     base, quote = pair[:3], pair[4:]
     up = ("none" if premium_bps == 0 else
           f"{'taker' if premium_bps > 0 else 'maker'} pays {_pct_text(premium_bps)} %")
     return (f"{word} {_amount_text(notional_e6, True)} {base} vs {quote} at {_amount_text(rate_e6, False)} {quote} "
-            f"per {base}, matures {_date_text(maturity)}, upfront {up}, "
-            f"counterparty exit within {_pct_text(exit_band_bps)} % of market")
+            f"per {base}, matures {_date_text(maturity)}, upfront {up}")
 
 
 def v1_side(side: Any, pair: Any) -> str:
@@ -316,12 +394,6 @@ def v1_side(side: Any, pair: Any) -> str:
 
 
 # ---------- typed data ----------
-
-def fields_of(primary: str) -> list[tuple[str, str]]:
-    """(name, type) of each member of a known struct, in order."""
-    body = STRUCTS[primary][len(primary) + 1:-1]
-    return [(n, t) for t, n in (p.split(" ") for p in body.split(","))]
-
 
 def domain_json(chain_id: int, core: str) -> dict:
     """The CRX domain of one chain and core, in its JSON form."""
@@ -378,7 +450,7 @@ def struct_hash(primary: str, message: dict) -> bytes:
     fields = fields_of(primary)
     if not isinstance(message, dict) or set(message) != {n for n, _ in fields}:
         raise ValueError(f"the {primary} message does not have its members")
-    kinds, words = ["bytes32"], [keccak(text=STRUCTS[primary])]
+    kinds, words = ["bytes32"], [typehash(primary)]
     for name, kind in fields:
         v = word_of(kind, message[name])
         if kind == "string":
@@ -393,7 +465,7 @@ def struct_hash(primary: str, message: dict) -> bytes:
 def typed_digest(td: dict) -> bytes:
     """The EIP-712 digest of a typed-data object this module knows. Raises ValueError on any other shape."""
     primary = td.get("primaryType") if isinstance(td, dict) else None
-    if primary not in STRUCTS or set(td) != {"types", "primaryType", "domain", "message"}:
+    if primary not in structs() or set(td) != {"types", "primaryType", "domain", "message"}:
         raise ValueError("not a typed-data object of a known struct")
     d = td["domain"]
     if not isinstance(d, dict) or set(d) != {n for n, _ in DOMAIN_FIELDS}:
@@ -436,23 +508,27 @@ def typed_mismatch(served: Any, own: dict) -> str | None:
 
 
 def trade_message(
-    pair: str, side: int, notional_e6: int, rate_e6: int, premium_bps: int, exit_band_bps: int, maturity: int,
-    pair_c: str, own_leg_id: str, quote_expiry: Any, own_nonce: Any, own_salt: str, wraps_hash: str,
+    pair: str, side: int, notional_e6: int, rate_e6: int, premium_bps: int, maturity: int,
+    pair_c: str, own_leg_id: str, own_nonce: Any, own_salt: str, quote_expiry: Any = None,
 ) -> dict:
     """The ``Trade`` message, JSON form: integers as decimal strings, ``bytes32`` as lower-case hex.
 
-    The summary is formatted from the integers. Raises ValueError on a value the guest refuses.
+    The summary is formatted from the integers. ``quote_expiry`` is a member only with
+    drop_quote_expiry off. Raises ValueError on a value the guest refuses.
     """
-    summary = trade_summary(pair, side, notional_e6, rate_e6, premium_bps, exit_band_bps, maturity)
-    msg = {
+    summary = trade_summary(pair, side, notional_e6, rate_e6, premium_bps, maturity)
+    vals = {
         "summary": summary, "pair": pair, "side": side_text(side), "notionalE6": str(notional_e6),
-        "rateE6": str(rate_e6), "premiumBps": str(premium_bps), "exitBandBps": str(exit_band_bps),
-        "maturity": str(maturity), "pairC": pair_c, "ownLegId": own_leg_id, "quoteExpiry": quote_expiry,
-        "ownNonce": own_nonce, "ownSalt": own_salt, "wrapsHash": wraps_hash,
+        "rateE6": str(rate_e6), "premiumBps": str(premium_bps), "maturity": str(maturity), "pairC": pair_c,
+        "ownLegId": own_leg_id, "quoteExpiry": quote_expiry, "ownNonce": own_nonce, "ownSalt": own_salt,
     }
-    for name, kind in fields_of("Trade")[8:]:
-        v = word_of(kind, msg[name])
-        msg[name] = h0x(v) if kind == "bytes32" else str(v)
+    msg = {}
+    for name, kind in fields_of("Trade"):
+        v = vals[name]
+        if name in ("pairC", "ownLegId", "quoteExpiry", "ownNonce", "ownSalt"):
+            v = word_of(kind, v)
+            v = h0x(v) if kind == "bytes32" else str(v)
+        msg[name] = v
     return msg
 
 
@@ -462,33 +538,6 @@ def trade_struct_hash(msg: dict) -> bytes:
 
 def trade_digest(separator: bytes, msg: dict) -> bytes:
     return keccak(b"\x19\x01" + separator + trade_struct_hash(msg))
-
-
-def side_message(t: dict) -> dict:
-    """The ``Side`` message of a template, JSON form."""
-    return {
-        "pairC": h0x(hx(t["pair_c"])), "ownLegId": h0x(hx(t["own_leg_id"])), "quoteExpiry": str(int(t["quote_expiry"])),
-        "ownNonce": str(int(t["own_nonce"])), "ownSalt": h0x(hx(t["own_salt"])), "wrapsHash": h0x(hx(t["wraps_hash"])),
-    }
-
-
-def leg_message(a: dict) -> dict:
-    """The ``Leg`` message of a half, JSON form: 6-decimal notional and rate, unix-second times."""
-    return {
-        "seat": address(a["seat"]), "legId": h0x(hx(a["leg_id"])), "joinRef": h0x(hx(a["join_ref"])),
-        "pair": h0x(hx(a["pair_id"])), "instrumentId": str(int(a["instrument_id"])), "side": str(int(a["side"])),
-        "notional": str(scaled6(a["notional"])), "rate": str(scaled6(a["rate"])), "imBps": str(int(a["im_bps"])),
-        "premiumBps": str(int(a["premium_bps"])), "expiry": str(int(a["expiry"]) // 1000),
-        "nonce": str(int(a["nonce"])), "quoteExpiry": str(int(a["quote_expiry"]) // 1000),
-    }
-
-
-def withdraw_message(w: dict) -> dict:
-    """The ``WithdrawIntent`` message, JSON form."""
-    return {
-        "account": address(w["account"]), "amount": str(int(w["amount"])), "recipient": address(w["recipient"]),
-        "nonce": str(int(w["nonce"])), "deadline": str(int(w["deadline"])),
-    }
 
 
 # ---------- signatures ----------

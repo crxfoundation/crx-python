@@ -67,6 +67,12 @@ class BadRequest(CrxError):
     code = "bad_request"
 
 
+class QuoteFormatOutdated(BadRequest):
+    """The gateway refused a quote signed in an older format. Update the SDK. Nothing was written."""
+
+    code = "quote_format_outdated"
+
+
 class AuthError(CrxError):
     code = "unauthorized"
 
@@ -210,9 +216,8 @@ class QuoteLost(CrxError):
     - ``another_maker``: the taker accepted another quote.
     - ``expired``: the RFQ or your quote ended with no accept.
     - ``cancelled``: the RFQ was cancelled.
-    - ``round_closed``: the taker accepted, and the Side round closed before the pair armed.
-    - ``dropped``: a binding quote that can no longer be taken: you dropped its leg, your
-      later quote on the RFQ replaced it, or the gateway restarted.
+    - ``dropped``: a quote that can no longer be taken: you dropped its leg, your later
+      quote on the RFQ replaced it, or the gateway restarted.
     - ``timeout``: no accept before the wait ended. The RFQ can still take one.
     """
 
@@ -244,7 +249,7 @@ class LegLive(CrxError):
 
 class QuoteFillsFull(CrxError):
     """The gateway takes no more of your quotes for now: your seat's recently filled legs are at
-    their limit. They clear as their quote_expiry passes."""
+    their limit. They clear as their quote end passes."""
 
     code = "quote_fills_full"
 
@@ -301,6 +306,7 @@ _BY_GATEWAY_CODE: dict[str, type[CrxError]] = {
     "mark_unavailable": MarkUnavailable,
     "position_matured": PositionMatured,
     "bad_request": BadRequest,
+    "quote_format_outdated": QuoteFormatOutdated,
     "unprocessable_entity": BadRequest,
     "viewer_invalid": BadRequest,
     "viewer_is_maker": BadRequest,

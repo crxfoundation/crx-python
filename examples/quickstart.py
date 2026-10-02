@@ -24,7 +24,7 @@ q = c.quote(
     "USD/BRL", "buy", 25_000,
     expiry=datetime(2026, 12, 15, 18, 0, tzinfo=timezone.utc),
 )
-log(q.pair, q.rate, q.house)  # 11:21:26 USD/BRL 5.2562 True
+log(q.pair, q.rate)  # 11:21:26 USD/BRL 5.2562
 log(q.expiry)  # 11:21:26 2026-12-15 18:00:00+00:00
 log(q.expires_at)  # 11:21:26 2026-09-30 15:21:52+00:00
 

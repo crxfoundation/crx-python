@@ -1,28 +1,25 @@
-"""The maker's calls: read open RFQs, post a signed quote, sign the maker Side after the accept.
+"""The maker's calls: read open RFQs, post a signed binding quote, wait for the accept.
 
-An RFQ names what its maker signs (``sign_mode``). ``side``, or no name: a Leg at the
-quote, a Side after the accept. ``quote``: a binding Quote at the quote, nothing after.
-
-Every value the gateway serves is checked before a signature exists. A mismatch
-raises RefusedToSign and nothing is signed.
+The maker signs one ``Quote`` per quote (SPEC v5 §3): its own half of the RFQ's terms,
+a fresh salt and the RFQ's ``taker_ref``. The quote is its trade signature: nothing is
+signed after the accept. Every value the gateway serves is checked before a signature
+exists. A mismatch raises RefusedToSign and nothing is signed.
 """
 
 from __future__ import annotations
 
 import logging
 import secrets
-import uuid
 from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Any, Iterator
 
 from eth_utils import keccak
 
 from . import _eip712 as e7
-from ._bind import SIDE_WINDOW, Binder, obj, read_later, status_code, utc
-from ._http import Gateway
+from ._bind import QUOTE_WINDOW, utc
 from .errors import (
-    BadAnswer, BadRequest, CrxError, LegIdTaken, LegLive, NetworkError, NoQuotes, QuoteLost, RateLimited,
-    RefusedToSign, ServerError, TradeUnknown, UnknownOrEnded, clean, from_gateway,
+    BadAnswer, BadRequest, LegIdTaken, LegLive, NetworkError, NoQuotes, QuoteLost, RateLimited,
+    RefusedToSign, ServerError, UnknownOrEnded, clean,
 )
 from .models import Drop, MakerQuote, Rfq, Trade, _side_of, dec, ms_to_dt
 
@@ -33,14 +30,10 @@ log = logging.getLogger("crx")
 
 PAGE = 1000  # /trades rows per page; the gateway's cap
 U64_MAX = 2**64 - 1
-CONSENT_WINDOW_MS = 86_400_000  # the gateway takes an RFQ quote_expiry at most 24 h out
-CLOCK_SLACK_MS = 60_000
 LIVE = ("open", "quoted")  # RFQ statuses that take a quote
 AFTER_ACCEPT = ("accepted", "opened", "settled", "armed", "signing", "consenting")
-SIGN_WINDOW = 120.0  # s: the maker signs within 120 s of the accept (the gateway's round window)
-SIGN_GRACE = 5.0  # s past the sign window the gateway still takes the Side
 TRANSIENT = (NetworkError, ServerError, RateLimited)
-QUOTE_MIN_LIFE = 60  # s: the gateway takes a binding quote whose quote_expiry is at least this far out
+QUOTE_MIN_LIFE = 60  # s: the gateway takes a binding quote whose quote end is at least this far out
 LOST = {
     "another_maker": "the taker accepted another quote",
     "expired": "the RFQ ended with no accept",
@@ -79,31 +72,31 @@ def rfq_of(d: dict, seq: Any = None, quotes: Any = ()) -> Rfq | None:
     rid = _word(d.get("rfq_id"))
     if rid is None:
         return None
-    opened, window = _int(d.get("opened_at")), _int(d.get("quote_window_secs"))
+    qe_max = _int(d.get("quote_expiry_max"))
     rows = tuple(q for q in quotes if isinstance(q, dict)) if isinstance(quotes, (list, tuple)) else ()
     cid = d.get("client_rfq_id")
     return Rfq(
         rfq_id=rid, pair=_slash(d.get("pair")), side=_side_of(d.get("side")), notional=dec(d.get("notional")),
-        expiry=ms_to_dt(_int(d.get("expiry"))), quote_expiry=ms_to_dt(_int(d.get("quote_expiry"))),
-        im_bps=_int(d.get("im_bps")), premium_bps=_int(d.get("premium_bps")),
-        kind=str(d.get("kind") or "open"), status=d.get("status") if isinstance(d.get("status"), str) else None,
-        opened_at=ms_to_dt(opened),
-        closes_at=ms_to_dt(opened + window * 1000) if opened is not None and window is not None else None,
+        expiry=ms_to_dt(_int(d.get("expiry"))),
+        quote_expiry_max=ms_to_dt(qe_max * 1000) if qe_max is not None else None,
+        premium_bps=_int(d.get("premium_bps")), kind=str(d.get("kind") or "open"),
+        status=d.get("status") if isinstance(d.get("status"), str) else None,
+        closes_at=ms_to_dt(_int(d.get("closes_at"))),
         client_rfq_id=cid if isinstance(cid, str) and cid else None,
         seq=seq if isinstance(seq, int) and not isinstance(seq, bool) else None, quotes=rows, raw=dict(d),
     )
 
 
 def _quotable(r: Rfq, chain: str, now_ms: float) -> bool:
-    """An open RFQ on this chain, another seat's, inside its quote window."""
+    """An open RFQ on this chain, another seat's, inside its quote window and before its quote end."""
     d = r.raw
-    if r.kind != "open" or d.get("chain") != chain or d.get("join_ref") is None:
+    if r.kind != "open" or d.get("chain") != chain or r.own:
         return False
     if r.status is not None and r.status not in LIVE:
         return False
     closes = r.closes_at.timestamp() * 1000 if r.closes_at else None
-    qe = _int(d.get("quote_expiry"))
-    return (closes is None or closes > now_ms) and (qe is None or qe > now_ms)
+    qe = _int(d.get("quote_expiry_max"))
+    return (closes is None or closes > now_ms) and (qe is None or qe * 1000 > now_ms)
 
 
 # ---------- the RFQ stream ----------
@@ -221,27 +214,21 @@ def _rate(value: Any) -> Decimal:
     return d
 
 
-def maker_leg(seat: str, r: Rfq, chain: str, rate: Decimal, nonce: int, now_ms: float, binding: bool = False) -> dict:
-    """The Leg this seat signs on ``r``: the RFQ's terms, this seat's own credential and side.
-    ``binding``: the terms of a binding quote, whose leg id the seat makes itself."""
+def maker_terms(seat: str, r: Rfq, chain: str, rate: Decimal, now_ms: float) -> dict:
+    """The terms of this seat's half on ``r``: the RFQ's terms, this seat's own side and rate.
+    The pair id is keccak256 of the RFQ's pair."""
     d = r.raw
     if r.kind != "open":
         raise BadRequest("a close RFQ takes a price-only quote; send_quote() quotes open RFQs only")
     if d.get("chain") != chain:
         raise BadRequest(f"the RFQ is on {clean(d.get('chain'), 40)}; this client signs for {chain}")
-    if d.get("join_ref") is None:
+    if r.own:
         raise BadRequest("this is your own RFQ; a seat does not quote its own RFQ")
-    leg_id, join_ref, pair_id = _word(d.get("leg_id")), _word(d.get("join_ref")), _word(d.get("pair_id"))
-    if (leg_id is None and not binding) or join_ref is None or pair_id is None:
-        raise RefusedToSign("refused to sign: the RFQ names no leg_id, join_ref or pair_id for this seat")
-    if pair_id != e7.h0x(e7.pair_id(r.pair)):
-        raise RefusedToSign(f"refused to sign: pair_id is not keccak256({clean(r.pair, 20)})")
+    if not e7.pair_text_ok(r.pair):
+        raise RefusedToSign("refused to sign: the RFQ names no AAA/BBB pair")
     side = d.get("side")
     if isinstance(side, bool) or side not in (1, -1):
         raise RefusedToSign("refused to sign: the RFQ names no side for this seat")
-    inst = d.get("instrument_id", 1)
-    if isinstance(inst, bool) or inst != 1:
-        raise RefusedToSign("refused to sign: the RFQ is not an NDF (instrument 1)")
     notional = d.get("notional")
     try:
         if not isinstance(notional, str) or Decimal(notional) <= 0:
@@ -249,93 +236,48 @@ def maker_leg(seat: str, r: Rfq, chain: str, rate: Decimal, nonce: int, now_ms: 
         e7.scaled6(notional)
     except (ValueError, ArithmeticError):
         raise RefusedToSign("refused to sign: the RFQ's notional cannot be read") from None
-    im_bps, premium = _int(d.get("im_bps")), _int(d.get("premium_bps"))
-    if im_bps is None or not 1 <= im_bps <= 10_000:
-        raise RefusedToSign("refused to sign: the RFQ's im_bps is not 1 to 10000")
+    premium = _int(d.get("premium_bps", 0))
     if premium is None or not -32_768 <= premium <= 32_767:
         raise RefusedToSign("refused to sign: the RFQ's premium_bps cannot be read")
-    expiry, qe = _int(d.get("expiry")), _int(d.get("quote_expiry"))
+    expiry = _int(d.get("expiry"))
     if expiry is None or expiry <= now_ms:
         raise RefusedToSign("refused to sign: the RFQ's expiry is not in the future")
-    if qe is None or qe <= now_ms:
-        raise QuoteLost("the RFQ's quote_expiry has passed; nothing signed", reason="expired")
-    if qe > now_ms + CONSENT_WINDOW_MS + CLOCK_SLACK_MS:
-        raise RefusedToSign("refused to sign: the RFQ's quote_expiry is more than 24 h out")
     return {
-        "seat": seat, "leg_id": leg_id, "join_ref": join_ref, "pair_id": pair_id, "instrument_id": 1,
-        "side": side, "notional": notional, "rate": _plain(rate), "im_bps": im_bps, "premium_bps": premium,
-        "expiry": expiry, "nonce": str(nonce), "quote_expiry": qe,
+        "seat": seat, "pair_id": e7.h0x(e7.pair_id(r.pair)), "side": side, "notional": notional,
+        "rate": _plain(rate), "premium_bps": premium, "expiry": expiry,
     }
 
 
 def nonce_for(seat: str, client_quote_id: str) -> int:
-    """The low 64 bits of keccak256(seat ‖ client_quote_id): the nonce of the maker's Leg."""
+    """The low 64 bits of keccak256(seat ‖ client_quote_id): the Quote nonce with derive_maker_nonce off."""
     return int.from_bytes(keccak(bytes.fromhex(seat[2:]) + client_quote_id.encode())[-8:], "big")
 
 
-def send(c: "Client", r: Any, rate: Any, client_quote_id: str | None, expires_in: float | None) -> MakerQuote:
-    if not isinstance(r, Rfq):
-        raise BadRequest("send_quote() takes an Rfq from rfqs() or rfq()")
-    rate = _rate(rate)
-    cqid = client_quote_id or f"sdk-q-{uuid.uuid4().hex[:16]}"
-    if not isinstance(cqid, str) or not 0 < len(cqid) <= 128 or not all(" " <= ch <= "~" for ch in cqid):
-        raise BadRequest("client_quote_id is 1 to 128 printable ASCII characters")
-    b = c._binder()
-    now = c._clock()
-    if r.sign_mode == "quote":
-        return _send_bound(c, b, r, rate, cqid, expires_in, now)
-    leg = maker_leg(c.address, r, c.chain_key, rate, nonce_for(c.address, cqid), now * 1000)
-    try:
-        digest = e7.leg_digest(b.sep, leg)
-    except (KeyError, TypeError, ValueError, ArithmeticError):
-        raise RefusedToSign("refused to sign: the Leg cannot be encoded") from None
-    body: dict[str, Any] = {"rate": leg["rate"], "client_quote_id": cqid}
-    if expires_in is not None:
-        if not 0 < float(expires_in) <= 86_400:
-            raise BadRequest("expires_in is seconds, above 0 and at most 86400")
-        body["expires_at"] = int((now + float(expires_in)) * 1000)
-    body["sig"] = "0x" + bytes(c._account.unsafe_sign_hash(digest).signature).hex()
-    q = c._gw.request("POST", f"/rfqs/{r.rfq_id}/quotes", body=body)
-    try:
-        quote_id = _word(q["quote_id"])
-        echo_rate = e7.scaled6(q["rate"])
-        leg_hash = q.get("leg_hash")
-    except (KeyError, TypeError, ValueError, ArithmeticError):
-        raise BadAnswer("the quote answer cannot be read") from None
-    if quote_id is None:
-        raise BadAnswer("the quote answer names no quote_id")
-    if q.get("rfq_id") is not None and str(q["rfq_id"]).lower() != r.rfq_id:
-        raise BadAnswer("the quote answer names another RFQ")
-    if echo_rate != e7.scaled6(leg["rate"]) or (leg_hash is not None and str(leg_hash).lower() != e7.h0x(digest)):
-        raise BadAnswer("the gateway rested a quote other than the one signed")
-    log.info("rfq %s: quoted %s", r.rfq_id, leg["rate"])
-    return MakerQuote(
-        rfq_id=r.rfq_id, quote_id=quote_id, pair=r.pair, side="buy" if leg["side"] == 1 else "sell",
-        notional=Decimal(leg["notional"]), rate=rate, expiry=ms_to_dt(leg["expiry"]),
-        expires_at=ms_to_dt(_int(q.get("expires_at"))), client_quote_id=cqid, raw=q, leg=leg, rfq=r,
-    )
-
-
-# ---------- the binding quote ----------
-
-def _send_bound(
-    c: "Client", b: Binder, r: Rfq, rate: Decimal, cqid: str, expires_in: float | None, now: float,
-) -> MakerQuote:
+def send(c: "Client", r: Any, rate: Any, client_quote_id: str | None) -> MakerQuote:
     """Post a binding quote on ``r``: this seat signs a ``Quote`` over its own half, a fresh
     salt and the RFQ's ``taker_ref``. Nothing is signed after the accept.
 
-    The leg id is this seat's own: 24 random bytes, then the quote expiry. A later quote
-    on the same RFQ keeps it, so one leg fills at most once. The quote expiry is the
-    RFQ's ``quote_expiry_max``. The salt goes to the gateway only and is not kept.
+    The leg id is this seat's own: 24 random bytes, then the quote end, the RFQ's
+    ``quote_expiry_max``. A later quote on the same RFQ keeps it, so one leg fills at most
+    once. The Quote nonce is the u64 of leg id bytes 16 to 23. The salt goes to the gateway
+    only and is not kept.
     """
+    if not isinstance(r, Rfq):
+        raise BadRequest("send_quote() takes an Rfq from rfqs() or rfq()")
+    rate = _rate(rate)
+    cqid = client_quote_id
+    if cqid is not None and (not isinstance(cqid, str) or not 0 < len(cqid) <= 128
+                             or not all(" " <= ch <= "~" for ch in cqid)):
+        raise BadRequest("client_quote_id is 1 to 128 printable ASCII characters")
+    if cqid is None and not e7.DERIVE_MAKER_NONCE:
+        cqid = f"sdk-q-{secrets.token_hex(8)}"
+    b = c._binder()
+    now = c._clock()
     d = r.raw
-    nonce = nonce_for(c.address, cqid)
-    terms = maker_leg(c.address, r, c.chain_key, rate, nonce, now * 1000, binding=True)
+    terms = maker_terms(c.address, r, c.chain_key, rate, now * 1000)
     taker_ref, qe_max = _word(d.get("taker_ref")), _int(d.get("quote_expiry_max"))
     if taker_ref is None or qe_max is None:
         raise RefusedToSign("refused to sign: the RFQ names no taker_ref or quote_expiry_max")
-    if expires_in is not None and not 0 < float(expires_in) <= 86_400:
-        raise BadRequest("expires_in is seconds, above 0 and at most 86400")
     for rid in [rid for rid, leg in c._legs.items() if e7.leg_id_tail(leg) < now]:
         del c._legs[rid]
     leg_id = c._legs.get(r.rfq_id)
@@ -344,19 +286,24 @@ def _send_bound(
             raise QuoteLost(f"under {QUOTE_MIN_LIFE} s of the RFQ's quote window is left; nothing signed",
                             reason="expired")
         leg_id = e7.leg_id_for(secrets.token_bytes(24), qe_max)
-    qe = e7.leg_id_tail(leg_id)
-    if qe > now + SIDE_WINDOW or qe * 1000 > terms["quote_expiry"]:
-        raise RefusedToSign(f"refused to sign: the quote_expiry is past the RFQ's, or more than {SIDE_WINDOW} s ahead")
+    end = e7.leg_id_tail(leg_id)
+    if end > now + QUOTE_WINDOW or end > qe_max:
+        raise RefusedToSign("refused to sign: the quote end is past the RFQ's quote_expiry_max, or more than "
+                            f"{QUOTE_WINDOW} s ahead")
+    nonce = e7.maker_nonce(leg_id) if e7.DERIVE_MAKER_NONCE else nonce_for(c.address, cqid)
     salt = e7.h0x(secrets.token_bytes(32))
-    half = dict(terms, leg_id=leg_id, quote_expiry=qe * 1000)
+    half = dict(terms, leg_id=leg_id, nonce=str(nonce), quote_expiry=end)
     try:
-        digest = e7.quote_digest(b.sep, e7.arm_words(half, nonce, qe), salt, taker_ref)
+        digest = e7.quote_digest(b.sep, e7.leg_words(half), salt, taker_ref)
     except (KeyError, TypeError, ValueError, ArithmeticError):
         raise RefusedToSign("refused to sign: the Quote cannot be encoded") from None
-    body: dict[str, Any] = {"rate": half["rate"], "leg_id": leg_id, "salt": salt, "nonce": str(nonce),
-                            "quote_expiry": qe, "client_quote_id": cqid}
-    if expires_in is not None:
-        body["expires_at"] = min(int((now + float(expires_in)) * 1000), qe * 1000)
+    body: dict[str, Any] = {"rate": half["rate"], "leg_id": leg_id, "salt": salt}
+    if not e7.DERIVE_MAKER_NONCE:
+        body["nonce"] = str(nonce)
+    if not e7.DROP_QUOTE_EXPIRY:
+        body["quote_expiry"] = end
+    if cqid is not None:
+        body["client_quote_id"] = cqid
     body["sig"] = "0x" + bytes(c._account.unsafe_sign_hash(digest).signature).hex()
     c._legs[r.rfq_id] = leg_id
     try:
@@ -385,20 +332,17 @@ def _send_bound(
     if (echo_rate != e7.scaled6(half["rate"]) or (leg_hash is not None and str(leg_hash).lower() != e7.h0x(digest))
             or (echo_leg is not None and str(echo_leg).lower() != leg_id)):
         raise BadAnswer("the gateway rested a quote other than the one signed")
-    log.info("rfq %s: quoted %s, binding until %s", r.rfq_id, half["rate"], utc(qe))
+    log.info("rfq %s: quoted %s, binding until %s", r.rfq_id, half["rate"], utc(end))
     return MakerQuote(
         rfq_id=r.rfq_id, quote_id=quote_id, pair=r.pair, side="buy" if half["side"] == 1 else "sell",
         notional=Decimal(half["notional"]), rate=rate, expiry=ms_to_dt(half["expiry"]),
         expires_at=ms_to_dt(_int(q.get("expires_at"))), client_quote_id=cqid, raw=q, leg=half, rfq=r,
-        sign_mode="quote",
     )
 
 
 def drop(c: "Client", q: Any, leg_id: Any = None) -> Drop:
     """DELETE /rfqs/{id}/quotes/{leg_id}: end this seat's binding leg, every quote on it."""
     if isinstance(q, MakerQuote):
-        if q.sign_mode != "quote":
-            raise BadRequest("drop_quote() ends a binding quote; a Leg quote ends at its expires_at")
         rfq_id, leg = q.rfq_id, _word(q.leg_id)
     elif isinstance(q, Rfq):
         rfq_id, leg = q.rfq_id, _word(leg_id) if leg_id is not None else c._legs.get(q.rfq_id)
@@ -445,46 +389,7 @@ def _accepted(c: "Client", q: MakerQuote, end: float, poll: float) -> None:
         c._sleep(poll)
 
 
-# ---------- the maker Side ----------
-
-def check_side(b: Binder, t: dict, leg: dict) -> bytes:
-    """Rebuild this seat's maker half with the gateway's nonce and the Side quote expiry.
-
-    Returns the digest to sign. Writes the nonce floor first.
-    """
-    try:
-        if t.get("digest_kind") != "side":
-            raise RefusedToSign("refused to sign: the template is not a Side template")
-        if t["own_leg_id"].lower() != leg["leg_id"].lower():
-            raise RefusedToSign("refused to sign: own_leg_id is not this leg")
-        c_maker = e7.half_commitment(e7.arm_words(leg, t["own_nonce"], t["quote_expiry"]), t["own_salt"])
-        if e7.h0x(c_maker) != t["c_maker"].lower():
-            raise RefusedToSign("refused to sign: c_maker is not this leg")
-        if e7.h0x(e7.pair_commitment(e7.hx(t["c_taker"]), c_maker)) != t["pair_c"].lower():
-            raise RefusedToSign("refused to sign: pair_c is not keccak(0x03, c_taker, c_maker)")
-        if str(t["domain_separator"]).lower() != e7.h0x(b.sep):
-            raise RefusedToSign("refused to sign: the template's domain is not this core's")
-        own_nonce, qe = int(t["own_nonce"]), int(t["quote_expiry"])
-        now = b.now()
-        last = b.last_signed()
-        if own_nonce >= U64_MAX:
-            raise RefusedToSign("refused to sign: own_nonce is out of range")
-        if own_nonce > max(int(now * 1000), last) + 86_400_000:
-            raise RefusedToSign("refused to sign: own_nonce is more than one day ahead")
-        if own_nonce <= last:
-            raise RefusedToSign("refused to sign: own_nonce is not above the last one this seat signed")
-        if qe <= now:
-            raise QuoteLost("the Side window has passed; no trade", reason="round_closed")
-        if qe > now + SIDE_WINDOW:
-            raise RefusedToSign(f"refused to sign: the Side quote_expiry is more than {SIDE_WINDOW} s ahead")
-        digest = e7.side_digest(b.sep, t)
-        if e7.h0x(digest) != str(t["digest"]).lower():
-            raise RefusedToSign("refused to sign: the served digest is not this Side")
-    except (KeyError, TypeError, ValueError, AttributeError, ArithmeticError):
-        raise RefusedToSign("refused to sign: the Side template cannot be read") from None
-    b.keep_signed(own_nonce)
-    return digest
-
+# ---------- the accept ----------
 
 def own_status(view: dict, quote_id: str) -> str:
     """The status of the seat's own quote ``quote_id`` in its view of the RFQ; "" when the view lacks it."""
@@ -517,104 +422,17 @@ def lost(view: dict, quote_id: str) -> str | None:
     return None
 
 
-def _template(c: "Client", q: MakerQuote, end: float, poll: float) -> dict | None:
-    """Poll GET /rfqs/{id}/side until the maker's template shows. None when the pair already armed.
-
-    The RFQ view is read on every third poll and at the end of the wait: both reads share
-    the gateway's per-IP budget of 2 requests a second with the taker's own polls.
-    """
-    path = f"/rfqs/{q.rfq_id}/side"
-    n = -1
-    while True:
-        n += 1
-        try:
-            r = c._gw.raw_request("GET", path)
-        except NetworkError:
-            r = None
-        k = status_code(r)
-        if r is not None and r.status_code == 200:
-            t = obj(r)
-            if not t:
-                raise BadAnswer("the Side template is not an object")
-            return t
-        if k == (409, "round_closed"):
-            raise QuoteLost("the Side round closed before the pair armed; no trade", reason="round_closed",
-                            status=409, gateway_code="round_closed")
-        if k == (409, "conflict"):
-            return None  # the pair armed: this seat signed before
-        if r is not None and r.status_code not in (404, 429) and r.status_code < 500:
-            raise from_gateway(r.status_code, Gateway.body_of(r), r.text[:300] if r.text else "")
-        why = None
-        if n % 3 == 0 or c._clock() >= end:
-            try:
-                why = lost(c._gw.request("GET", f"/rfqs/{q.rfq_id}"), q.quote_id)
-            except TRANSIENT:
-                why = None
-        if why is not None:
-            raise QuoteLost(LOST[why], reason=why, details={"rfq_id": q.rfq_id})
-        if c._clock() >= end:
-            raise QuoteLost("no accept before the wait ended", reason="timeout", details={"rfq_id": q.rfq_id})
-        c._sleep(poll)
-
-
-def _post_side(c: "Client", q: MakerQuote, sig: str, t: dict, sign_by: float) -> None:
-    """Post the maker Side signature; the same bytes again on no answer or 5xx, until ``sign_by``."""
-    why = None
-    try:
-        while True:
-            try:
-                r = c._gw.raw_request("POST", f"/rfqs/{q.rfq_id}/side", body={"sig": sig})
-            except NetworkError:
-                r = None
-            if r is not None and r.status_code == 200:
-                return
-            k = status_code(r)
-            if k == (409, "round_closed"):
-                raise QuoteLost("the Side round closed before the pair armed; no trade", reason="round_closed",
-                                status=409, gateway_code="round_closed")
-            if k == (409, "conflict"):
-                return  # already signed, or the pair armed: the trade status decides
-            if r is not None and r.status_code < 500 and r.status_code != 429:
-                raise from_gateway(r.status_code, Gateway.body_of(r), r.text[:300] if r.text else "")
-            if c._clock() + 1 >= sign_by:
-                why = "no answer" if r is None else f"HTTP {r.status_code}"
-                break
-            c._sleep(1.0)
-    except QuoteLost:
-        raise
-    except CrxError as e:
-        if e.status is not None and e.status < 500:
-            raise  # the gateway refused the signature: it holds none
-        why = f"{e.code}: {e}"
-    raise TradeUnknown(
-        f"stopped after the Side was signed ({clean(why, 200)}); the trade may still open; "
-        + read_later(int(t["quote_expiry"])), details={"rfq_id": q.rfq_id})
-
-
 def confirm(c: "Client", q: Any, timeout: float | None, poll: float) -> Trade:
     if not isinstance(q, MakerQuote):
         raise BadRequest("confirm() takes the MakerQuote that send_quote() returned")
-    b = c._binder()
     now = c._clock()
     if timeout is None:
         closes = q.rfq.closes_at.timestamp() if q.rfq.closes_at else now + 120
         end = max(closes, now) + 5
     else:
         end = now + max(float(timeout), 0.0)
-    if q.sign_mode == "quote":
-        _accepted(c, q, end, poll)
-        t = None
-        log.info("rfq %s: accepted; the quote binds, nothing more to sign", q.rfq_id)
-    else:
-        t = _template(c, q, end, poll)
-    if t is not None and t.get("signed") is not True:
-        accepted = c._clock()
-        exp = q.raw.get("expires_at")
-        sign_by = min((exp if isinstance(exp, int) else 10**13) / 1000, accepted - poll + SIGN_WINDOW) + SIGN_GRACE
-        digest = check_side(b, t, q.leg)
-        sig = "0x" + bytes(c._account.unsafe_sign_hash(digest).signature).hex()
-        _post_side(c, q, sig, t, sign_by)
-        log.info("rfq %s: maker side signed, nonce %s, by %s", q.rfq_id, clean(t["own_nonce"]), utc(sign_by))
+    _accepted(c, q, end, poll)
+    log.info("rfq %s: accepted; the quote binds, nothing more to sign", q.rfq_id)
     status, view = c._settle(lambda: c._gw.request("GET", f"/rfqs/{q.rfq_id}"), "trade_status")
     tx = _word(view.get("trade_tx"))
     log.info("rfq %s %s: tx %s", q.rfq_id, status, tx)

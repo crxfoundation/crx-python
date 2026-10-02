@@ -1,0 +1,90 @@
+{
+  "typed_data": {
+    "domain": {
+      "chainId": 43113,
+      "name": "CRX",
+      "verifyingContract": "0xd757933e2a5600c6f00f83fd282b33aa7cb409c0",
+      "version": "rulebook-1.0"
+    },
+    "message": {
+      "maturity": "1798732800",
+      "notionalE6": "5000000000000",
+      "ownLegId": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+      "ownNonce": "1790000000123",
+      "ownSalt": "0x3131313131313131313131313131313131313131313131313131313131313131",
+      "pair": "USD/BRL",
+      "pairC": "0x3bb28decf99b625916b2a3c41517a2035273e731a71df7b0e9d5c115ce899795",
+      "premiumBps": "0",
+      "rateE6": "5410000",
+      "side": "buy",
+      "summary": "buy 5 000 000 USD vs BRL at 5.41 BRL per USD, matures 2026-12-31T16:00:00Z, upfront none"
+    },
+    "primaryType": "Trade",
+    "types": {
+      "EIP712Domain": [
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "version",
+          "type": "string"
+        },
+        {
+          "name": "chainId",
+          "type": "uint256"
+        },
+        {
+          "name": "verifyingContract",
+          "type": "address"
+        }
+      ],
+      "Trade": [
+        {
+          "name": "summary",
+          "type": "string"
+        },
+        {
+          "name": "pair",
+          "type": "string"
+        },
+        {
+          "name": "side",
+          "type": "string"
+        },
+        {
+          "name": "notionalE6",
+          "type": "uint256"
+        },
+        {
+          "name": "rateE6",
+          "type": "uint64"
+        },
+        {
+          "name": "premiumBps",
+          "type": "int16"
+        },
+        {
+          "name": "maturity",
+          "type": "uint40"
+        },
+        {
+          "name": "pairC",
+          "type": "bytes32"
+        },
+        {
+          "name": "ownLegId",
+          "type": "bytes32"
+        },
+        {
+          "name": "ownNonce",
+          "type": "uint64"
+        },
+        {
+          "name": "ownSalt",
+          "type": "bytes32"
+        }
+      ]
+    }
+  }
+}

@@ -37,11 +37,12 @@ q = maker.send_quote(rfq, RATE)  # POST /rfqs/{rfq_id}/quotes
 log("maker: quoted", q.rate)  # 12:36:52 maker: quoted 18.12
 
 # 6. Your test taker gets the winning quote: any maker quote
-#    outranks the house quote. It accepts a maker's only.
+#    outranks the house quote. It accepts yours only.
 won = ask.quote()
-log("taker: winning quote", won.rate, "house" if won.house else "maker")
-# 12:37:03 taker: winning quote 18.12 maker
-if not won.house:
+mine = won.quote_id == q.quote_id
+log("taker: winning quote", won.rate, "yours" if mine else "not yours")
+# 12:37:03 taker: winning quote 18.12 yours
+if mine:
     t = taker.trade(won)  # POST /rfqs/{rfq_id}/accept
     log("taker:", t.status)  # 12:37:34 taker: pending
 
