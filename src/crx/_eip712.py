@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from decimal import Decimal
+from decimal import Context, Decimal
 from typing import Any
 
 from eth_abi import encode
@@ -25,6 +25,7 @@ MAX_MATURITY = 253402300799  # 9999-12-31T23:59:59Z
 SUMMARY_MAX_LEN = 162
 SECP256K1_N = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
 TAKER_REF_TAG = b"CRX/takerRef/v1"
+_EXACT = Context(prec=100)  # wide enough for a u256 word: no rounding
 WITHDRAW_KIND = 5
 
 TERMS_FIELDS = (
@@ -130,8 +131,8 @@ def pair_id(pair: str) -> bytes:
 
 
 def scaled6(value: Any) -> int:
-    """A decimal string at 6 decimals, as an integer. Refuses finer precision."""
-    d = Decimal(str(value)).scaleb(6)
+    """A decimal string at 6 decimals, as an exact integer. Refuses finer precision."""
+    d = Decimal(str(value)).scaleb(6, _EXACT)
     if d != d.to_integral_value():
         raise ValueError("more than 6 decimals")
     return int(d)

@@ -43,7 +43,7 @@ class FakeClient:
 
     def quote(self, pair, side, notional, **kwargs):
         self.calls.append(("quote", pair, side, notional, kwargs))
-        return SimpleNamespace(pair=pair, rate="5.2562", house=True, expiry=kwargs.get("expiry"),
+        return SimpleNamespace(pair=pair, rate="5.2562", expiry=kwargs.get("expiry"),
                                expires_at="2026-09-29 21:08:30+00:00", rfq_id="r2")
 
     def trade(self, q):
@@ -132,6 +132,7 @@ def test_key_from_env_runs_every_step_without_asking(monkeypatch, capsys, fake):
     lines = capsys.readouterr().out.splitlines()
     assert len(lines) == 10 and all(STAMP.match(line) for line in lines)
     assert lines[0].endswith(" 0x7638c8075e517393fa62008b5faa6c1ea832fe71")
+    assert lines[3][9:] == "USD/BRL 5.2562"
     assert lines[4].endswith(" 2026-12-15 18:00:00+00:00")
     assert lines[7].endswith(" USDBRL buy 25000 5.2562 open")
     assert lines[9].endswith(" accepted")

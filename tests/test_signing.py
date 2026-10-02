@@ -1,4 +1,4 @@
-"""The hand-built digests match eth-account's own EIP-712 encoder and the live domain."""
+"""The hand-built digests match eth-account's own EIP-712 encoder and the live domain; signers; session login."""
 
 import copy
 import os
@@ -9,6 +9,8 @@ from eth_utils import keccak
 
 from crx import _eip712 as e7
 from crx._http import Gateway, rest_message
+
+from .conftest import BASE, FakeSession
 
 CORE = "0x0f6fba28791dfd909bd023e63bc072081610eeea"
 DOMAIN = {"name": "CRX", "version": "rulebook-1.0", "chainId": 43113, "verifyingContract": CORE}
@@ -32,46 +34,32 @@ def test_domain_matches_live_health(health):
     assert e7.h0x(e7.domain_separator(c["chain_id"], c["core"])) == c["domain"]
 
 
-def test_leg_digest_matches_eth_account():
+def test_trade_digest_matches_eth_account():
+    msg = e7.trade_message("USD/MXN", -1, 25_000_000_000, 18_712_345, -3, 1_790_000_000, rnd(), rnd(),
+                           "1789000000123", rnd())
+    td = e7.typed_data("Trade", 43113, CORE, msg)
+    types = {"Trade": td["types"]["Trade"]}
+    assert e7.trade_digest(e7.domain_separator(43113, CORE), msg) == typed_hash("Trade", types, msg) == full(td)
+
+
+def test_quote_digest_matches_eth_account():
     a = Account.create()
-    leg = {"seat": a.address.lower(), "leg_id": rnd(), "join_ref": rnd(), "pair_id": e7.h0x(e7.pair_id("USD/MXN")),
-           "instrument_id": 1, "side": -1, "notional": "25000.000000", "rate": "18.712345", "im_bps": 100,
-           "premium_bps": -3, "expiry": 1_790_000_000_000, "nonce": "123456789", "quote_expiry": 1_789_000_000_000}
-    types = {"Leg": [
-        {"name": "seat", "type": "address"}, {"name": "legId", "type": "bytes32"}, {"name": "joinRef", "type": "bytes32"},
-        {"name": "pair", "type": "bytes32"}, {"name": "instrumentId", "type": "uint8"}, {"name": "side", "type": "int8"},
-        {"name": "notional", "type": "uint256"}, {"name": "rate", "type": "uint64"}, {"name": "imBps", "type": "uint16"},
-        {"name": "premiumBps", "type": "int16"}, {"name": "expiry", "type": "uint40"}, {"name": "nonce", "type": "uint64"},
-        {"name": "quoteExpiry", "type": "uint64"}]}
-    msg = {"seat": a.address, "legId": e7.hx(leg["leg_id"]), "joinRef": e7.hx(leg["join_ref"]),
-           "pair": e7.hx(leg["pair_id"]), "instrumentId": 1, "side": -1, "notional": 25_000_000_000,
-           "rate": 18_712_345, "imBps": 100, "premiumBps": -3, "expiry": 1_790_000_000, "nonce": 123456789,
-           "quoteExpiry": 1_789_000_000}
+    leg_id = e7.leg_id_for(os.urandom(24), 1_790_000_600)
+    words = [a.address, e7.hx(leg_id), e7.pair_id("USD/MXN"), -1, 25_000_000_000, 18_712_345, -3, 1_790_000_000,
+             e7.maker_nonce(leg_id)]
+    salt, ref = rnd(), e7.h0x(e7.taker_ref(Account.create().address, rnd()))
+    td = e7.typed_data("Quote", 43113, CORE, e7.quote_message(words, salt, ref))
     sep = e7.domain_separator(43113, CORE)
-    assert e7.leg_digest(sep, leg) == typed_hash("Leg", types, msg)
-
-
-def test_side_digest_matches_eth_account():
-    t = {"pair_c": rnd(), "own_leg_id": rnd(), "quote_expiry": 1_789_000_300, "own_nonce": 1_789_000_000_123,
-         "own_salt": rnd(), "wraps_hash": rnd()}
-    types = {"Side": [
-        {"name": "pairC", "type": "bytes32"}, {"name": "ownLegId", "type": "bytes32"},
-        {"name": "quoteExpiry", "type": "uint64"}, {"name": "ownNonce", "type": "uint64"},
-        {"name": "ownSalt", "type": "bytes32"}, {"name": "wrapsHash", "type": "bytes32"}]}
-    msg = {"pairC": e7.hx(t["pair_c"]), "ownLegId": e7.hx(t["own_leg_id"]), "quoteExpiry": t["quote_expiry"],
-           "ownNonce": t["own_nonce"], "ownSalt": e7.hx(t["own_salt"]), "wrapsHash": e7.hx(t["wraps_hash"])}
-    assert e7.side_digest(e7.domain_separator(43113, CORE), t) == typed_hash("Side", types, msg)
+    assert e7.quote_digest(sep, words, salt, ref) == full(td) == e7.typed_digest(td)
 
 
 def test_withdraw_digest_matches_eth_account():
     a = Account.create()
-    w = {"account": a.address.lower(), "amount": "1000000000", "recipient": a.address.lower(), "nonce": "3",
-         "deadline": 1_789_000_000}
+    w = {"account": a.address.lower(), "amount": "1000000000", "nonce": "3", "deadline": 1_789_000_000}
     types = {"WithdrawIntent": [
         {"name": "account", "type": "address"}, {"name": "amount", "type": "uint256"},
-        {"name": "recipient", "type": "address"}, {"name": "nonce", "type": "uint64"},
-        {"name": "deadline", "type": "uint64"}]}
-    msg = {"account": a.address, "amount": 10**9, "recipient": a.address, "nonce": 3, "deadline": 1_789_000_000}
+        {"name": "nonce", "type": "uint64"}, {"name": "deadline", "type": "uint64"}]}
+    msg = {"account": a.address, "amount": 10**9, "nonce": 3, "deadline": 1_789_000_000}
     assert e7.withdraw_digest(e7.domain_separator(43113, CORE), w) == typed_hash("WithdrawIntent", types, msg)
 
 
@@ -81,10 +69,12 @@ def test_rest_headers_recover_to_seat():
     raw = b'{"chain":"avax-fuji","amount":"1000"}'
     h = gw.headers("POST", "/deposit", raw)
     seat = a.address.lower()
-    assert h["x-crx-address"] == seat and h["x-crx-signer"] == seat
-    msg = rest_message("POST", "/deposit", seat, seat, int(h["x-crx-ts"]), h["x-crx-nonce"], raw)
+    assert set(h) == {"x-crx-address", "x-crx-ts", "x-crx-sig"} and h["x-crx-address"] == seat
+    msg = rest_message("POST", "/deposit", seat, seat, int(h["x-crx-ts"]), raw)
     assert msg.endswith("Body: 0x" + keccak(raw).hex())
-    assert msg.splitlines()[:4] == ["CRX-REST-LOGIN", "Audience: crx-gateway", "Method: POST", "Path: /deposit"]
+    assert msg.splitlines() == ["CRX-REST-LOGIN", "Audience: crx-gateway", "Method: POST", "Path: /deposit",
+                                f"Custody: {seat}", f"Signer: {seat}", f"Timestamp: {h['x-crx-ts']}",
+                                "Body: 0x" + keccak(raw).hex()]
     assert Account.recover_message(encode_defunct(text=msg), signature=h["x-crx-sig"]).lower() == seat
 
 
@@ -108,44 +98,35 @@ def full(td):
     return keccak(b"\x19" + m.version + m.header + m.body)
 
 
-def test_leg_typed_data_is_the_leg_digest():
-    a = Account.create()
-    leg = {"seat": a.address.lower(), "leg_id": rnd(), "join_ref": rnd(), "pair_id": e7.h0x(e7.pair_id("USD/MXN")),
-           "instrument_id": 1, "side": -1, "notional": "25000.000000", "rate": "18.712345", "im_bps": 100,
-           "premium_bps": -3, "expiry": 1_790_000_000_000, "nonce": "123456789", "quote_expiry": 1_789_000_000_000}
-    td = e7.typed_data("Leg", 43113, CORE, e7.leg_message(leg))
+def test_withdraw_typed_data_is_its_digest():
     sep = e7.domain_separator(43113, CORE)
-    assert full(td) == e7.typed_digest(td) == e7.leg_digest(sep, leg)
-
-
-def test_side_and_withdraw_typed_data_are_their_digests():
-    sep = e7.domain_separator(43113, CORE)
-    t = {"pair_c": rnd(), "own_leg_id": rnd(), "quote_expiry": 1_789_000_300, "own_nonce": "1789000000123",
-         "own_salt": rnd(), "wraps_hash": rnd()}
-    td = e7.typed_data("Side", 43113, CORE, e7.side_message(t))
-    assert full(td) == e7.typed_digest(td) == e7.side_digest(sep, t)
     a = Account.create()
-    w = {"account": a.address.lower(), "amount": 10**9, "recipient": a.address.lower(), "nonce": 3,
-         "deadline": 1_789_000_000}
+    w = {"account": a.address.lower(), "amount": 10**9, "nonce": 3, "deadline": 1_789_000_000}
     td = e7.typed_data("WithdrawIntent", 43113, CORE, e7.withdraw_message(w))
+    assert set(td["message"]) == {"account", "amount", "nonce", "deadline"}
     assert full(td) == e7.typed_digest(td) == e7.withdraw_digest(sep, w)
 
 
-@pytest.mark.parametrize("primary", ["AllocationConsent", "AllocationAcceptance", "FailoverConsent"])
+@pytest.mark.parametrize("primary", ["AllocationConsent", "AllocationAcceptance", "FailoverConsent", "Terms"])
 def test_close_consent_typed_data(primary):
-    msg = {n: (rnd() if t == "bytes32" else str(1_789_000_000 + i)) for i, (n, t) in enumerate(e7.fields_of(primary))}
+    msg = {n: (rnd() if t == "bytes32" else str(1 + i % 100)) for i, (n, t) in enumerate(e7.fields_of(primary))}
     td = e7.typed_data(primary, 43113, CORE, msg)
     assert full(td) == e7.typed_digest(td)
-    assert e7.h0x(keccak(text=e7.STRUCTS[primary])) == e7.h0x(keccak(text=primary + "(" + ",".join(
-        f"{t} {n}" for n, t in e7.fields_of(primary)) + ")"))
+    assert e7.typehash(primary) == keccak(text=primary + "(" + ",".join(
+        f"{t} {n}" for n, t in e7.fields_of(primary)) + ")")
+
+
+def a_trade_td():
+    return e7.typed_data("Trade", 43113, CORE, e7.trade_message(
+        "USD/BRL", 1, 5_000_000_000_000, 5_410_000, 0, 1_798_732_800, rnd(), rnd(), 1, rnd()))
 
 
 def test_unknown_or_malformed_typed_data_has_no_digest():
-    td = e7.typed_data("Side", 43113, CORE, e7.side_message(
-        {"pair_c": rnd(), "own_leg_id": rnd(), "quote_expiry": 1, "own_nonce": 1, "own_salt": rnd(), "wraps_hash": rnd()}))
-    for edit in (lambda d: d.update(primaryType="Quote"), lambda d: d["types"]["Side"].reverse(),
-                 lambda d: d["message"].pop("ownSalt"), lambda d: d["domain"].update(chainId=True),
-                 lambda d: d.update(extra=1)):
+    td = a_trade_td()
+    for edit in (lambda d: d.update(primaryType="Side"), lambda d: d.update(primaryType="Leg"),
+                 lambda d: d["types"]["Trade"].reverse(), lambda d: d["message"].pop("ownSalt"),
+                 lambda d: d["message"].update(quoteExpiry="1"), lambda d: d["message"].update(wrapsHash=rnd()),
+                 lambda d: d["domain"].update(chainId=True), lambda d: d.update(extra=1)):
         bad = copy.deepcopy(td)
         edit(bad)
         with pytest.raises(ValueError):
@@ -208,7 +189,7 @@ class HashOnly:
 
 def test_hash_only_path_rebuilds_then_signs_the_digest():
     a = Account.create()
-    w = {"account": a.address.lower(), "amount": 10**9, "recipient": a.address.lower(), "nonce": 3, "deadline": 9}
+    w = {"account": a.address.lower(), "amount": 10**9, "nonce": 3, "deadline": 9}
     td = e7.typed_data("WithdrawIntent", 43113, CORE, e7.withdraw_message(w))
     digest = e7.withdraw_digest(e7.domain_separator(43113, CORE), w)
     s = HashOnly(a)
@@ -218,6 +199,19 @@ def test_hash_only_path_rebuilds_then_signs_the_digest():
     with pytest.raises(crx.RefusedToSign, match="not this typed data"):
         sign_hash_only(s, td, b"\x00" * 32)
     assert len(s.hashes) == 1
+
+
+def test_hash_only_path_refuses_a_digest_of_other_typed_data():
+    a = Account.create()
+    td = a_trade_td()
+    other = copy.deepcopy(td)
+    other["message"]["rateE6"] = "5410001"
+    s = HashOnly(a)
+    with pytest.raises(crx.RefusedToSign, match="the digest is not this typed data's"):
+        sign_typed(s, td, e7.typed_digest(other), a.address)
+    assert s.hashes == []
+    sig = sign_typed(s, td, e7.typed_digest(td), a.address)
+    assert s.hashes == [e7.typed_digest(td)] and sig == sign_typed(LocalSigner(a), td, e7.typed_digest(td), a.address)
 
 
 def test_signer_shape_checked():
@@ -242,7 +236,74 @@ def test_login_signature_from_a_custodian_is_normalized():
             s = e7.SECP256K1_N - int.from_bytes(sig[32:64], "big")
             return sig[:32] + s.to_bytes(32, "big") + bytes([55 - sig[64] - 27])  # high s, v 0/1
 
-    msg = rest_message("GET", "/balance", a.address.lower(), a.address.lower(), 1, "n", b"")
+    msg = rest_message("GET", "/balance", a.address.lower(), a.address.lower(), 1, b"")
     sig = sign_login(HighS(a), msg)
     assert int(sig[66:130], 16) <= e7.SECP256K1_N // 2 and sig[-2:] in ("1b", "1c")
     assert Account.recover_message(encode_defunct(text=msg), signature=sig) == a.address
+
+
+# ---------- session login (custodian mode) ----------
+
+TOKEN = "ab" * 32
+
+
+def session_gateway(a, mint):
+    s = FakeSession()
+    s.routes[("POST", "/session")] = mint
+    s.routes[("GET", "/balance")] = {"ok": True}
+    return Gateway(BASE, HashOnly(a), s, login=True), s
+
+
+def minted(a, ttl_ms=3_600_000, token=TOKEN):
+    me = a.address.lower()
+    return {"token": token, "custody": me, "signer": me, "ttl_ms": ttl_ms}
+
+
+def test_session_login_signs_once_then_sends_the_token():
+    a = Account.create()
+    gw, s = session_gateway(a, minted(a))
+    gw.request("GET", "/balance"), gw.request("GET", "/balance")
+    mint, *reads = s.calls
+    me = a.address.lower()
+    assert (mint["method"], mint["path"], mint["raw"]) == ("POST", "/session", b"")
+    assert set(mint["headers"]) == {"accept", "x-crx-address", "x-crx-ts", "x-crx-sig"}
+    msg = rest_message("POST", "/session", me, me, int(mint["headers"]["x-crx-ts"]), b"")
+    assert Account.recover_message(encode_defunct(text=msg), signature=mint["headers"]["x-crx-sig"]).lower() == me
+    assert [r["headers"] for r in reads] == [{"accept": "application/json", "x-crx-session": TOKEN}] * 2
+
+
+def test_session_refused_token_mints_once_more():
+    a = Account.create()
+    gw, s = session_gateway(a, [minted(a), minted(a, token="cd" * 32)])
+    s.routes[("GET", "/balance")] = [(401, {"code": "unauthorized", "error": "token"}), {"ok": True}]
+    assert gw.request("GET", "/balance") == {"ok": True}
+    assert [c["path"] for c in s.calls] == ["/session", "/balance", "/session", "/balance"]
+    assert s.calls[-1]["headers"]["x-crx-session"] == "cd" * 32
+
+
+def test_session_off_signs_every_call():
+    a = Account.create()
+    gw, s = session_gateway(a, (404, {"code": "not_found", "error": "no"}))
+    gw.request("GET", "/balance"), gw.request("GET", "/balance")
+    assert [c["path"] for c in s.calls] == ["/session", "/balance", "/balance"]
+    assert all(set(c["headers"]) == {"accept", "x-crx-address", "x-crx-ts", "x-crx-sig"} for c in s.calls)
+
+
+@pytest.mark.parametrize("bad", [{"token": "zz"}, {"custody": "0x" + "11" * 20}, {"signer": "0x" + "11" * 20},
+                                 {"ttl_ms": 0}, {"ttl_ms": True}])
+def test_session_token_this_sdk_cannot_use_is_refused(bad):
+    a = Account.create()
+    gw, s = session_gateway(a, {**minted(a), **bad})
+    with pytest.raises(crx.BadAnswer, match="/session"):
+        gw.request("GET", "/balance")
+    assert [c["path"] for c in s.calls] == ["/session"]
+
+
+def test_viewer_never_takes_a_session_token():
+    a = Account.create()
+    gw, s = session_gateway(a, minted(a))
+    gw.custody = Account.create().address.lower()
+    gw.request("GET", "/balance")
+    (call,) = s.calls
+    assert call["path"] == "/balance" and call["headers"]["x-crx-signer"] == a.address.lower()
+    assert call["headers"]["x-crx-address"] == gw.custody and "x-crx-session" not in call["headers"]

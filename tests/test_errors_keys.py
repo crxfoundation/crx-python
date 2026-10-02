@@ -40,6 +40,7 @@ from .conftest import BASE, RPC
         (404, {"code": "unknown_or_ended", "error": "no leg"}, crx.UnknownOrEnded, "unknown_or_ended"),
         (401, {"code": "unauthorized", "error": "who"}, crx.AuthError, "unauthorized"),
         (400, {"code": "viewer_invalid", "error": "no"}, crx.BadRequest, "bad_request"),
+        (400, {"code": "quote_format_outdated", "error": "outdated"}, crx.QuoteFormatOutdated, "quote_format_outdated"),
         (403, {"code": "viewer_is_maker", "error": "no"}, crx.BadRequest, "bad_request"),
         (503, {"code": "viewers_unavailable", "error": "off"}, crx.ServerError, "server_error"),
         (502, {"code": "upstream", "error": "down"}, crx.ServerError, "server_error"),
@@ -70,6 +71,17 @@ def test_rate_limited_retry_after(details, headers, wait):
     e = from_gateway(429, {"code": "rate_limited", "error": "slow", "details": details}, "",
                      retry_after=(headers or {}).get("Retry-After"))
     assert type(e) is crx.RateLimited and e.retry_after == wait
+
+
+def test_quote_format_outdated_is_a_bad_request():
+    assert "QuoteFormatOutdated" in crx.__all__ and issubclass(crx.QuoteFormatOutdated, crx.BadRequest)
+    body = {"code": "quote_format_outdated", "error": "the quote is signed in an older format",
+            "details": {"typehash": "0xe0bb"}}
+    e = from_gateway(400, body)
+    assert type(e) is crx.QuoteFormatOutdated and isinstance(e, crx.BadRequest)
+    assert (e.code, e.gateway_code, e.status) == ("quote_format_outdated", "quote_format_outdated", 400)
+    assert str(e) == "the quote is signed in an older format" and e.details == {"typehash": "0xe0bb"}
+    assert type(from_gateway(400, {"error": "quote_format_outdated"})) is crx.QuoteFormatOutdated
 
 
 def test_leg_live_and_already_accepted_read_their_details():

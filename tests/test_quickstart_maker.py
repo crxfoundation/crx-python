@@ -23,6 +23,8 @@ TAKER_KEY = "0x" + "22" * 32
 EXAMPLE = Path(__file__).parent.parent / "examples" / "maker.py"
 STAMP = re.compile(r"^\d\d:\d\d:\d\d ")
 OURS = "0x" + "a1" * 32
+MINE = "0x" + "b1" * 32    # the maker's quote id
+THEIRS = "0x" + "c1" * 32  # another maker's quote id
 TXH = "0x" + "55" * 32
 CHECK = datetime(2026, 10, 1, 9, 5, tzinfo=timezone.utc)
 
@@ -32,7 +34,7 @@ class FakeClient:
 
     maker = taker = None
     order = []      # every call, both clients, in the order made
-    house = False   # the winning quote is the house desk's
+    theirs = False  # the winning quote is another maker's, at the maker's rate
     lose = None     # the reason confirm() loses the quote for
     status = "open"  # the trade status confirm() returns
 
@@ -66,7 +68,7 @@ class FakeClient:
 
     def winner(self):
         self.did("ask.quote")
-        return SimpleNamespace(rate=Decimal("18.12"), house=FakeClient.house, rfq_id=OURS)
+        return SimpleNamespace(rate=Decimal("18.12"), quote_id=THEIRS if FakeClient.theirs else MINE, rfq_id=OURS)
 
     def trade(self, q):
         self.did("trade", q.rfq_id)
@@ -80,7 +82,7 @@ class FakeClient:
 
     def send_quote(self, rfq, rate):
         self.did("send_quote", rfq.rfq_id, rate)
-        return SimpleNamespace(rfq_id=rfq.rfq_id, rate=Decimal(rate))
+        return SimpleNamespace(rfq_id=rfq.rfq_id, rate=Decimal(rate), quote_id=MINE)
 
     def confirm(self, q, **kwargs):
         self.did("confirm", q.rfq_id, kwargs)
@@ -102,7 +104,7 @@ class FakeClient:
 def fake(monkeypatch):
     monkeypatch.setattr(crx, "Client", FakeClient)
     FakeClient.maker = FakeClient.taker = FakeClient.lose = None
-    FakeClient.order, FakeClient.house, FakeClient.status = [], False, "open"
+    FakeClient.order, FakeClient.theirs, FakeClient.status = [], False, "open"
     return FakeClient
 
 
@@ -191,7 +193,7 @@ def test_the_taker_asks_the_maker_quotes_the_taker_accepts(capsys, fake, keys):
     assert [line[9:] for line in lines] == [
         "0x7638c8075e517393fa62008b5faa6c1ea832fe71 0x5b38da6a701c568545dcfcb03fcb875f56beddc4",
         "20000.000000 20000.000000", "USD/MXN sell 25000", "maker: quoted 18.12",
-        "taker: winning quote 18.12 maker", "taker: pending", "maker: open"]
+        "taker: winning quote 18.12 yours", "taker: pending", "maker: open"]
 
 
 def test_a_lost_quote_exits_1_with_its_code_and_drops_nothing(capsys, fake, keys):
@@ -208,12 +210,13 @@ def test_no_accept_in_the_wait_drops_the_quote_and_exits_1(capsys, fake, keys):
     assert FakeClient.order[-2:] == ["confirm", "drop_quote"] and FakeClient.maker.calls[-1] == ("drop_quote", OURS)
 
 
-def test_a_winning_house_quote_is_not_accepted(capsys, fake, keys):
-    FakeClient.house, FakeClient.lose = True, "timeout"
+def test_a_winning_quote_that_is_not_yours_is_not_accepted(capsys, fake, keys):
+    # Same rate, another quote id: the quote id alone names the maker's own quote.
+    FakeClient.theirs, FakeClient.lose = True, "timeout"
     assert qs.main([]) == 1
     out = capsys.readouterr().out.splitlines()
-    assert out[-1].endswith(" taker: winning quote 18.12 house")
-    assert "trade" not in FakeClient.order and FakeClient.order[-1] == "drop_quote"
+    assert out[-1][9:] == "taker: winning quote 18.12 not yours"
+    assert "trade" not in FakeClient.order and FakeClient.order[-2:] == ["confirm", "drop_quote"]
 
 
 def test_a_taker_refusal_ends_the_run_with_its_own_error(capsys, fake, keys, monkeypatch):

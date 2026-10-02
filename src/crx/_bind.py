@@ -203,7 +203,9 @@ class Binder:
         if not isinstance(t, dict) or set(t) != {"typed_data"}:
             raise RefusedToSign("refused to sign: the trade template is not {typed_data}")
         premium, cap = ask["premium_bps"], ask.get("max_premium_bps")
-        if premium != 0 and (cap is None or abs(premium) > cap):
+        if premium != 0 and cap is None:
+            raise RefusedToSign("refused to sign: the premium is not 0 and the market serves no premium cap")
+        if abs(premium) > (cap or 0):
             raise RefusedToSign(f"refused to sign: the premium {premium} bps is above the cap ({cap} bps)")
         try:
             served = served_message(t)

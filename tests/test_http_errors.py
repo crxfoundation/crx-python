@@ -130,6 +130,14 @@ def test_json_bodies_unchanged(make_client, session):
     assert str(e) == "USD/JPY is paused" and e.details == {"pair": "USD/JPY"} and e.status == 409
 
 
+def test_quote_format_outdated_body(make_client, session):
+    body = {"code": "quote_format_outdated", "error": "the quote is signed in an older format; update the SDK"}
+    e = fail_balance(make_client, session, 400, body, {})
+    assert type(e) is crx.QuoteFormatOutdated and isinstance(e, crx.BadRequest)
+    assert (e.code, e.gateway_code, e.status) == ("quote_format_outdated", "quote_format_outdated", 400)
+    assert "older format" in str(e)
+
+
 def test_json_body_without_message_unchanged(make_client, session):
     e = fail_balance(make_client, session, 500, {"code": "internal"}, {})
     assert type(e) is crx.ServerError and str(e) == "HTTP 500" and e.details == {}

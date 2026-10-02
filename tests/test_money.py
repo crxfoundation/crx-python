@@ -1,16 +1,20 @@
 """deposit(), withdraw() and the seat reads against a scripted gateway and chain."""
 
+import copy
 import time
+from datetime import datetime, timezone
 from decimal import Decimal
 
 import pytest
+from eth_abi import encode
 from eth_account import Account
-from eth_utils import to_checksum_address
+from eth_utils import keccak, to_checksum_address
 
 import crx
 from crx import _eip712 as e7
+from crx.signer import LocalSigner
 
-from .conftest import CHAIN_ID, Clock
+from .conftest import BASE, CHAIN_ID, RPC, Clock, fixture
 
 TOKEN = "0xa52c60e6e14190dad2739f4b401aa3264ae68cb8"
 
@@ -166,25 +170,50 @@ def test_deposit_revert_names_error(make_client, session, health, account):
 LANDED = "0x" + "7a" * 32
 OTHER = "0x" + "ee" * 32
 OWN = object()  # stands for the item of the withdraw the gateway queued
+SEAT = object()  # stands for the seat's own address
+WITHDRAW_TYPE = "WithdrawIntent(address account,uint256 amount,uint64 nonce,uint64 deadline)"
+WITHDRAW_KINDS = ["address", "uint256", "uint64", "uint64"]
+
+
+def intent_words(w):
+    return [to_checksum_address(w["account"]), int(w["amount"]), int(w["nonce"]), int(w["deadline"])]
+
+
+def intent_digest(sep, w):
+    """The WithdrawIntent digest, built here from the type string: account, amount, nonce, deadline."""
+    struct = keccak(encode(["bytes32", *WITHDRAW_KINDS], [keccak(text=WITHDRAW_TYPE), *intent_words(w)]))
+    return keccak(b"\x19\x01" + sep + struct)
+
+
+def intent_item(w, recipient=None):
+    """keccak256(uint256(5) ‖ abi.encode(account, amount, nonce, deadline)). With ``recipient``, a
+    recipient word sits between the amount and the nonce."""
+    kinds, words = ["uint256", *WITHDRAW_KINDS], [5, *intent_words(w)]
+    if recipient is not None:
+        kinds.insert(3, "address")
+        words.insert(3, to_checksum_address(recipient))
+    return keccak(encode(kinds, words))
 
 
 class Gate:
     """POST /withdraw as the gateway runs it: rebuilds the intent from the body and the seat,
-    recovers the signer of that rebuild, answers with its item. ``edit`` changes the queued intent."""
+    recovers the signer of that rebuild, answers with its item. ``edit`` changes the queued intent;
+    ``recipient`` builds the item with a recipient word (SEAT: the seat's own address)."""
 
-    def __init__(self, session, account, chain_id, core, status=202, item=OWN, edit=None):
+    def __init__(self, session, account, chain_id, core, status=202, item=OWN, edit=None, recipient=None):
         self.session, self.account = session, account
         self.sep = e7.domain_separator(chain_id, core)
         self.status, self.forced, self.edit = status, item, edit or {}
+        self.recipient = account.address if recipient is SEAT else recipient
         self.intent = self.signer = self.item = None
         session.routes[("POST", "/withdraw")] = self.answer
 
     def answer(self, req):
         b, seat = req["body"], self.account.address.lower()
-        self.intent = {"account": seat, "amount": e7.scaled6(b["amount"]), "recipient": seat,
+        self.intent = {"account": seat, "amount": int(Decimal(b["amount"]).scaleb(6)),
                        "nonce": int(b["nonce"]), "deadline": int(b["deadline"])}
-        self.signer = Account._recover_hash(e7.withdraw_digest(self.sep, self.intent), signature=b["sig"])
-        self.item = e7.h0x(e7.withdraw_item({**self.intent, **self.edit}))
+        self.signer = Account._recover_hash(intent_digest(self.sep, self.intent), signature=b["sig"])
+        self.item = "0x" + intent_item({**self.intent, **self.edit}, self.recipient).hex()
         item = self.item if self.forced is OWN else self.forced
         body = {"item": item, "status": "sending", "chain": b["chain"], "account": seat,
                 "amount": f"{Decimal(b['amount']):.6f}", "nonce": b["nonce"], "deadline": b["deadline"]}
@@ -219,12 +248,34 @@ def test_withdraw_one_signed_post_sends_no_tx(make_client, session, health, acco
     posts = [c for c in session.calls if c["method"] == "POST"]
     assert [c["path"] for c in posts] == ["/withdraw"]
     body = posts[0]["body"]
+    # The body names no recipient: the chain pays the account.
     assert {k: v for k, v in body.items() if k != "sig"} == {
         "chain": "avax-fuji", "amount": "1000", "nonce": "3", "deadline": now + 22 * 3600}
     assert 120 < body["deadline"] - now <= 82_800  # the gateway's deadline window
-    assert g.intent == {"account": account.address.lower(), "amount": 1000 * 10**6,
-                        "recipient": account.address.lower(), "nonce": 3, "deadline": now + 22 * 3600}
-    assert g.signer == account.address  # the digest signed is the gateway's rebuild
+    assert g.intent == {"account": account.address.lower(), "amount": 1000 * 10**6, "nonce": 3,
+                        "deadline": now + 22 * 3600}
+    assert g.signer == account.address  # the digest signed is the gateway's 4-member rebuild
+
+
+def test_withdraw_signs_the_four_member_intent_on_the_health_domain(
+        make_client, session, health, account, monkeypatch):
+    Chain(session)
+    g = gate(session, health, account)
+    session.routes[("GET", "/balance")] = [balance_body(account), g.view("accepted")]
+    seen = []
+    sign = LocalSigner.sign_typed_data
+    monkeypatch.setattr(LocalSigner, "sign_typed_data", lambda self, td: seen.append(copy.deepcopy(td)) or sign(self, td))
+    clock = Clock(time.time())
+    now = int(clock())
+    make_client(clock=clock).withdraw(1000)
+    (td,) = seen
+    w1 = fixture("format-vectors-v5.json")["withdraw"]["typed_data"]
+    assert td["primaryType"] == "WithdrawIntent" and td["types"] == w1["types"]
+    assert [m["name"] for m in td["types"]["WithdrawIntent"]] == ["account", "amount", "nonce", "deadline"]
+    assert td["domain"] == {"name": "CRX", "version": "rulebook-1.0", "chainId": CHAIN_ID,
+                            "verifyingContract": core_of(health)}
+    assert td["message"] == {"account": account.address.lower(), "amount": "1000000000", "nonce": "3",
+                             "deadline": str(now + 22 * 3600)}
 
 
 @pytest.mark.parametrize("amount,nonce", [("1000", "0"), ("0.000001", "3"), ("12345.678901", "18446744073709551615")])
@@ -233,14 +284,46 @@ def test_withdraw_signs_the_gateway_rebuild(make_client, session, health, accoun
     g = gate(session, health, account)
     session.routes[("GET", "/balance")] = [balance_body(account, nonce=nonce), g.view("accepted")]
     out = make_client(clock=Clock(time.time())).withdraw(amount)
-    assert g.signer == account.address and g.intent["amount"] == e7.scaled6(amount) and g.intent["nonce"] == int(nonce)
+    assert g.signer == account.address
+    assert g.intent["amount"] == int(Decimal(amount).scaleb(6)) and g.intent["nonce"] == int(nonce)
     assert out.nonce == int(nonce) and out.item == g.item
 
 
-def test_withdraw_item_vector():
-    seat = "0x7638646FcFf3E28E42Dc4a778ea7bbc236701230"
-    w = {"account": seat, "amount": 1_000_000_000, "recipient": seat, "nonce": 3, "deadline": 1_790_082_800}
-    assert e7.h0x(e7.withdraw_item(w)) == "0x46d62f771582cf423fca01063c182410c03b62dda1125c000036f8d515584b76"
+def test_withdraw_digest_and_item_match_vector_w1():
+    v = fixture("format-vectors-v5.json")
+    w1, taker = v["withdraw"], v["keys"]["taker"]
+    td, m = w1["typed_data"], w1["typed_data"]["message"]
+    assert m["account"] == taker["address"] and w1["signer"] == "taker"
+    w = {"account": m["account"], "amount": int(m["amount"]), "nonce": int(m["nonce"]), "deadline": int(m["deadline"])}
+    chain_id, core = td["domain"]["chainId"], td["domain"]["verifyingContract"]
+    sep = e7.domain_separator(chain_id, core)
+    assert e7.h0x(sep) == v["domain_separator"]
+    assert e7.h0x(e7.withdraw_digest(sep, w)) == w1["digest"] == e7.h0x(intent_digest(sep, w))
+    assert e7.typed_data("WithdrawIntent", chain_id, core, e7.withdraw_message(w)) == td
+    assert e7.h0x(Account.from_key(taker["private_key"]).sign_typed_data(full_message=td).signature) == w1["signature"]
+    assert e7.withdraw_item(w) == intent_item(w)
+    assert e7.withdraw_item(w) != intent_item(w, recipient=m["account"])
+
+
+def test_withdraw_posts_vector_w1(session, tmp_path):
+    # The client on W1's domain, key, nonce and deadline sends W1's signature and checks its item.
+    v = fixture("format-vectors-v5.json")
+    w1, taker = v["withdraw"], Account.from_key(v["keys"]["taker"]["private_key"])
+    m, core = w1["typed_data"]["message"], w1["typed_data"]["domain"]["verifyingContract"]
+    session.routes[("GET", "/health")] = {"status": "ok", "chains": [{
+        "key": "avax-fuji", "chain_id": CHAIN_ID, "core": core, "domain": v["domain_separator"]}]}
+    session.rpc["eth_getCode"] = lambda p: "0x6080" if p[0].lower() == core else "0x"
+    Chain(session)
+    g = Gate(session, taker, CHAIN_ID, core)
+    session.routes[("GET", "/balance")] = [balance_body(taker, nonce=m["nonce"]), g.view("accepted")]
+    c = crx.Client(key=v["keys"]["taker"]["private_key"], base_url=BASE, rpc_url=RPC, state_dir=tmp_path / "state",
+                   session=session)
+    clock = Clock(int(m["deadline"]) - 22 * 3600)
+    c._clock, c._sleep = clock, clock.sleep
+    out = c.withdraw(Decimal(m["amount"]).scaleb(-6))
+    body = next(x for x in session.calls if x["method"] == "POST")["body"]
+    assert body["sig"] == w1["signature"] and body["deadline"] == int(m["deadline"]) and body["nonce"] == m["nonce"]
+    assert out.item == g.item == e7.h0x(intent_item({**m, "account": taker.address}))
 
 
 @pytest.mark.parametrize("item,word", [(OWN, "accepted"), (OTHER, "pending"), (None, "pending")])
@@ -261,8 +344,8 @@ def test_withdraw_answer_without_item(make_client, session, health, account):
         make_client().withdraw(1000)
 
 
-@pytest.mark.parametrize("edit", [{"recipient": "0x" + "99" * 20}, {"amount": 2000 * 10**6}, {"nonce": 4},
-                                  {"deadline": 1}, {"account": "0x" + "99" * 20}])
+@pytest.mark.parametrize("edit", [{"amount": 2000 * 10**6}, {"nonce": 4}, {"deadline": 1},
+                                  {"account": "0x" + "99" * 20}])
 def test_withdraw_refuses_an_item_other_than_signed(make_client, session, health, account, edit):
     # The gateway queues a withdraw other than the one signed: its item differs.
     Chain(session)
@@ -271,6 +354,19 @@ def test_withdraw_refuses_an_item_other_than_signed(make_client, session, health
     with pytest.raises(crx.BadAnswer, match="other than the signed"):
         make_client().withdraw(1000)
     assert g.signer == account.address and polls(session, "/balance") == 1
+
+
+@pytest.mark.parametrize("recipient", [SEAT, "0x" + "99" * 20], ids=["seat", "other"])
+def test_withdraw_refuses_an_item_with_a_recipient_word(make_client, session, health, account, recipient):
+    # The item hashes account, amount, nonce, deadline. An item with a recipient word, even the
+    # seat's own, is another withdraw. test_withdraw_one_signed_post_sends_no_tx is the control.
+    Chain(session)
+    session.routes[("GET", "/balance")] = balance_body(account)
+    g = gate(session, health, account, recipient=recipient)
+    with pytest.raises(crx.BadAnswer, match="/withdraw queued an item other than the signed withdraw"):
+        make_client().withdraw(1000)
+    assert g.signer == account.address and polls(session, "/balance") == 1
+    assert session.paths("POST") == ["/withdraw"]
 
 
 @pytest.mark.parametrize("nonce", [None, "", "-1", "0x3"])
@@ -385,9 +481,61 @@ def test_trades_own_by_default(make_client, session):
     assert [e.seq for e in c.trades(market=True)] == [1, 2, 3, 4, 5, 6, 7, 8, 9]
 
 
+PAIRS = ("USD/BRL", "USD/MXN", "USD/PHP")
+DROP = object()  # removes the key
+
+
+def markets_with(markets, pair, **chain_row):
+    """/markets with ``pair``'s avax-fuji row updated by ``chain_row``; a value ``DROP`` removes the key."""
+    m = copy.deepcopy(markets)
+    row = next(r for r in m["markets"] if r["pair"] == pair)["chains"][0]
+    assert row["chain"] == "avax-fuji"
+    row.update(chain_row)
+    for k in [k for k, v in row.items() if v is DROP]:
+        del row[k]
+    return m
+
+
 def test_markets_parse(make_client):
     ms = {m.pair: m for m in make_client(key=False).markets()}
-    for live in ("USD/MXN", "USD/BRL", "USD/PHP"):
-        assert not ms[live].paused and ms[live].min_notional == Decimal(10000)
-    assert ms["USD/JPY"].paused
-    assert ms["USD/MXN"].next_open is not None
+    assert sorted(ms) == list(PAIRS)
+    for pair in PAIRS:
+        m = ms[pair]
+        assert not m.paused and m.min_notional == Decimal(10000) and m.max_notional == Decimal(10_000_000)
+        assert m.pair_id == "0x" + keccak(text=pair).hex() and (m.base, m.quote) == (pair[:3], pair[4:])
+        assert m.max_premium_bps == 200 and m.open is False and (m.min_tenor_s, m.max_tenor_s) == (600, 7_776_000)
+    assert ms["USD/MXN"].next_open == datetime.fromtimestamp(1_790_546_400, timezone.utc)
+
+
+def test_a_pair_markets_does_not_list_is_not_offered(make_client, session):
+    c = make_client(key=False)
+    assert c.market("USDMXN").pair == "USD/MXN"  # the control: a listed pair
+    with pytest.raises(crx.MarketPaused) as ei:
+        c.market("USD/JPY")
+    assert ei.value.code == "market_paused" and str(ei.value) == "USD/JPY is not offered on avax-fuji"
+    assert ei.value.details == {"pair": "USD/JPY"} and session.paths("POST") == []
+
+
+def test_a_pair_with_no_row_for_this_chain_is_paused(make_client, session, markets):
+    session.routes[("GET", "/markets")] = markets_with(markets, "USD/PHP", chain="base")
+    c = make_client(key=False)
+    assert {m.pair: m.paused for m in c.markets()} == {"USD/BRL": False, "USD/MXN": False, "USD/PHP": True}
+    with pytest.raises(crx.MarketPaused, match="USD/PHP is not offered on avax-fuji"):
+        c.market("USD/PHP")
+    assert session.paths("POST") == []
+
+
+@pytest.mark.parametrize("paused,read", [(True, True), (False, False), (DROP, False)], ids=["true", "false", "missing"])
+def test_markets_read_the_paused_key(make_client, session, markets, paused, read):
+    session.routes[("GET", "/markets")] = markets_with(markets, "USD/BRL", paused=paused)
+    c = make_client(key=False)
+    assert {m.pair: m.paused for m in c.markets()} == {"USD/BRL": read, "USD/MXN": False, "USD/PHP": False}
+    assert c.market("USD/BRL").paused is read
+
+
+@pytest.mark.parametrize("cap,read", [(200, 200), (0, 0), (None, None), (DROP, None)], ids=["200", "0", "null", "missing"])
+def test_markets_read_the_premium_cap(make_client, session, markets, cap, read):
+    session.routes[("GET", "/markets")] = markets_with(markets, "USD/MXN", max_premium_bps=cap)
+    ms = {m.pair: m for m in make_client(key=False).markets()}
+    assert ms["USD/MXN"].max_premium_bps == read
+    assert ms["USD/BRL"].max_premium_bps == ms["USD/PHP"].max_premium_bps == 200

@@ -16,10 +16,13 @@ EMPTY_BODY = "Body: 0x" + keccak(b"").hex()
 
 
 def signed(call):
-    """(custody, signer) from the headers, after the signature recovers to the signer over those lines."""
+    """(custody, signer, message) from the headers, after the signature recovers to the signer over those
+    lines. No ``x-crx-signer`` header: the signer is the custody."""
     h = call["headers"]
-    custody, signer = h["x-crx-address"], h["x-crx-signer"]
-    msg = rest_message(call["method"], call["path"], custody, signer, int(h["x-crx-ts"]), h["x-crx-nonce"], call["raw"])
+    custody = h["x-crx-address"]
+    signer = h.get("x-crx-signer", custody)
+    assert "x-crx-nonce" not in h
+    msg = rest_message(call["method"], call["path"], custody, signer, int(h["x-crx-ts"]), call["raw"])
     assert Account.recover_message(encode_defunct(text=msg), signature=h["x-crx-sig"]).lower() == signer
     return custody, signer, msg
 
@@ -37,7 +40,7 @@ def test_default_signs_as_own_seat(make_client, session, account):
     me = account.address.lower()
     assert c.account == me
     for call in session.calls:
-        assert sorted(call["headers"]) == ["accept", "x-crx-address", "x-crx-nonce", "x-crx-sig", "x-crx-signer", "x-crx-ts"]
+        assert sorted(call["headers"]) == ["accept", "x-crx-address", "x-crx-sig", "x-crx-ts"]
         assert signed(call)[:2] == (me, me)
 
 
@@ -49,7 +52,11 @@ def test_account_signs_custody_owner_signer_key(make_client, session, account):
     c.positions(), c.trades()
     assert c.account == b.account == owner.address.lower() and c.address == account.address.lower()
     assert b.free == Decimal("900")
+    assert len(session.calls) == 3
     for call in session.calls:
+        h = call["headers"]
+        assert sorted(h) == ["accept", "x-crx-address", "x-crx-sig", "x-crx-signer", "x-crx-ts"]
+        assert (h["x-crx-address"], h["x-crx-signer"]) == (owner.address.lower(), account.address.lower())
         custody, signer, msg = signed(call)
         assert (custody, signer) == (owner.address.lower(), account.address.lower())
         assert f"Custody: {custody}" in msg.splitlines() and f"Signer: {signer}" in msg.splitlines()
