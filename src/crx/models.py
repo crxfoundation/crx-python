@@ -50,7 +50,11 @@ class Market:
 
 @dataclass(frozen=True)
 class Quote:
-    """A firm maker quote on your open RFQ. Pass it to ``Client.trade``."""
+    """A firm maker quote on your open RFQ. Pass it to ``Client.trade`` before ``closes_at``.
+
+    ``expires_at`` is the quote end: the RFQ's quote end. ``closes_at`` is the RFQ's end, 120 s
+    after the request: the gateway takes no accept after it. None when the gateway did not serve it.
+    """
 
     rfq_id: str
     quote_id: str
@@ -63,6 +67,7 @@ class Quote:
     raw: dict = field(repr=False, compare=False)
     rfq: dict = field(repr=False, compare=False)
     expiry_ms: int = field(repr=False, default=0)
+    closes_at: datetime | None = None
 
 
 @dataclass(frozen=True)

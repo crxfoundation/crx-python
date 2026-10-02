@@ -244,9 +244,11 @@ class Binder:
 
     # ---------- the accept ----------
 
-    def until(self, expires_at_ms: Any) -> float:
-        """The last instant to post an accept: the quote's expires_at, 120 s from now at most."""
-        return min(self.now() + 120, (expires_at_ms if isinstance(expires_at_ms, int) else 10**13) / 1000)
+    def until(self, closes_at_ms: Any) -> float:
+        """The last instant to post an accept: the RFQ's ``closes_at``, 120 s from now at most.
+        The quote's ``expires_at`` is its quote end, not the accept deadline."""
+        closes = closes_at_ms if isinstance(closes_at_ms, int) and not isinstance(closes_at_ms, bool) else 10**13
+        return min(self.now() + 120, closes / 1000)
 
     def post_accept(self, rfq_id: str, body: dict, until: float) -> Any:
         """POST /accept. 409 rejected can be a busy maker: post the same body again every 3 s until ``until``."""
@@ -258,7 +260,7 @@ class Binder:
             return r
 
     def accept_trade(
-        self, rfq_id: str, quote_id: str, ask: dict, t: dict | None, expires_at_ms: Any,
+        self, rfq_id: str, quote_id: str, ask: dict, t: dict | None, closes_at_ms: Any,
     ) -> tuple[dict, dict, float]:
         """Accept in one call: check the trade template, sign this seat's own ``Trade``, post ``{quote_id, sig}``.
 
@@ -266,7 +268,7 @@ class Binder:
         for it: 409 trade_stale carries it. A template whose ownNonce is not above this
         seat's last signed one is asked for again, while a signed post still fits.
         409 trade_stale on a signed post carries a fresh template: it is checked and signed
-        in turn. At most MAX_POSTS bodies, while the quote lives.
+        in turn. At most MAX_POSTS bodies, before the RFQ's ``closes_at_ms``.
 
         Returns (the 200 answer, the template signed, the answer time). When the gateway
         does not answer a signed post, the answer is ``{}``: the gateway may hold the
@@ -274,7 +276,7 @@ class Binder:
         raises as is. After it, the trade can still open, so any failure other than a
         NOTHING_SENT refusal raises TradeUnknown.
         """
-        until = self.until(expires_at_ms)
+        until = self.until(closes_at_ms)
         posts, signed = 0, None
         try:
             ask_for = t is None

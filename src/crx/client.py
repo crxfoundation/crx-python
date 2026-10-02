@@ -499,6 +499,7 @@ class Client:
 
         One call: the gateway answers after the 10 s window with the winner.
         An older gateway answers at once: then the SDK polls for ``wait`` s.
+        ``trade()`` takes the quote until ``Quote.closes_at``, 120 s after the request.
 
         A closed market still takes the RFQ: the gateway decides. Its refusal
         raises the matching error; no quote raises ``NoQuotes``. An RFQ the gateway
@@ -537,8 +538,10 @@ class Client:
         self, pair: str, side: str, notional: Any, expiry: datetime | timedelta | int | None, premium_bps: int,
         client_rfq_id: str | None, wait: bool,
     ) -> tuple[dict, dict]:
-        """Check the terms and POST /rfqs. ``wait``: the gateway answers after the 10 s window,
-        with the winner; else at once. Returns (the RFQ's terms, the gateway's answer)."""
+        """Check the terms and POST /rfqs. ``wait``: no ``wait`` is sent, and the gateway answers after
+        the 10 s window, with the winner. Else ``wait: false`` is sent, and it answers at once.
+        Returns (the RFQ's terms, the gateway's answer). ``closes_at`` (unix ms) is the RFQ's end:
+        no accept after it."""
         self._need_seat()
         if client_rfq_id is not None and not _client_id(client_rfq_id):
             raise BadRequest("client_rfq_id must be 1 to 128 printable characters",
@@ -570,19 +573,22 @@ class Client:
             raise BadRequest("premium_bps is an integer from -10000 to 10000")
         req = {
             "chain": self.chain_key, "pair": compact, "side": side, "notional": _plain(amount),
-            "expiry": expiry_ms, "client_rfq_id": client_rfq_id or f"sdk-{uuid.uuid4().hex[:12]}", "wait": wait,
+            "expiry": expiry_ms, "client_rfq_id": client_rfq_id or f"sdk-{uuid.uuid4().hex[:12]}",
         }
         if premium_bps:
             req["premium_bps"] = premium_bps
+        if not wait:
+            req["wait"] = False  # the gateway answers at once; with no `wait` it answers after the window
         r = self._gw.request("POST", "/rfqs", body=req,
                              timeout=max(self._gw._timeout, OPEN_TIMEOUT) if wait else None)
         rfq_id, leg_id, qe_max = _word(r.get("rfq_id")), _word(r.get("leg_id")), r.get("quote_expiry_max")
         if rfq_id is None or leg_id is None or type(qe_max) is not int:
             raise BadAnswer("/rfqs sent an answer this SDK cannot read")
+        closes_at = r.get("closes_at") if type(r.get("closes_at")) is int else None
         log.info("rfq %s opened: %s %s %s", rfq_id, slash, side, _plain(amount))
         rfq = {"rfq_id": rfq_id, "leg_id": leg_id, "quote_expiry_max": qe_max, "pair": slash, "side": side,
                "notional": _plain(amount), "expiry": expiry_ms, "premium_bps": premium_bps,
-               "max_premium_bps": m.max_premium_bps}
+               "max_premium_bps": m.max_premium_bps, "closes_at": closes_at}
         return rfq, r
 
     def _winner(self, rfq: dict, wait: float) -> Quote:
@@ -592,12 +598,13 @@ class Client:
     @staticmethod
     def _quote_of(rfq: dict, q: dict) -> Quote:
         """A quote row on the RFQ ``rfq`` as a ``Quote``: the rate and expires_at from the row, the terms
-        from the RFQ's own ask."""
+        and ``closes_at`` from the RFQ's own ask."""
         try:
             return Quote(
                 rfq_id=rfq["rfq_id"], quote_id=str(q["quote_id"]), pair=rfq["pair"], side=rfq["side"],
                 notional=Decimal(rfq["notional"]), rate=Decimal(str(q["rate"])), expiry=ms_to_dt(rfq["expiry"]),
                 expires_at=ms_to_dt(q.get("expires_at")), raw=q, rfq=rfq, expiry_ms=rfq["expiry"],
+                closes_at=ms_to_dt(rfq.get("closes_at")),
             )
         except (KeyError, TypeError, ValueError, ArithmeticError):
             raise BadAnswer("the quote row cannot be read") from None
@@ -702,7 +709,7 @@ class Client:
                     notional=quote.notional, rate=quote.rate)
         template = quote.raw.get("trade_template")
         r, t, _ = b.accept_trade(rfq_id, quote.quote_id, ask, template if isinstance(template, dict) else None,
-                                 quote.raw.get("expires_at"))
+                                 rfq.get("closes_at"))
         log.info("rfq %s @ %s: trade signed and posted with the accept, nonce %s", rfq_id, quote.rate,
                  clean(t["typed_data"]["message"]["ownNonce"]))
         status, view = self._settle(lambda: self._gw.request("GET", f"/rfqs/{rfq_id}"), "trade_status")

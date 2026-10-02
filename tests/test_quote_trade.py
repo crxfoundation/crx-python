@@ -94,14 +94,14 @@ class Venue:
         self.qe = now + self.qe_ahead
         self.leg = e7.leg_id_for(HEAD, self.qe + self.tail_delta)
         opened = {"rfq_id": RFQ, "leg_id": self.leg, "side": 1 if b["side"] == "buy" else -1, "expiry": b["expiry"],
-                  "closes_at": now * 1000 + 10_000, "quote_expiry_max": self.qe, "status": "open", "kind": "open",
+                  "closes_at": now * 1000 + 120_000, "quote_expiry_max": self.qe, "status": "open", "kind": "open",
                   "client_rfq_id": b["client_rfq_id"]}
         for k, v in self.open_edit.items():
             if v is None:
                 opened.pop(k, None)
             else:
                 opened[k] = v
-        if not (self.waited and b.get("wait")):
+        if not (self.waited and b.get("wait", True)):  # no `wait`: the gateway answers after the window
             return opened
         v = self.view(req) if self.waited_view is None else self.waited_view()
         return {**opened, **v}
@@ -219,7 +219,7 @@ def test_quote_then_trade_signs_one_trade(make_client, venue, session, clock, ac
         RFQ, QID, Decimal("18.700000"), "buy", "USD/MXN", Decimal("25000"))
     assert q.raw["trade_template"] == venue.draft
     b = venue.rfq_body
-    assert (b["pair"], b["notional"], b["chain"], b["wait"]) == ("USDMXN", "25000", "avax-fuji", True)
+    assert (b["pair"], b["notional"], b["chain"], "wait" in b) == ("USDMXN", "25000", "avax-fuji", False)
     assert accepts(session) == [] and trade_polls(session) == []  # quote() never accepts; the answer named the winner
 
     t = c.trade(q)
@@ -349,6 +349,32 @@ def test_trade_no_status_is_pending(make_client, venue, session, clock, view):
 
 
 # ---------- the accept: retries, stale templates, refusals ----------
+
+
+def test_the_accept_deadline_is_the_rfqs_closes_at_not_the_quote_end(make_client, venue, session, clock):
+    # closes_at: 20 s after the open. The quote end (expires_at) is 570 s out: it never sets the deadline.
+    venue.open_edit = {"closes_at": int(clock() * 1000) + 20_000}
+    venue.row_edit = {"expires_at": int(clock() * 1000) + 570_000}
+    posted = []
+
+    def rejected(req):
+        posted.append(clock())
+        return 409, {"code": "rejected", "error": "rejected"}
+    session.routes[("POST", f"/rfqs/{RFQ}/accept")] = rejected
+    c = make_client(clock=clock)
+    q = c.quote("USD/MXN", "buy", 25_000)
+    closes = venue.open_edit["closes_at"] / 1000
+    assert q.closes_at == datetime.fromtimestamp(closes, timezone.utc) and q.expires_at > q.closes_at
+    with pytest.raises(crx.QuoteExpired):
+        c.trade(q)
+    assert len(posted) > 1 and max(posted) < closes and max(posted) + 3 >= closes
+
+
+def test_quote_closes_at_is_none_when_the_open_answer_has_none(make_client, venue, session, clock):
+    venue.open_edit = {"closes_at": None}
+    c = make_client(clock=clock)
+    q = c.quote("USD/MXN", "buy", 25_000)
+    assert q.closes_at is None and c.trade(q).status == "open"
 
 
 def test_rejected_accept_retries_then_quote_expired(make_client, venue, session, clock):
@@ -874,7 +900,7 @@ def test_premium_out_of_range_is_refused_before_any_post(make_client, session, m
 def test_premium_is_sent_only_when_not_zero(make_client, venue, session, clock, premium):
     make_client(clock=clock).quote("USD/MXN", "buy", 25_000, premium_bps=premium)
     [post] = rfq_posts(session)
-    keys = {"chain", "pair", "side", "notional", "expiry", "client_rfq_id", "wait"}
+    keys = {"chain", "pair", "side", "notional", "expiry", "client_rfq_id"}
     assert set(post["body"]) == (keys | {"premium_bps"} if premium else keys)
     assert post["body"].get("premium_bps") == (premium or None)
 
@@ -1060,10 +1086,11 @@ def test_closed_market_no_maker_is_no_quotes(make_client, venue, session, market
         c.quote("USD/MXN", "buy", 25_000, wait=3)
 
 
-def test_quote_sends_wait_with_a_30_s_timeout(make_client, venue, session, clock):
+def test_quote_sends_no_wait_and_takes_a_30_s_timeout(make_client, venue, session, clock):
+    # The gateway answers after the window when the body has no `wait`.
     make_client(clock=clock).quote("USD/MXN", "buy", 25_000)
     [post] = rfq_posts(session)
-    assert post["body"]["wait"] is True and post["timeout"] == 30
+    assert "wait" not in post["body"] and post["timeout"] == 30
     assert {x["timeout"] for x in session.calls if x is not post} == {10}
 
 
@@ -1221,20 +1248,20 @@ def test_answer_at_once_polls(make_client, venue, session, clock):
 # ---------- ask() ----------
 
 OPEN_BODY = (b'{"chain":"avax-fuji","pair":"USDMXN","side":"buy","notional":"25000","expiry":1900000000000,'
-             b'"client_rfq_id":"desk-1","wait":%s}')
+             b'"client_rfq_id":"desk-1"%s}')
 
 
 def test_quote_wire_body(make_client, venue, session, clock):
     make_client(clock=clock).quote("USD/MXN", "buy", 25_000, expiry=EXPIRY_MS, client_rfq_id="desk-1")
     [post] = rfq_posts(session)
-    assert post["raw"] == OPEN_BODY % b"true" and post["timeout"] == 30
+    assert post["raw"] == OPEN_BODY % b"" and post["timeout"] == 30
 
 
 def test_ask_sends_wait_false_and_returns_at_once(make_client, venue, session, clock):
     start = clock()
     a = make_client(clock=clock).ask("USD/MXN", "buy", 25_000, expiry=EXPIRY_MS, client_rfq_id="desk-1")
     [post] = rfq_posts(session)
-    assert post["raw"] == OPEN_BODY % b"false" and post["timeout"] == 10
+    assert post["raw"] == OPEN_BODY % b',"wait":false' and post["timeout"] == 10
     assert trade_polls(session) == [] and clock() == start
     assert isinstance(a, crx.Ask)
     assert (a.rfq_id, a.pair, a.side, a.notional) == (RFQ, "USD/MXN", "buy", Decimal("25000"))

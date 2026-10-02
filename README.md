@@ -87,7 +87,9 @@ print(w.status)  # accepted
 | `remove_viewer(addr)` | Takes that access back. |
 | `viewers()` | Wallets that can read your seat. |
 
-`quote()` also takes `expiry=` (datetime, timedelta or unix ms), `premium_bps=` (the upfront premium, default 0; `trade()` signs only when it is within the market's `max_premium_bps`) and `wait=` (seconds to poll an older gateway that answers at once).
+`quote()` also takes `expiry=` (datetime, timedelta or unix ms) and `premium_bps=` (the upfront premium, default 0; `trade()` signs only when it is within the market's `max_premium_bps`).
+
+Accept within 120 s of your request: `trade()` posts the accept before `Quote.closes_at`. `Quote.expires_at` is the quote end.
 
 `markets()`: a chain row with no `paused` reads as not paused.
 
