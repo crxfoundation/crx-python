@@ -416,10 +416,10 @@ def test_trade_stale_signs_the_fresh_template(make_client, venue, session, clock
 
 @pytest.mark.parametrize("late,posts", [(False, 3), (True, 1)])
 def test_trade_stale_three_posts_at_most(make_client, venue, session, clock, late, posts):
-    # Stale on every post: 3 signed posts, then a new quote. Past the quote's life: no second post.
+    # Stale on every post: 3 signed posts, then a new quote. Past the RFQ's closes_at: no second post.
     venue.stale = 99
     if late:
-        venue.on_stale = lambda: clock.sleep(61)  # the quote row lives 60 s
+        venue.on_stale = lambda: clock.sleep(121)  # the RFQ closes 120 s after the open
     c = make_client(clock=clock)
     q = c.quote("USD/MXN", "buy", 25_000)
     with pytest.raises(crx.QuoteExpired) as ei:
