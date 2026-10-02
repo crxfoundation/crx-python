@@ -10,6 +10,12 @@ pip install git+https://github.com/crxfoundation/crx-python
 
 Python 3.10 or newer.
 
+Version 0.5.0 and older cannot trade on the current gateway. Upgrade:
+
+```bash
+pip install -U git+https://github.com/crxfoundation/crx-python
+```
+
 ## Key
 
 ```bash
@@ -76,7 +82,7 @@ print(w.status)  # accepted
 | `withdraw(amount)` | Signs a withdraw to your own wallet and sends it in one request. CRX sends the tx and pays gas. `status`: `sending`, `accepted`, `pending`, `paid`, `partial`, `refused` or `returned`. In your wallet within about 2 hours. |
 | `balance()` | Collateral, free, margin, withdraw state. |
 | `positions()` | Open positions. |
-| `trades()` | Your event tape. `market=True` adds every open RFQ a maker seat receives (no owner named). |
+| `trades()` | Your event tape: `trade.opened`, `trade.refused`, `trade.settled`, `trade.closed`, `trade.closed_out`, `trade.novated`, `margin.called`, `margin.cured`, and your RFQ events. `market=True` adds every open RFQ a maker seat receives (no owner named). |
 | `add_viewer(addr)` | Lets another wallet read your seat. Up to 5. |
 | `remove_viewer(addr)` | Takes that access back. |
 | `viewers()` | Wallets that can read your seat. |
@@ -102,12 +108,12 @@ Other desks ask on Testnet too, so the script quotes its own test taker's RFQ on
 | Call | Does |
 |---|---|
 | `rfqs()` | Streams the open RFQs you can quote. A seat with no collateral receives none. `only=` (an `Ask`, or an RFQ id) yields that RFQ alone. |
-| `rfq(rfq_id)` | One RFQ as your seat reads it. Its taker also reads every desk's quote. |
+| `rfq(rfq_id)` | One RFQ as your seat reads it. Its taker reads the winning quote only. A maker reads its own quotes only. |
 | `send_quote(rfq, rate)` | Signs and posts a binding quote. The gateway takes quotes for the first 10 s of an RFQ only. The taker gets the best quote only. Any maker quote outranks the CRX desk's quote. |
 | `confirm(quote)` | Waits for the accept. You sign nothing more. CRX sends the tx and pays gas. `status`: `open`, `sending`, `pending` or `refused`. |
 | `drop_quote(quote)` | Ends your binding quote at once. |
 
-Your quote is a signed `Quote`: your trade signature until the RFQ's `quote_expiry_max`, or until you drop it. You sign nothing after the accept. A later quote on the same RFQ replaces the earlier one.
+Your quote is a signed `Quote`: your trade signature until the RFQ's `quote_expiry_max`, or until you drop it. Its leg id ends in that second. You sign nothing after the accept. A later quote on the same RFQ replaces the earlier one.
 
 ## Custodian signer
 

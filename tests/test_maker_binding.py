@@ -65,6 +65,14 @@ def test_a_held_leg_that_ends_past_the_rfqs_quote_expiry_max_is_refused(maker, g
     assert len(posts(session)) == 1
 
 
+def test_a_held_leg_that_ends_before_the_rfqs_quote_expiry_max_is_refused(maker, gw, session):
+    # The guest and the gateway take a maker leg only when its tail is the RFQ's quote_expiry_max.
+    maker.send_quote(rfq_obj(), "5.41")
+    with pytest.raises(crx.RefusedToSign, match="the leg id's quote end is not the RFQ's quote_expiry_max"):
+        maker.send_quote(rfq_obj(quote_expiry_max=QE_MAX + 10), "5.41")
+    assert len(posts(session)) == 1
+
+
 def test_leg_id_taken_is_typed_and_the_next_quote_takes_a_new_leg(maker, gw):
     gw.answer = refusal("leg_id_taken")
     with pytest.raises(crx.LegIdTaken) as e:

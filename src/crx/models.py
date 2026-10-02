@@ -191,7 +191,7 @@ class Rfq:
     settlement instant. ``closes_at`` is the end of the quote window: no accept after it.
     ``quote_expiry_max`` is the latest quote end the gateway takes: a quote binds until it.
     ``client_rfq_id`` is served to the RFQ's own taker only. ``quotes`` holds the quote
-    rows ``Client.rfq()`` reads: every desk's quote for the RFQ's taker, the seat's own
+    rows ``Client.rfq()`` reads: the winning quote only for the RFQ's taker, the seat's own
     quotes for a maker. ``seq`` is the tape position of an ``rfq.opened`` frame.
     """
 

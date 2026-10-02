@@ -17,8 +17,8 @@ REVERTS = {
     keccak(text=n + "()")[:4]: n
     for n in (
         "NotWhitelisted DepositsClosed ZeroAmount DepositBelowMinimum NotAdmin SeatNotSeeded AmountOverflow "
-        "PayeeNotSeat NotFunded DuplicateArm DeadlinePassed DeadlineTooFar BadSignature StopDepositsUndrained "
-        "HardPaused BadTerms BadArmKind EnvelopeTooLong WrapsUnbound"
+        "NotFunded DuplicateArm DeadlinePassed DeadlineTooFar BadSignature StopDepositsUndrained "
+        "HardPaused BadTerms BadArmKind EnvelopeTooLong"
     ).split()
 }
 

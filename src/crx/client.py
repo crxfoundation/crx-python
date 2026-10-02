@@ -376,9 +376,8 @@ class Client:
             pair = m["pair"]
             slash = e7.pair_text_ok(pair)
             out.append(Market(
-                pair=pair, pair_id=e7.h0x(e7.pair_id(pair)) if slash else str(m.get("pair_id") or ""),
-                base=pair[:3] if slash else str(m.get("base") or ""),
-                quote=pair[4:] if slash else str(m.get("quote") or ""), open=session.get("open") is True,
+                pair=pair, pair_id=e7.h0x(e7.pair_id(pair)) if slash else "",
+                base=pair[:3] if slash else "", quote=pair[4:] if slash else "", open=session.get("open") is True,
                 paused=not on or any(c.get("paused") is True for c in on), max_premium_bps=cap,
                 min_notional=dec(notional.get("min")), max_notional=dec(notional.get("max")),
                 next_open=ms_to_dt(nb.get("at")) if nb.get("kind") == "open" else None,
@@ -433,7 +432,10 @@ class Client:
         ]
 
     def trades(self, since: int = 0, *, market: bool = False) -> list[Event]:
-        """Your own event tape, oldest first: trade.opened, trade.settled, and the rest.
+        """Your own event tape, oldest first. Trade events: ``trade.opened``, ``trade.refused``,
+        ``trade.settled``, ``trade.closed``, ``trade.closed_out`` and ``trade.novated``. Margin events:
+        ``margin.called`` and ``margin.cured``. ``rfq.accepted`` names ``rfq_id``, ``quote_id`` and
+        ``client_quote_id`` only.
 
         ``since`` is a seq: pass the last ``Event.seq`` to read only newer events.
         A maker seat also receives every open RFQ on the venue (``rfq.opened``, no
@@ -859,8 +861,8 @@ class Client:
         return _maker.stream(self, since, wait, poll, stop, only)
 
     def rfq(self, rfq_id: str) -> Rfq:
-        """One RFQ as your seat reads it. As its taker, ``quotes`` holds every desk's
-        quote and ``client_rfq_id`` is yours. As a maker, ``quotes`` holds your own quotes only."""
+        """One RFQ as your seat reads it. As its taker, ``quotes`` holds the winning quote only
+        and ``client_rfq_id`` is yours. As a maker, ``quotes`` holds your own quotes only."""
         self._need_seat()
         return _maker.read(self, rfq_id)
 

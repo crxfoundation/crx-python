@@ -258,9 +258,9 @@ def send(c: "Client", r: Any, rate: Any, client_quote_id: str | None) -> MakerQu
     salt and the RFQ's ``taker_ref``. Nothing is signed after the accept.
 
     The leg id is this seat's own: 24 random bytes, then the quote end, the RFQ's
-    ``quote_expiry_max``. A later quote on the same RFQ keeps it, so one leg fills at most
-    once. The Quote nonce is the u64 of leg id bytes 16 to 23. The salt goes to the gateway
-    only and is not kept.
+    ``quote_expiry_max``. A leg id that ends in another second is refused before a signature
+    exists. A later quote on the same RFQ keeps it, so one leg fills at most once. The Quote
+    nonce is the u64 of leg id bytes 16 to 23. The salt goes to the gateway only and is not kept.
     """
     if not isinstance(r, Rfq):
         raise BadRequest("send_quote() takes an Rfq from rfqs() or rfq()")
@@ -290,6 +290,8 @@ def send(c: "Client", r: Any, rate: Any, client_quote_id: str | None) -> MakerQu
     if end > now + QUOTE_WINDOW or end > qe_max:
         raise RefusedToSign("refused to sign: the quote end is past the RFQ's quote_expiry_max, or more than "
                             f"{QUOTE_WINDOW} s ahead")
+    if end != qe_max:
+        raise RefusedToSign("refused to sign: the leg id's quote end is not the RFQ's quote_expiry_max")
     nonce = e7.maker_nonce(leg_id) if e7.DERIVE_MAKER_NONCE else nonce_for(c.address, cqid)
     salt = e7.h0x(secrets.token_bytes(32))
     half = dict(terms, leg_id=leg_id, nonce=str(nonce), quote_expiry=end)
