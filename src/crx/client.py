@@ -355,10 +355,12 @@ class Client:
     def markets(self) -> list[Market]:
         """Every pair: session open, paused, notional limits, the premium cap.
 
-        A pair is paused on this chain when /markets lists no row for the chain, or the row
-        reads ``paused: true``. A row with no ``paused`` reads as not paused.
+        The request names this client's chain (``?chain=``). A row with ``chains`` is paused on this
+        chain when it lists no entry for the chain, or the entry reads ``paused: true``; an entry with
+        no ``paused`` reads as not paused, and the cap is the entry's. A row with no ``chains`` is this
+        chain's: offered, the cap is the row's ``max_premium_bps``.
         """
-        body = self._gw.request("GET", "/markets", auth=False)
+        body = self._gw.request("GET", "/markets", query={"chain": self.chain_key}, auth=False)
         rows = body.get("markets")
         if not isinstance(rows, list):
             raise BadAnswer("/markets lists no markets")
@@ -366,19 +368,25 @@ class Client:
         for m in rows:
             if not isinstance(m, dict) or not isinstance(m.get("pair"), str):
                 continue
-            on = [c for c in m.get("chains") or [] if isinstance(c, dict) and c.get("chain") == self.chain_key]
+            if "chains" in m:
+                on = [c for c in m.get("chains") or [] if isinstance(c, dict) and c.get("chain") == self.chain_key]
+                caps = [c.get("max_premium_bps") for c in on]
+                cap = min(caps) if caps and all(type(v) is int and v >= 0 for v in caps) else None
+                paused = not on or any(c.get("paused") is True for c in on)
+            else:
+                v = m.get("max_premium_bps")
+                cap = v if type(v) is int and v >= 0 else None
+                paused = False
             session = m.get("session") if isinstance(m.get("session"), dict) else {}
             nb = session.get("next_boundary") if isinstance(session.get("next_boundary"), dict) else {}
             notional = m.get("notional") if isinstance(m.get("notional"), dict) else {}
             tenor = m.get("tenor") if isinstance(m.get("tenor"), dict) else {}
-            caps = [c.get("max_premium_bps") for c in on]
-            cap = min(caps) if caps and all(type(v) is int and v >= 0 for v in caps) else None
             pair = m["pair"]
             slash = e7.pair_text_ok(pair)
             out.append(Market(
                 pair=pair, pair_id=e7.h0x(e7.pair_id(pair)) if slash else "",
                 base=pair[:3] if slash else "", quote=pair[4:] if slash else "", open=session.get("open") is True,
-                paused=not on or any(c.get("paused") is True for c in on), max_premium_bps=cap,
+                paused=paused, max_premium_bps=cap,
                 min_notional=dec(notional.get("min")), max_notional=dec(notional.get("max")),
                 next_open=ms_to_dt(nb.get("at")) if nb.get("kind") == "open" else None,
                 min_tenor_s=tenor.get("min_secs"), max_tenor_s=tenor.get("max_secs"), raw=m,
@@ -386,12 +394,12 @@ class Client:
         return out
 
     def market(self, pair: str) -> Market:
-        """One pair. A pair /markets does not offer on this chain raises ``MarketPaused``."""
+        """One pair. A pair /markets does not offer on this chain raises ``MarketPaused``: no row, or a
+        row with ``chains`` and no entry for this chain."""
         slash, _ = _pair(pair)
         m = next((m for m in self.markets() if m.pair == slash), None)
-        chains = m.raw.get("chains") if m is not None else None
-        if not isinstance(chains, list) or not any(
-                isinstance(c, dict) and c.get("chain") == self.chain_key for c in chains):
+        if m is None or ("chains" in m.raw and not any(
+                isinstance(c, dict) and c.get("chain") == self.chain_key for c in m.raw.get("chains") or [])):
             raise MarketPaused(f"{slash} is not offered on {self.chain_key}", details={"pair": slash})
         return m
 

@@ -539,3 +539,74 @@ def test_markets_read_the_premium_cap(make_client, session, markets, cap, read):
     ms = {m.pair: m for m in make_client(key=False).markets()}
     assert ms["USD/MXN"].max_premium_bps == read
     assert ms["USD/BRL"].max_premium_bps == ms["USD/PHP"].max_premium_bps == 200
+
+
+def one_chain(markets, **row_edit):
+    """/markets in the one-chain shape: no ``chains``, ``as_of``, ``session.venue`` or ``session.label``;
+    each row carries its chain entry's ``max_premium_bps``. ``row_edit`` maps a pair to the keys to set on
+    its row (a value ``DROP`` removes the key; a pair mapped to ``DROP`` removes the row)."""
+    m = copy.deepcopy(markets)
+    m.pop("as_of", None)
+    for row in m["markets"]:
+        row["max_premium_bps"] = row.pop("chains")[0]["max_premium_bps"]
+        row["session"].pop("venue", None)
+        row["session"].pop("label", None)
+    for pair, edit in row_edit.items():
+        row = next(r for r in m["markets"] if r["pair"] == pair.replace("_", "/"))
+        if edit is DROP:
+            m["markets"].remove(row)
+            continue
+        row.update(edit)
+        for k in [k for k, v in row.items() if v is DROP]:
+            del row[k]
+    return m
+
+
+def test_markets_ask_for_this_chain(make_client, session):
+    make_client(key=False).markets()
+    call = next(c for c in session.calls if c["path"] == "/markets")
+    assert call["query"] == {"chain": ["avax-fuji"]}
+
+
+def test_a_one_chain_row_is_offered_with_the_row_cap(make_client, session, markets):
+    session.routes[("GET", "/markets")] = one_chain(markets)
+    c = make_client(key=False)
+    ms = {m.pair: m for m in c.markets()}
+    assert sorted(ms) == list(PAIRS)
+    for pair in PAIRS:
+        m = ms[pair]
+        assert m.paused is False and m.max_premium_bps == 200 and m.open is False
+        assert m.min_notional == Decimal(10000) and m.max_notional == Decimal(10_000_000)
+        assert (m.min_tenor_s, m.max_tenor_s) == (600, 7_776_000)
+    assert ms["USD/MXN"].next_open == datetime.fromtimestamp(1_790_546_400, timezone.utc)
+    assert c.market("USDMXN").pair == "USD/MXN" and c.market("USD/BRL").paused is False
+
+
+@pytest.mark.parametrize("cap,read", [(150, 150), (0, 0), (None, None), (DROP, None), (-1, None), ("200", None),
+                                      (True, None)], ids=["150", "0", "null", "missing", "negative", "text", "bool"])
+def test_a_one_chain_row_reads_its_premium_cap(make_client, session, markets, cap, read):
+    session.routes[("GET", "/markets")] = one_chain(markets, USD_MXN={"max_premium_bps": cap})
+    ms = {m.pair: m for m in make_client(key=False).markets()}
+    assert ms["USD/MXN"].max_premium_bps == read and ms["USD/MXN"].paused is False
+    assert ms["USD/BRL"].max_premium_bps == ms["USD/PHP"].max_premium_bps == 200
+
+
+def test_a_pair_the_one_chain_reply_omits_is_not_offered(make_client, session, markets):
+    session.routes[("GET", "/markets")] = one_chain(markets, USD_PHP=DROP)
+    c = make_client(key=False)
+    assert {m.pair: m.paused for m in c.markets()} == {"USD/BRL": False, "USD/MXN": False}
+    assert c.market("USD/BRL").pair == "USD/BRL"  # the control: a listed pair
+    with pytest.raises(crx.MarketPaused, match="USD/PHP is not offered on avax-fuji") as ei:
+        c.market("USD/PHP")
+    assert ei.value.details == {"pair": "USD/PHP"} and session.paths("POST") == []
+
+
+@pytest.mark.parametrize("chains", [[], None], ids=["empty", "null"])
+def test_a_row_with_an_empty_chains_key_stays_paused(make_client, session, markets, chains):
+    m = copy.deepcopy(markets)
+    next(r for r in m["markets"] if r["pair"] == "USD/PHP")["chains"] = chains
+    session.routes[("GET", "/markets")] = m
+    c = make_client(key=False)
+    assert {x.pair: x.paused for x in c.markets()} == {"USD/BRL": False, "USD/MXN": False, "USD/PHP": True}
+    with pytest.raises(crx.MarketPaused):
+        c.market("USD/PHP")

@@ -29,9 +29,11 @@ def side_word(side: Any) -> str | None:
 
 @dataclass(frozen=True)
 class Market:
-    """One pair on this client's chain. ``pair_id`` is keccak256 of ``pair``. ``paused`` is True when the
-    pair is not offered on this chain, or its chain row reads ``paused: true``; a row with no ``paused``
-    reads as not paused. ``max_premium_bps`` is the chain's premium cap; None when not served."""
+    """One pair on this client's chain. ``pair_id`` is keccak256 of ``pair``. A /markets row with
+    ``chains``: ``paused`` is True when the row lists no entry for this chain, or the entry reads
+    ``paused: true``; an entry with no ``paused`` reads as not paused. A row with no ``chains`` is this
+    chain's: ``paused`` is False. ``max_premium_bps`` is the premium cap (the chain entry's, else the
+    row's); None when not served."""
 
     pair: str
     pair_id: str
