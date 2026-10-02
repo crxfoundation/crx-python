@@ -111,7 +111,7 @@ Other desks ask on Testnet too, so the script quotes its own test taker's RFQ on
 |---|---|
 | `rfqs()` | Streams the open RFQs you can quote. A seat with no collateral receives none. `only=` (an `Ask`, or an RFQ id) yields that RFQ alone. |
 | `rfq(rfq_id)` | One RFQ as your seat reads it. Its taker reads the winning quote only. A maker reads its own quotes only. |
-| `send_quote(rfq, rate)` | Signs and posts a binding quote. The gateway takes quotes for the first 10 s of an RFQ only. The taker gets the best quote only. Any maker quote outranks the CRX desk's quote. |
+| `send_quote(rfq, rate)` | Signs and posts a binding quote. The gateway takes quotes for the first 10 s of an RFQ only. The taker gets the best quote only. |
 | `confirm(quote)` | Waits for the accept. You sign nothing more. CRX sends the tx and pays gas. `status`: `open`, `sending`, `pending` or `refused`. |
 | `drop_quote(quote)` | Ends your binding quote at once. |
 
