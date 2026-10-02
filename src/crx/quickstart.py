@@ -46,10 +46,8 @@ def steps():
     day = datetime.now(timezone.utc) + timedelta(days=30)
     while day.weekday() >= 5:  # a weekend rolls to Monday
         day += timedelta(days=1)
-    q = c.quote(
-        "USD/BRL", "buy", 25_000,
-        expiry=datetime(day.year, day.month, day.day, 18, 0, tzinfo=timezone.utc),
-    )
+    when = day.replace(hour=18, minute=0, second=0, microsecond=0)
+    q = c.quote("USD/BRL", "buy", 25_000, expiry=when)
     log(q.pair, q.rate)  # 11:21:26 USD/BRL 5.2562
     log(q.expiry)  # 11:21:26 2026-10-30 18:00:00+00:00
     log(q.expires_at)  # 11:21:26 2026-09-30 15:30:45+00:00
