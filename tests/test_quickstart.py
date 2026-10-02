@@ -88,12 +88,20 @@ def test_import_runs_nothing(monkeypatch, no_key):
     assert callable(qs.main) and callable(qs.steps)
 
 
+def _from_step_2_on(text: str) -> str:
+    """The steps from "# 2. Fund." on, minus that step's comment line: the example connects to the
+    production gateway, the packaged module to the test network; every other line is the same."""
+    lines = text[text.index("# 2. Fund."):].splitlines()
+    return "\n".join(lines[1:]).rstrip("\n")
+
+
 def test_steps_are_the_example_line_for_line():
     example = EXAMPLE.read_text()
     body = textwrap.dedent(inspect.getsource(qs.steps)).splitlines()
     first = next(i for i, line in enumerate(body) if line.startswith("    # 1. Connect"))
     steps = textwrap.dedent("\n".join(body[first:]))
-    assert example[example.index("# 1. Connect"):].rstrip("\n") == steps.rstrip("\n")
+    assert _from_step_2_on(example) == _from_step_2_on(steps)
+    assert example[example.index("# 1. Connect"):].count("crx.Client(") == 1
     assert inspect.getsource(qs.log) in example
     assert example.startswith("from datetime import datetime, timedelta, timezone\n\nimport crx\n")
 
