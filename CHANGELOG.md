@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.1
+
+The quickstart's end date is now relative: 30 days ahead, a weekend rolls to Monday, at 18:00 UTC.
+
 ## 0.6.0
 
 The SDK speaks the gateway's v5 format. Version 0.5.0 and older cannot trade on it.
