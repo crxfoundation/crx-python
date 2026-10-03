@@ -43,10 +43,10 @@ NETWORKS = {
         "settle_wait": 30.0,
         "check_minute": 5,
     },
-    # Ethereum mainnet. Off unless the caller opts in; no default URLs.
+    # Ethereum mainnet. Off unless the caller opts in; no default RPC.
     "mainnet": {
         "chain": "ethereum",
-        "base_url": None,
+        "base_url": "https://api.crxfx.com",
         "rpc_url": None,
         "settle_wait": 90.0,
         "check_minute": 35,
@@ -180,8 +180,9 @@ class Client:
     ``balance``, ``positions`` and ``trades`` read that seat; every other call is refused.
 
     ``network="mainnet"`` (Ethereum, chain 1) is off unless ``allow_mainnet=True``
-    or ``CRX_ALLOW_MAINNET=1``. It has no default URLs: pass ``base_url`` and
-    ``rpc_url``, or set ``CRX_BASE`` and ``CRX_RPC``.
+    or ``CRX_ALLOW_MAINNET=1``. Its gateway is ``https://api.crxfx.com`` unless
+    ``base_url`` or ``CRX_BASE`` names another. It has no default RPC: pass ``rpc_url``
+    or set ``CRX_RPC``.
     """
 
     def __init__(
@@ -220,8 +221,6 @@ class Client:
             refusal = None
             if not (allow_mainnet is True or os.environ.get("CRX_ALLOW_MAINNET") == "1"):
                 refusal = "mainnet is off: pass allow_mainnet=True or set CRX_ALLOW_MAINNET=1"
-            elif not gw_url:
-                refusal = "mainnet has no default gateway: pass base_url= or set CRX_BASE"
             elif not rpc:
                 refusal = "mainnet has no default RPC: pass rpc_url= or set CRX_RPC"
             if refusal:

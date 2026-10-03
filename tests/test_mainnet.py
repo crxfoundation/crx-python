@@ -1,4 +1,4 @@
-"""The mainnet network: off by default, chain 1 only, URLs from config."""
+"""The mainnet network: off by default, chain 1 only, gateway api.crxfx.com, RPC from config."""
 
 import time
 
@@ -32,10 +32,10 @@ def main(session, tmp_path, account, **kw):
     return crx.Client(**args)
 
 
-def test_mainnet_is_listed_without_urls():
+def test_mainnet_is_listed_with_its_gateway_and_no_rpc():
     net = crx.NETWORKS["mainnet"]
     assert net["chain"] == "ethereum"
-    assert net["base_url"] is None and net["rpc_url"] is None
+    assert net["base_url"] == "https://api.crxfx.com" and net["rpc_url"] is None
 
 
 def test_mainnet_is_off_by_default(session, tmp_path, account):
@@ -58,11 +58,15 @@ def test_mainnet_opt_in_by_env(session, tmp_path, account, monkeypatch):
         main(session, tmp_path, account)
 
 
-@pytest.mark.parametrize("missing", ["base_url", "rpc_url"])
-def test_mainnet_has_no_default_urls(session, tmp_path, account, missing):
+def test_mainnet_has_no_default_rpc(session, tmp_path, account):
     with pytest.raises(crx.ConfigError) as ei:
-        main(session, tmp_path, account, allow_mainnet=True, **{missing: None})
-    assert missing in str(ei.value)
+        main(session, tmp_path, account, allow_mainnet=True, rpc_url=None)
+    assert "rpc_url" in str(ei.value)
+
+
+def test_mainnet_default_gateway(session, tmp_path, account):
+    c = main(session, tmp_path, account, allow_mainnet=True, base_url=None)
+    assert c._gw.base_url == "https://api.crxfx.com"
 
 
 def test_mainnet_urls_from_env(session, tmp_path, account, monkeypatch):

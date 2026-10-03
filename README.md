@@ -197,7 +197,7 @@ Every error is a `crx.CrxError`. Branch on `.code`.
 - The SDK rebuilds every digest and transaction before it signs. A mismatch raises `refused_to_sign`.
 - A trade carries a readable `summary` line. The SDK builds its own `Trade` from your request and the quote's rate, compares it with the gateway's member by member, checks the domain, the quote end in your leg id and the nonce, and signs its own.
 - Every signature leaves with low `s` and `v` 27 or 28. One that does not recover to the seat raises `refused_to_sign`.
-- Testnet by default. `network="mainnet"` (Ethereum, chain 1) is off until you pass `allow_mainnet=True` or set `CRX_ALLOW_MAINNET=1`. It has no default URLs.
+- Testnet by default. `network="mainnet"` (Ethereum, chain 1) is off until you pass `allow_mainnet=True` or set `CRX_ALLOW_MAINNET=1`. Its gateway is `https://api.crxfx.com`. It has no default RPC.
 - Keep DEBUG logging off in production: urllib3 then logs request paths, and an RPC key can sit in the path.
 - A nonce floor lives in `~/.crx-quickstart/`, shared with the quickstart scripts. `CRX_STATE_DIR` moves it.
 

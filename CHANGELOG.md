@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.2
+
+- `network="mainnet"` defaults its gateway to `https://api.crxfx.com`. It is still off until `allow_mainnet=True` or `CRX_ALLOW_MAINNET=1`, and it still needs an RPC (`rpc_url=` or `CRX_RPC`).
+- The core, lens and domain come from `GET /health`; the minimum notional comes from `GET /markets`. The SDK names no core address and no minimum.
+- The `quote_only.py` sample output shows the 100 USD minimum.
+
 ## 0.6.1
 
 The quickstart's end date is now relative: 30 days ahead, a weekend rolls to Monday, at 18:00 UTC.
