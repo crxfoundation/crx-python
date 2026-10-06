@@ -216,7 +216,7 @@ def test_testnet_and_fuji_alias(kw, account):
     c = crx.Client(key=account.key.hex(), **kw)
     assert c.network == "testnet" and c.chain_key == "avax-fuji"
     assert "network='testnet'" in repr(c)
-    assert list(crx.NETWORKS) == ["testnet", "mainnet"]
+    assert list(crx.NETWORKS) == ["testnet", "mainnet", "solana"]
 
 
 def test_rpc_url_never_in_errors(make_client, session):

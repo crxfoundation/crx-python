@@ -5,7 +5,7 @@ Trade FX forwards on CRX from Python.
 ## Install
 
 ```bash
-pip install "git+https://github.com/crxfoundation/crx-python@v0.1.1"
+pip install "git+https://github.com/crxfoundation/crx-python@v0.2.0"
 ```
 
 Python 3.10 or newer.
@@ -152,6 +152,57 @@ print(len(viewer.positions()))
 
 A viewer reads `balance()`, `positions()` and `trades()` only. Other calls raise `config`.
 
+## Solana
+
+Install version 0.2.0 with the extra:
+
+```bash
+pip install "crx-python[solana] @ git+https://github.com/crxfoundation/crx-python@v0.2.0"
+```
+
+```python
+import time
+
+import crx
+
+c = crx.Client(network="solana", keypair="~/.config/solana/id.json", rpc_url="https://…", allow_mainnet=True)
+c.bind()               # the seat takes this wallet as authority and payout; bound to it already: signs nothing
+c.deposit("1000")      # the wallet signs one Solana tx
+while not c.balance().free:
+    time.sleep(60)     # a quote needs collateral that an hourly check has credited
+q = c.quote("USD/MXN", "buy", 100_000)
+c.trade(q)
+c.withdraw("500")      # paid to the wallet's USDC account fixed at bind
+```
+
+- The trading (seat) key comes from the wallet: the wallet signs one fixed text, and its keccak256 is the seat key.
+  The site makes the same key from the same wallet. Sign that text nowhere but portal.crxfx.com.
+- The gateway is `https://portal.crxfx.com/api`. `base_url=` or `CRX_BASE` names another gateway; the text the
+  wallet signs stays the same.
+- Before the first signature the client checks the cluster (genesis hash), the program, the 3-field domain
+  (no chain id) and the core and vault addresses. Any mismatch refuses, nothing signed.
+- The CRX program the client signs for is `crx.NETWORKS["solana"]["program_id"]`. While it is `None`, no call
+  signs and no wallet is read.
+- The keypair file is the `solana-keygen` JSON array, mode 600 (`chmod 600`), as for the Ethereum key file.
+- `deposit(unsigned=True, authority="<wallet>")` returns the checked, unsigned tx (base64) for a wallet you
+  sign with elsewhere. It refuses when the seat is bound to another wallet.
+- A seat opens for deposits after CRX lists it.
+- A bind fixes the seat's payout account for good. `bind_state()` reads the seat's bind: `bound` says the seat
+  is bound, not to which keys. Compare `authority`, `payout_wallet` and `payout_ata` with your own, or call
+  `bind()`: it compares the three.
+- `bind()` returns once the gateway reads the seat bound with the three keys of the bind: the authority, the
+  payout wallet and its USDC account. It reads for 240 s at most. A bind with no end by then raises
+  `bind_in_progress`: it has not failed, and `bind()` reads its end.
+- `bind()` on a seat bound to the same three keys returns the bind and signs nothing. A seat bound to another
+  payout raises `seat_bound_other_payout`; to another authority, `seat_already_bound`. `details["bound"]` holds
+  the keys the chain holds, `details["filed"]` the ones the bind named.
+- A deposit that the program refuses on a full intake raises `tx_failed` with `details["reason"]`
+  `intake_full`: no USDC left the wallet. Deposit again after the hourly check.
+- `quote()` and `ask()` read the pair's tenor band from `/markets` (`tenor.min_secs`, `tenor.max_secs`) and send
+  no RFQ outside it. The error is `bad_request` with `details["limit"]` `tenor`. Its message names when the
+  shortest (or the longest) trade settles now; `details["earliest_expiry"]` (or `latest_expiry`) is that instant,
+  unix ms. The gateway's own tenor refusal reads the same. A pair that serves no band is not checked.
+
 ## Errors
 
 Every error is a `crx.CrxError`. Branch on `.code`.
@@ -179,6 +230,10 @@ Every error is a `crx.CrxError`. Branch on `.code`.
 | `rate_limited` | Too many requests. `.retry_after` is the wait in seconds, when sent. |
 | `own_round_open` | Your last round is still open. |
 | `not_whitelisted` | Onboard the seat first. |
+| `seat_stopped` | Solana: CRX removed the seat's access. No new trade and no deposit. `withdraw()` still works. `except crx.NotWhitelisted` catches it too. |
+| `seat_bound_other_payout` | Solana: the seat is bound to another payout wallet. The bind is permanent. Contact CRX. `details["bound"]` and `details["filed"]` hold the keys. |
+| `bind_in_progress` | Solana: a bind of the seat has no end yet: the seat is not bound, and the bind has not failed. `bind()` reads its end. No other bind is taken before it. |
+| `bind_failed` | Solana: the bind ended and the seat is not bound. |
 | `seat_not_ready` | Onboarding not finished. Wait. |
 | `conflict` | The venue cannot take this now. |
 | `withdraw_in_progress` | One withdraw at a time. The next opens when this one is paid. |
