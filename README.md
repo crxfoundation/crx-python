@@ -5,7 +5,7 @@ Trade FX forwards on CRX from Python.
 ## Install
 
 ```bash
-pip install "git+https://github.com/crxfoundation/crx-python@v0.2.4"
+pip install "git+https://github.com/crxfoundation/crx-python@v0.2.5"
 ```
 
 Python 3.10 or newer.
@@ -78,7 +78,7 @@ print(w.status)  # accepted
 | `withdraw(amount)` | Signs a withdraw to your own wallet and sends it in one request. CRX sends the tx and pays gas. `status`: `sending`, `accepted`, `pending`, `paid`, `partial`, `refused` or `returned`. |
 | `balance()` | Collateral, free, margin, withdraw state. |
 | `positions()` | Open positions. |
-| `trades()` | Your event tape: `trade.opened`, `trade.refused`, `trade.settled`, `trade.closed`, `trade.closed_out`, `trade.novated`, `margin.called`, `margin.cured`, and your RFQ events. `market=True` adds every open RFQ a maker seat receives (no owner named). `after=` (the last `Event.seq` you read) reads newer events only. |
+| `trades()` | Your event tape: `trade.opened`, `trade.refused`, `trade.settled`, `trade.closed`, `trade.closed_out`, `trade.novated`, `margin.called`, `margin.cured`, and your RFQ events. `market=True` adds every open RFQ a maker seat receives (no owner named). `after=` (the last `Event.seq` you read) reads newer events only. Key trades on `trade_id`. A `trade.opened` with `provisional: true` is followed, once final, by a `trade.opened` with no `provisional` key; that one is the final state. `trade.retracted` removes a provisional open. |
 | `add_viewer(addr)` | Lets another wallet read your seat. Up to 5. |
 | `remove_viewer(addr)` | Takes that access back. |
 | `viewers()` | Wallets that can read your seat. |
@@ -158,10 +158,10 @@ A viewer reads `balance()`, `positions()` and `trades()` only. Other calls raise
 
 Sign up first at portal.crxfx.com/sign-up with the same wallet. The sign-up runs in a browser wallet: for a keypair file, import the key into a browser wallet first.
 
-Install version 0.2.4 with the extra:
+Install version 0.2.5 with the extra:
 
 ```bash
-pip install "crx-python[solana] @ git+https://github.com/crxfoundation/crx-python@v0.2.4"
+pip install "crx-python[solana] @ git+https://github.com/crxfoundation/crx-python@v0.2.5"
 ```
 
 ```python

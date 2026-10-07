@@ -585,6 +585,10 @@ class Client:
         ``margin.called`` and ``margin.cured``. ``rfq.accepted`` names ``rfq_id``, ``quote_id`` and
         ``client_quote_id`` only.
 
+        Key trades on ``trade_id``. A ``trade.opened`` with ``provisional: true`` is followed, once final, by a
+        ``trade.opened`` with no ``provisional`` key; that one is the final state. ``trade.retracted`` removes a
+        provisional open.
+
         ``after`` is a seq of this client's tape: pass the last ``Event.seq`` to read only newer
         events. Seqs count per account and role (a viewer reads as a taker), so a seq read by
         another client, or by SDK 0.6, is not a cursor here. An ``after`` past your head raises

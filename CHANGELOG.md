@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.5
+
+- Docs: `trades()` and the README say how to read provisional and final trade events. Key trades on `trade_id`; a `trade.opened` with no `provisional` key is the final state; `trade.retracted` removes a provisional open. No code change.
+
 ## 0.2.4
 
 - A Solana deposit's "not sent" verdict reads the tx's own blockhash (`isBlockhashValid`, confirmed), not the served `last_valid_block_height`: both RPCs must read it not valid at a slot past the slot where it last read valid, then hold no status for the tx. A blockhash not valid before the send: the tx is not sent, `TxFailed` with `details['reason']` `expired`.
