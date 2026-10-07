@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.1
+
+- `network="solana"` pins the mainnet program `A32Z1LwBwyE6UB8SmcF1mwHKQfEhtVQ95s9jfpqDFvWE`. Signing calls on Solana no longer refuse for a missing program.
+
 ## 0.2.0
 
 Adds the Solana network. Every Ethereum network behaves as in 0.1.1, except for the first line below.
