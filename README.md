@@ -27,7 +27,9 @@ The SDK never prints or logs the key.
 CRX_WALLET_PK=0x... python -m crx.quickstart
 ```
 
-Runs the API Quickstart on Testnet: connect, fund, quote, trade, read, withdraw. Without the key, it asks for it and hides the input. Same script: `examples/quickstart.py`.
+Runs the API Quickstart on Testnet: connect, fund, quote, trade, read, withdraw. Without the key, it asks for it and hides the input. The same steps on Mainnet: `examples/quickstart.py`.
+
+On Solana, follow the steps under [Solana](#solana).
 
 ## Hello world
 
@@ -154,6 +156,8 @@ A viewer reads `balance()`, `positions()` and `trades()` only. Other calls raise
 
 ## Solana
 
+Sign up first at portal.crxfx.com/sign-up with the same wallet. The sign-up runs in a browser wallet: for a keypair file, import the key into a browser wallet first.
+
 Install version 0.2.0 with the extra:
 
 ```bash
@@ -170,7 +174,7 @@ c.bind()               # the seat takes this wallet as authority and payout; bou
 c.deposit("1000")      # the wallet signs one Solana tx
 while not c.balance().free:
     time.sleep(60)     # a quote needs collateral that an hourly check has credited
-q = c.quote("USD/MXN", "buy", 100_000)
+q = c.quote("USD/MXN", "buy", 100)
 c.trade(q)
 c.withdraw("500")      # paid to the wallet's USDC account fixed at bind
 ```
@@ -187,6 +191,7 @@ c.withdraw("500")      # paid to the wallet's USDC account fixed at bind
 - `deposit(unsigned=True, authority="<wallet>")` returns the checked, unsigned tx (base64) for a wallet you
   sign with elsewhere. It refuses when the seat is bound to another wallet.
 - A seat opens for deposits after CRX lists it.
+- A dealer quotes a size only when its free collateral covers it.
 - A bind fixes the seat's payout account for good. `bind_state()` reads the seat's bind: `bound` says the seat
   is bound, not to which keys. Compare `authority`, `payout_wallet` and `payout_ata` with your own, or call
   `bind()`: it compares the three.
