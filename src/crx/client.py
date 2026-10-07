@@ -56,10 +56,10 @@ NETWORKS = {
         "check_minute": 35,
     },
     # Solana mainnet. Off unless the caller opts in (allow_mainnet); no default RPC. program_id is the one
-    # place the SDK names the CRX program: base58, in full, from the birth record. None until the launch:
-    # until then every signing call refuses and no wallet is read. Another cluster: add a copy of this row to
-    # NETWORKS under a new name, with that cluster's base_url, rpc_url, genesis_hash, cluster_tag, program_id
-    # and mint; it also needs allow_mainnet.
+    # place the SDK names the CRX program: base58, in full, from the birth record (birth-pins.py emit).
+    # With no program_id every signing call refuses and no wallet is read. Another cluster: add a copy of
+    # this row to NETWORKS under a new name, with that cluster's base_url, rpc_url, genesis_hash, cluster_tag,
+    # program_id and mint; it also needs allow_mainnet.
     "solana": {
         "chain": "solana",
         "family": "solana",
@@ -69,7 +69,7 @@ NETWORKS = {
         "check_minute": 5,
         "genesis_hash": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
         "cluster_tag": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
-        "program_id": None,
+        "program_id": "A32Z1LwBwyE6UB8SmcF1mwHKQfEhtVQ95s9jfpqDFvWE",
         "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     },
 }

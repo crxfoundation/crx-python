@@ -264,8 +264,11 @@ def sclient(session, tmp_path, account, **kw):
 
 PINNED = crx.NETWORKS["solana"]["program_id"]
 # The alias and the domain separator of the pinned program on the cluster tag, from the birth record (an
-# independent run). Both stay empty while the row pins no program.
-PINNED_VECTOR = {"alias": "", "separator": ""}
+# independent run: birth-pins.py emit). Both are empty while the row pins no program.
+PINNED_VECTOR = {"alias": "0x4f24816e47e7f12ef046fd7bb1f429cb3f232dd2", "separator": "0xf48bf500c50be0ac78c260d6ef1b08228d4bec66bc0df860bfb7733af3ba70ac"}
+# The core and vault PDAs of the pinned program, from the birth record (birth-pins.py show).
+PINNED_PDAS = {"core": "8ZdqL3tMWtPF8HLCEgT9GY5NvkEpMknaARKv4CY3usvT",
+               "vault": "H5f3cXD4BmGmqSux43VY2TCnPFuSDzpHbfEHS7Csm4Sm"}
 while_unpinned = pytest.mark.skipif(PINNED is not None, reason="the solana row pins a program")
 while_pinned = pytest.mark.skipif(PINNED is None, reason="the solana row pins no program yet")
 
@@ -369,6 +372,33 @@ def test_this_sdk_pins_the_record_program():
     assert e7.h0x(e7.domain_separator(None, alias)) == PINNED_VECTOR["separator"]
 
 
+@while_pinned
+def test_the_pinned_row_signs_for_the_record_program(session, tmp_path, monkeypatch):
+    """On the real solana row a wallet makes a client, the chain check passes for the record's program and a
+    bind is signed and posted: no call refuses for lack of a pin. The core, PDAs and separator are the record's."""
+    pytest.importorskip("cryptography")
+    for k in ("CRX_ALLOW_MAINNET", "CRX_BASE", "CRX_RPC"):
+        monkeypatch.delenv(k, raising=False)
+    session.routes[("GET", "/health")] = sol_health(pid=PINNED)
+    session.rpc.update({
+        "getGenesisHash": GENESIS,
+        "getAccountInfo": lambda p: {"value": {"executable": True, "owner": sol.LOADER_V3}} if p[0] == PINNED
+        else {"value": None},
+    })
+    c = crx.Client(network="solana", keypair=list(SEED), base_url=BASE, rpc_url=RPC, session=session,
+                   state_dir=tmp_path / "s", allow_mainnet=True)
+    assert c.address == SITE_SEAT
+    row = c._chain_ready()
+    assert (row["program_id"], row["core"], row["core_pda"]) == (PINNED, PINNED_VECTOR["alias"], PINNED_PDAS["core"])
+    assert sol.pda(PINNED, b"vault") == PINNED_PDAS["vault"] and e7.h0x(c._sep) == PINNED_VECTOR["separator"]
+    assert type(c._binder()) is sol.SeatBinder
+    clk = Clock(1_760_000_000)
+    c._clock, c._sleep = clk, clk.sleep
+    posted, _ = bind_routes(session, c, pid=PINNED)
+    assert c.bind()["status"] == "bound"
+    assert [b for b in posted if "sig" in b] and posted[0]["authority"] == AUTH
+
+
 @pytest.mark.parametrize("now, at", [("08:00:00", "08:05:00"), ("08:05:00", "09:05:00"), ("08:35:00", "09:05:00")])
 def test_solana_next_check_is_05_past_the_hour(session, tmp_path, account, monkeypatch, now, at):
     from datetime import datetime
@@ -418,16 +448,16 @@ def test_chain_check_refuses_each_step(solnet, solsession, tmp_path, account, st
         c._chain_ready()
 
 
-def bind_routes(session, client, nonce=0, deadline=None, **over):
+def bind_routes(session, client, nonce=0, deadline=None, pid=PID, **over):
     deadline = deadline or int(client._clock()) + 3600
-    alias = sol.alias(GENESIS, PID)
+    alias = sol.alias(GENESIS, pid)
     msg = {"seat": client.address, "authority": e7.h0x(sol.key(AUTH)), "payout": e7.h0x(sol.key(AUTH)),
            "nonce": str(nonce), "deadline": str(deadline)}
     td = e7.typed_data("BindSeat", None, alias, msg)
     body = {"bind": {"seat": client.address, "authority": AUTH, "payout": AUTH, "nonce": str(nonce),
                      "deadline": deadline},
             "payout_ata": AUTH_ATA, "row": 3, "digest": e7.h0x(e7.typed_digest(td)), "typed_data": td,
-            "program_id": PID, "verifying_contract": alias}
+            "program_id": pid, "verifying_contract": alias}
     for k, v in over.items():
         body[k] = v
     posted = []
