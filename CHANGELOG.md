@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.4
 
 - A Solana deposit's "not sent" verdict reads the tx's own blockhash (`isBlockhashValid`, confirmed), not the served `last_valid_block_height`: both RPCs must read it not valid at a slot past the slot where it last read valid, then hold no status for the tx. A blockhash not valid before the send: the tx is not sent, `TxFailed` with `details['reason']` `expired`.
 - `sendTransaction` errors -32002, -32003 and -32602 read as not sent. Any other error object: the status reads decide, as for a send with no clear answer.

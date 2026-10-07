@@ -5,7 +5,7 @@ Trade FX forwards on CRX from Python.
 ## Install
 
 ```bash
-pip install "git+https://github.com/crxfoundation/crx-python@v0.2.3"
+pip install "git+https://github.com/crxfoundation/crx-python@v0.2.4"
 ```
 
 Python 3.10 or newer.
@@ -158,10 +158,10 @@ A viewer reads `balance()`, `positions()` and `trades()` only. Other calls raise
 
 Sign up first at portal.crxfx.com/sign-up with the same wallet. The sign-up runs in a browser wallet: for a keypair file, import the key into a browser wallet first.
 
-Install version 0.2.3 with the extra:
+Install version 0.2.4 with the extra:
 
 ```bash
-pip install "crx-python[solana] @ git+https://github.com/crxfoundation/crx-python@v0.2.3"
+pip install "crx-python[solana] @ git+https://github.com/crxfoundation/crx-python@v0.2.4"
 ```
 
 ```python
