@@ -57,7 +57,9 @@ NETWORKS = {
     },
     # Solana mainnet. Off unless the caller opts in (allow_mainnet); no default RPC. program_id is the one
     # place the SDK names the CRX program: base58, in full, from the birth record. None until the launch:
-    # until then every signing call refuses and no wallet is read.
+    # until then every signing call refuses and no wallet is read. Another cluster: add a copy of this row to
+    # NETWORKS under a new name, with that cluster's base_url, rpc_url, genesis_hash, cluster_tag, program_id
+    # and mint; it also needs allow_mainnet.
     "solana": {
         "chain": "solana",
         "family": "solana",
@@ -653,7 +655,7 @@ class Client:
             return self._winner(rfq, wait)
         q = self._pick(r, rfq["rfq_id"])  # the answer came after the window
         if q is None:
-            raise _no_quotes("no quote in the window: no maker online, or the market closed", r,
+            raise _no_quotes("no quote in the window: the request is still open", r,
                              {"rfq_id": rfq["rfq_id"]})
         return self._quote_of(rfq, q)
 
@@ -787,7 +789,7 @@ class Client:
                 best = self._pick(view, rfq_id)
                 if best is not None:
                     return best
-                raise _no_quotes("no quote before the wait ended: no maker online, or the market closed", view,
+                raise _no_quotes("no quote before the wait ended: the request is still open", view,
                                  {"rfq_id": rfq_id})
             self._sleep(1.0)
 

@@ -1317,8 +1317,17 @@ def test_no_quote_at_the_end_of_the_wait_carries_the_gateway_line(make_client, v
     with pytest.raises(crx.NoQuotes) as ei:
         make_client(clock=clock).quote("USD/MXN", "buy", 25_000, wait=3)
     head = "no quote in the window" if path == "waited" else "no quote before the wait ended"
-    assert str(ei.value) == f"{head}: no maker online, or the market closed (no_quote: {CLOSED})"
+    assert str(ei.value) == f"{head}: the request is still open (no_quote: {CLOSED})"
     assert ei.value.details == {"rfq_id": RFQ, "outcome": "no_quote", "message": CLOSED}
+
+
+@pytest.mark.parametrize("path", ["waited", "polled"])
+def test_an_open_rfq_at_the_end_of_the_wait_says_it_is_still_open(make_client, venue, session, clock, path):
+    serve(venue, session, path, lambda: {"status": "open", "quote": None, "quotes": []})
+    with pytest.raises(crx.NoQuotes) as ei:
+        make_client(clock=clock).quote("USD/MXN", "buy", 25_000, wait=3)
+    head = "no quote in the window" if path == "waited" else "no quote before the wait ended"
+    assert str(ei.value) == f"{head}: the request is still open" and ei.value.details == {"rfq_id": RFQ}
 
 
 @pytest.mark.parametrize("line", [{}, {"outcome": "no_quote"}, {"message": "  "}, {"outcome": 7, "message": None}])

@@ -234,7 +234,7 @@ def test_a_taker_refusal_ends_the_run_with_its_own_error(capsys, fake, keys, mon
 
 def test_an_rfq_with_no_winner_exits_1(capsys, fake, keys, monkeypatch):
     def unquoted(self):
-        raise crx.NoQuotes("no quote before the wait ended: no maker online, or the market closed")
+        raise crx.NoQuotes("no quote before the wait ended: the request is still open")
 
     monkeypatch.setattr(FakeClient, "winner", unquoted)
     assert qs.main([]) == 1
