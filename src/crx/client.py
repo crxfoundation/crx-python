@@ -914,6 +914,9 @@ class Client:
 
         On a testnet, ``mint=True`` first mints the test USDC the wallet lacks. Otherwise a
         wallet that holds less than ``amount`` raises ``TxFailed`` and nothing is sent.
+        The core call is ``deposit``, or ``depositFor`` to this seat's own address (an account CRX removed
+        can still deposit to itself). Any other call, or ``depositFor`` to another address, raises
+        ``RefusedToSign`` and nothing is sent.
         Returns once the deposit is ``credited`` or ``failed``; ``pending`` when
         neither shows within 30 s (testnet) or 90 s (mainnet).
 
@@ -958,14 +961,20 @@ class Client:
             txs = r["transactions"]
             if int(r["amount_raw"]) != raw:
                 raise RefusedToSign(f"the gateway served amount_raw {clean(r['amount_raw'], 40)}, not {_plain(amount)}; nothing sent")
-            want = [(core, e7.calldata("deposit(uint256)", ["uint256"], [raw]))]
+            # deposit(raw), or depositFor(raw) to this seat's own address: the tx of an account CRX removed.
+            calls = [e7.calldata("deposit(uint256)", ["uint256"], [raw]),
+                     e7.calldata("depositFor(address,uint256)", ["address", "uint256"],
+                                 [to_checksum_address(self.address), raw])]
+            first = []
             if len(txs) == 2:
-                want.insert(0, (token, e7.calldata("approve(address,uint256)", ["address", "uint256"],
-                                                   [to_checksum_address(core), raw])))
+                first = [(token, e7.calldata("approve(address,uint256)", ["address", "uint256"],
+                                             [to_checksum_address(core), raw]))]
             served = [(t["to"].lower(), t["data"].lower(), int(t["chain_id"])) for t in txs]
         except (KeyError, TypeError, ValueError, AttributeError):
             raise RefusedToSign("the gateway served a deposit this SDK cannot read; nothing sent") from None
-        if served != [(to.lower(), data, c["chain_id"]) for to, data in want]:
+        want = next((w for w in ([*first, (core, d)] for d in calls)
+                     if served == [(to.lower(), data, c["chain_id"]) for to, data in w]), None)
+        if want is None:
             raise RefusedToSign("the gateway served a tx this SDK does not expect; nothing sent")
         hashes = []
         held = self._rpc.int("eth_call", {"to": token, "data": e7.calldata(

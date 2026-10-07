@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import pytest
+import rlp
 from eth_abi import encode
 from eth_account import Account
 from eth_utils import keccak, to_checksum_address
@@ -173,6 +174,43 @@ def test_deposit_foreign_tx_sends_nothing(make_client, session, health, account)
     deposit_route(session, health, account, 1000 * 10**6,
                   data_edit=e7.calldata("transfer(address,uint256)", ["address", "uint256"], ["0x" + "99" * 20, 1]))
     with pytest.raises(crx.RefusedToSign):
+        make_client().deposit(1000)
+    assert chain.sent == []
+
+
+def deposit_for(account_address, amount_raw):
+    return e7.calldata("depositFor(address,uint256)", ["address", "uint256"],
+                       [to_checksum_address(account_address), amount_raw])
+
+
+def sent_data(raw_tx):
+    """The data field of a signed type-2 or legacy tx."""
+    b = bytes.fromhex(raw_tx[2:])
+    fields = rlp.decode(b[1:]) if b[0] == 2 else rlp.decode(b)
+    return "0x" + (fields[7] if b[0] == 2 else fields[5]).hex()
+
+
+@pytest.mark.parametrize("approve", [True, False])
+def test_deposit_for_the_seat_itself_is_sent(make_client, session, health, account, approve):
+    """A removed account: the gateway serves depositFor(own address). The SDK sends it as served."""
+    chain = Chain(session, held=10**12)
+    data = deposit_for(account.address, 1000 * 10**6)
+    deposit_route(session, health, account, 1000 * 10**6, approve=approve, data_edit=data)
+    money_view(session, account, chain, "deposit")
+    d = make_client(clock=Clock(time.time())).deposit(1000, mint=False)
+    assert d.status == "credited" and len(chain.sent) == len(d.txs) == (2 if approve else 1)
+    assert sent_data(chain.sent[-1]) == data and all(Account.recover_transaction(r) == account.address
+                                                     for r in chain.sent)
+
+
+@pytest.mark.parametrize("edit", [
+    lambda acct, raw: deposit_for("0x" + "99" * 20, raw),  # another address
+    lambda acct, raw: deposit_for(acct, raw + 1),  # its own address, another amount
+])
+def test_deposit_for_another_address_or_amount_sends_nothing(make_client, session, health, account, edit):
+    chain = Chain(session, held=10**12)
+    deposit_route(session, health, account, 1000 * 10**6, data_edit=edit(account.address, 1000 * 10**6))
+    with pytest.raises(crx.RefusedToSign, match="^the gateway served a tx this SDK does not expect; nothing sent$"):
         make_client().deposit(1000)
     assert chain.sent == []
 
