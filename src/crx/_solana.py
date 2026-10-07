@@ -35,6 +35,7 @@ COMPUTE_BUDGET = "ComputeBudget111111111111111111111111111111"
 LOADER_V3 = "BPFLoaderUpgradeab1e11111111111111111111111"
 
 DEPOSIT_IX = 10  # crx_core instruction tag
+DEPOSIT_FOR_IX = 11  # crx_core deposit_for: the tx a seat CRX removed gets to deposit to itself
 CH_ARM, CH_MARKET = 0, 2  # checkpoint chains the deposit touches
 # A deposit's priority fee ceiling, lamports: compute unit limit x price / 1e6.
 MAX_PRIORITY_LAMPORTS = 100_000
@@ -213,11 +214,18 @@ def deposit_data(amount_raw: int, row: int, seat20: bytes) -> bytes:
     return bytes([DEPOSIT_IX]) + int(amount_raw).to_bytes(8, "little") + int(row).to_bytes(4, "little") + seat20
 
 
+def deposit_for_data(amount_raw: int, row: int, seat20: bytes) -> bytes:
+    """crx_core.deposit_for of the seat to itself: the payer and the account are the same row and seat."""
+    return (bytes([DEPOSIT_FOR_IX]) + int(amount_raw).to_bytes(8, "little") + int(row).to_bytes(4, "little") + seat20
+            + int(row).to_bytes(4, "little") + seat20)
+
+
 def check_deposit(raw: bytes, *, program_id: str, authority: str, source: str, amount_raw: int, row: int | None,
                   seat20: bytes, max_priority_lamports: int = MAX_PRIORITY_LAMPORTS) -> dict:
     """Refuses (RefusedToSign) any tx but: compute limit (1..MAX_COMPUTE_UNITS), compute price, crx_core.deposit
     of exactly these accounts and bytes, no other key, one signer = the authority as fee payer, empty signature
-    slot. Returns the parse.
+    slot. Returns the parse. In place of deposit it takes crx_core.deposit_for of the seat to itself (the same
+    accounts; payer and account are this row and ``seat20``): the tx of a seat CRX removed.
 
     ``row`` None takes the seat row the tx names; the program refuses a row that does not hold the seat."""
     try:
@@ -257,9 +265,10 @@ def check_deposit(raw: bytes, *, program_id: str, authority: str, source: str, a
     keys = t["keys"]
     if len(keys) != len(set(keys)) or set(keys) != {k for k, _, _ in metas} | {COMPUTE_BUDGET, program_id}:
         raise RefusedToSign("the deposit tx holds a key twice or a key it does not use; nothing signed")
-    if row is None and len(dep["data"]) == 33:
-        row = int.from_bytes(dep["data"][9:13], "little")
-    if row is None or dep["data"] != deposit_data(amount_raw, row, seat20):
+    data = dep["data"]
+    if row is None and len(data) in (33, 57):
+        row = int.from_bytes(data[9:13], "little")
+    if row is None or data not in (deposit_data(amount_raw, row, seat20), deposit_for_data(amount_raw, row, seat20)):
         raise RefusedToSign("the deposit tx carries other bytes; nothing signed")
     return t
 
@@ -603,13 +612,13 @@ def check_cluster(rpc: Any, net: dict, served: dict) -> dict:
 
 # ---------- a seat CRX stopped ----------
 
-STOPPED_LINE = "CRX removed this seat's access: no new trade and no deposit; withdraw() still works"
+STOPPED_LINE = "CRX removed this seat's access: no new trade; deposit() and withdraw() still work"
 
 
 class SeatStopped(NotWhitelisted):
-    """CRX removed this seat's access. ``deposit``, ``bind``, ``ask``, ``quote`` and ``trade`` raise it: nothing
-    is sent to the chain and no trade opens. ``balance``, ``positions`` and ``withdraw`` still work. A stopped
-    seat that holds collateral can still ``bind``, so that it can withdraw."""
+    """CRX removed this seat's access. A call the gateway refuses for it raises it (``ask``, ``quote``,
+    ``trade``): nothing is sent to the chain and no trade opens. ``deposit`` to the seat itself, ``balance``,
+    ``positions`` and ``withdraw`` still work. A stopped seat can still ``bind``, so that it can withdraw."""
 
     code = "seat_stopped"
 

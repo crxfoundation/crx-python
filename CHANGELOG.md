@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- On Solana, a seat CRX removed can deposit to itself: `deposit()` takes the gateway's `crx_core.deposit_for` tx when its payer and account are this seat (same row and seat key); any other `deposit_for` is refused, nothing signed. The `seat_stopped` line reads "no new trade; deposit() and withdraw() still work".
+
 ## 0.2.5
 
 - Docs: `trades()` and the README say how to read provisional and final trade events. Key trades on `trade_id`; a `trade.opened` with no `provisional` key is the final state; `trade.retracted` removes a provisional open. No code change.

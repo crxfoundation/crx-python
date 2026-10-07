@@ -159,6 +159,68 @@ def test_deposit_check_accepts_the_exact_tx():
     assert check(build_tx(AUTH, deposit_ixs(seat)), seat, row=None)
 
 
+def deposit_for_ixs(payer20: bytes, account20: bytes, amount_raw: int = 100_000_000, payer_row: int = 3,
+                    account_row: int = 3, tag: int = sol.DEPOSIT_FOR_IX):
+    """deposit_ixs with crx_core.deposit_for in place of deposit: the same accounts."""
+    data = (bytes([tag]) + amount_raw.to_bytes(8, "little") + payer_row.to_bytes(4, "little") + payer20
+            + account_row.to_bytes(4, "little") + account20)
+    ixs = deposit_ixs(payer20)
+    p, a, _ = ixs[2]
+    ixs[2] = (p, a, data)
+    return ixs
+
+
+def test_deposit_check_takes_a_deposit_for_of_the_seat_to_itself():
+    """A seat CRX removed gets crx_core.deposit_for (tag 0x0b, 57 bytes) with itself as payer and account."""
+    seat = b"\x11" * 20
+    raw = build_tx(AUTH, deposit_for_ixs(seat, seat))
+    t = check(raw, seat)
+    assert t["instructions"][2]["data"] == sol.deposit_for_data(100_000_000, 3, seat)
+    assert len(t["instructions"][2]["data"]) == 57 and t["instructions"][2]["data"][0] == 0x0B
+    assert check(raw, seat, row=None)
+
+
+@pytest.mark.parametrize("mut", ["another_seat", "another_payer", "both_other", "another_account_row",
+                                 "another_payer_row", "row_both", "amount", "tag", "short", "long"])
+def test_deposit_check_refuses_any_other_deposit_for(mut):
+    """deposit_for to another seat, from another seat, or with any other byte: refused, nothing signed."""
+    seat, other = b"\x11" * 20, b"\x12" * 20
+    ixs = {
+        "another_seat": lambda: deposit_for_ixs(seat, other),
+        "another_payer": lambda: deposit_for_ixs(other, seat),
+        "both_other": lambda: deposit_for_ixs(other, other),
+        "another_account_row": lambda: deposit_for_ixs(seat, seat, account_row=4),
+        "another_payer_row": lambda: deposit_for_ixs(seat, seat, payer_row=4),
+        "row_both": lambda: deposit_for_ixs(seat, seat, payer_row=4, account_row=4),
+        "amount": lambda: deposit_for_ixs(seat, seat, amount_raw=100_000_001),
+        "tag": lambda: deposit_for_ixs(seat, seat, tag=12),
+    }.get(mut)
+    if ixs is not None:
+        ixs = ixs()
+    else:
+        ixs = deposit_for_ixs(seat, seat)
+        p, a, d = ixs[2]
+        ixs[2] = (p, a, d[:-1] if mut == "short" else d + b"\0")
+    with pytest.raises(crx.RefusedToSign) as ei:
+        check(build_tx(AUTH, ixs), seat)
+    assert str(ei.value) == "the deposit tx carries other bytes; nothing signed"
+    if mut in ("another_payer_row", "another_account_row"):
+        with pytest.raises(crx.RefusedToSign):
+            check(build_tx(AUTH, ixs), seat, row=None)
+
+
+def test_client_deposit_signs_a_deposit_for_of_the_seat_to_itself(solnet, solsession, tmp_path, account):
+    pytest.importorskip("cryptography")
+    c = sclient(solsession, tmp_path, account)
+    seat20 = bytes.fromhex(c.address[2:])
+    raw = deposit_routes(solsession, c, ixs=deposit_for_ixs(seat20, seat20))
+    d = c.deposit("100", unsigned=True, authority=AUTH)
+    assert d.status == "unsigned" and base64.b64decode(d.txs[0]) == raw
+    deposit_routes(solsession, c, ixs=deposit_for_ixs(seat20, b"\x12" * 20))
+    with pytest.raises(crx.RefusedToSign):
+        c.deposit("100", unsigned=True, authority=AUTH)
+
+
 @pytest.mark.parametrize("mut", [
     "amount", "row", "seat", "source", "extra_ix", "extra_budget_ix", "drop_budget", "fee_payer", "price_high",
     "units_high", "account_ro", "program", "signed", "vault", "swap_accounts", "trailing",
@@ -1641,7 +1703,7 @@ def test_bind_on_an_unpinned_network_makes_no_request(unpinned_net, session, tmp
 
 # ---------- a seat CRX stopped: one error on deposit, bind, ask, quote and trade; withdraw stays open ----------
 
-STOPPED_TEXT = "CRX removed this seat's access: no new trade and no deposit; withdraw() still works"
+STOPPED_TEXT = "CRX removed this seat's access: no new trade; deposit() and withdraw() still work"
 
 
 def stopped_answer(line):

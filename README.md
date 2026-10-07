@@ -240,7 +240,7 @@ Every error is a `crx.CrxError`. Branch on `.code`. Show `str(e)`: on a gateway 
 | `rate_limited` | Too many requests. `.retry_after` is the wait in seconds, when sent. |
 | `own_round_open` | Your last round is still open. |
 | `not_whitelisted` | Onboard the seat first. |
-| `seat_stopped` | Solana: CRX removed the seat's access. No new trade and no deposit. `withdraw()` still works. `except crx.NotWhitelisted` catches it too. |
+| `seat_stopped` | Solana: CRX removed the seat's access. No new trade. `deposit()` and `withdraw()` still work. `except crx.NotWhitelisted` catches it too. |
 | `seat_bound_other_payout` | Solana: the seat is bound to another payout wallet. The bind is permanent. Contact CRX. `details["bound"]` and `details["filed"]` hold the keys. |
 | `bind_in_progress` | Solana: a bind of the seat has no end yet: the seat is not bound, and the bind has not failed. `bind()` reads its end. No other bind is taken before it. |
 | `bind_failed` | Solana: the bind ended and the seat is not bound. |
