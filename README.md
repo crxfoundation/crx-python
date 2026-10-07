@@ -203,6 +203,10 @@ c.withdraw("500")      # paid to the wallet's USDC account fixed at bind
   the keys the chain holds, `details["filed"]` the ones the bind named.
 - A deposit that the program refuses on a full intake raises `tx_failed` with `details["reason"]`
   `intake_full`: no USDC left the wallet. Deposit again after the hourly check.
+- `deposit()` sends its tx once. With no confirmed status at the end of its wait it raises `send_unknown`:
+  the deposit can be on the chain. `.tx` is its signature: check it on the chain before a new deposit.
+  `tx_failed` with `details["reason"]` `expired` means not sent: two RPCs read no status after the tx expired.
+  `check_rpc_url=` or `CRX_CHECK_RPC` names the second RPC.
 - `quote()` and `ask()` read the pair's tenor band from `/markets` (`tenor.min_secs`, `tenor.max_secs`) and send
   no RFQ outside it. The error is `bad_request` with `details["limit"]` `tenor`. Its message names when the
   shortest (or the longest) trade settles now; `details["earliest_expiry"]` (or `latest_expiry`) is that instant,
@@ -248,6 +252,7 @@ Every error is a `crx.CrxError`. Branch on `.code`. Show `str(e)`: on a gateway 
 | `bad_answer` | The gateway sent an answer the SDK cannot read, or queued a withdraw other than the one signed. Read `balance()`. |
 | `trade_unknown` | The trade may still open. Do not trade again. Read `positions()` after the time the error names. |
 | `tx_failed` | A transaction would revert, or reverted. |
+| `send_unknown` | A deposit tx was sent and its outcome is not known. `.tx` is its signature. Check it on the chain before a new deposit. |
 | `network` | The gateway or the RPC did not answer. A GET is sent once more first, also after a 5xx or `mark_unavailable`. |
 
 ## Safety
