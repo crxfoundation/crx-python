@@ -240,8 +240,8 @@ class TxFailed(CrxError):
 
 
 class SendUnknown(CrxError):
-    """A transaction was sent and its outcome is not known: it can be on the chain. ``tx`` is its signature.
-    Read its status on the chain before a new deposit."""
+    """A transaction was sent and its outcome is not known: it can be on the chain. ``tx`` is its hash
+    (Ethereum) or its signature (Solana). Read its status on the chain before you send again."""
 
     code = "send_unknown"
 

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.3
+
+- Ethereum: a tx with no receipt after 300 s raises `SendUnknown` (`send_unknown`), `.tx` its hash, `details['txs']` every hash that can still be mined. It was `TxFailed`. `TxFailed` after a send means the tx reverted on the chain. A receipt with no readable status is read as no receipt.
+
 ## 0.2.2
 
 - A Solana deposit sends its tx once. A send with no clear answer (none, not JSON, HTTP 5xx) is never read as not sent: the status reads decide. With no confirmed status at the end of the wait, `deposit()` raises `SendUnknown` (`send_unknown`), `.tx` the signature. `TxFailed` with `details['reason']` `expired` (not sent) only when two RPCs each read their block height past the tx's last valid height and hold no status for it. The second RPC: `check_rpc_url=`, `CRX_CHECK_RPC`, or the row's `https://api.mainnet-beta.solana.com`.

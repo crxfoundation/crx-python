@@ -13,7 +13,7 @@ from eth_utils import keccak, to_checksum_address
 from crx import _chain
 from crx import _eip712 as e7
 from crx._chain import TIP_FLOOR, Rpc, TxLog, send_tx
-from crx.errors import BadAnswer, TxFailed
+from crx.errors import BadAnswer, SendUnknown, TxFailed
 
 from .conftest import BASE, CHAIN_ID, RPC, Clock
 
@@ -142,10 +142,38 @@ def test_the_receipt_wait_is_300_s(session, account, monkeypatch):
     session.rpc["eth_getTransactionReceipt"] = None
     t = [0.0]
     monkeypatch.setattr(_chain, "time", SimpleNamespace(monotonic=lambda: t[0]))
-    with pytest.raises(TxFailed, match=r"^approve tx 0x(ab){32} has no receipt after 300 s$"):
+    with pytest.raises(SendUnknown) as ei:
         send_tx(Rpc(RPC, session), account, CHAIN_ID, "approve", TOKEN, APPROVE,
                 sleep=lambda s: t.__setitem__(0, t[0] + s))
     assert 300 < t[0] <= 302 and len(chain.sent) == 1
+    e, h = ei.value, "0x" + "ab" * 32
+    assert not isinstance(e, TxFailed) and e.code == "send_unknown" and e.tx == h
+    assert str(e) == f"approve tx {h}. Status unknown; check this transaction before you send again."
+    assert e.details == {"step": "approve", "tx": h, "txs": [h]}
+
+
+@pytest.mark.parametrize("receipt", [{"status": None, "blockNumber": "0x11"}, {"blockNumber": "0x11"},
+                                     {"status": "0x2"}, "0x1", ["0x1"]])
+def test_a_receipt_with_no_readable_status_is_no_receipt(session, account, monkeypatch, receipt):
+    chain = Chain(session, base=GWEI, gas_price=GWEI, tip=GWEI)
+    session.rpc["eth_getTransactionReceipt"] = receipt
+    t = [0.0]
+    monkeypatch.setattr(_chain, "time", SimpleNamespace(monotonic=lambda: t[0]))
+    with pytest.raises(SendUnknown):
+        send_tx(Rpc(RPC, session), account, CHAIN_ID, "approve", TOKEN, APPROVE,
+                sleep=lambda s: t.__setitem__(0, t[0] + s))
+    assert len(chain.sent) == 1
+
+
+@pytest.mark.parametrize("status", ["0x0", "0x00"])
+def test_a_mined_revert_is_tx_failed(session, account, status):
+    chain = Chain(session, base=GWEI, gas_price=GWEI, tip=GWEI)
+    session.rpc["eth_getTransactionReceipt"] = {"status": status, "blockNumber": "0x11", "logs": []}
+    with pytest.raises(TxFailed) as ei:
+        send_tx(Rpc(RPC, session), account, CHAIN_ID, "approve", TOKEN, APPROVE, sleep=lambda s: None)
+    e, h = ei.value, "0x" + "ab" * 32
+    assert type(e) is TxFailed and e.code == "tx_failed" and str(e) == f"approve tx {h} reverted"
+    assert e.details == {"step": "approve", "tx": h} and len(chain.sent) == 1
 
 
 @pytest.mark.parametrize("base", ["-0x1", "-0x3b9aca00"])
@@ -363,7 +391,7 @@ def test_a_tx_with_no_receipt_is_replaced_at_once_on_the_next_send(session, acco
     log = TxLog(tmp_path / "txs.json")
     pool = Pool(session, account, None, monkeypatch)
     session.rpc["eth_getTransactionReceipt"] = None
-    with pytest.raises(TxFailed, match="has no receipt after 300 s"):
+    with pytest.raises(SendUnknown, match="Status unknown; check this transaction before you send again."):
         send_on(pool, session, account, log)
     (first,) = log.rows()
     _, tip, cap = fields(pool.sent[0])

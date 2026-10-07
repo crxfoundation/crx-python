@@ -1701,7 +1701,7 @@ def test_readme_solana_quickstart_names_the_version_binds_by_the_keys_and_waits_
     text = (Path(__file__).parent.parent / "README.md").read_text()
     section = text[text.index("## Solana"):text.index("## Errors")]
     assert f'"crx-python[solana] @ git+https://github.com/crxfoundation/crx-python@v{crx.__version__}"' in section
-    assert crx.__version__ == "0.2.2"
+    assert crx.__version__ == "0.2.3"
     sample = section[section.index("```python"):]
     sample = sample[:sample.index("```", 3)]
     steps = ["c.bind()", "c.deposit(", "while not c.balance().free:", "c.quote(", "c.trade(", "c.withdraw("]

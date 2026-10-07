@@ -912,6 +912,9 @@ class Client:
         Returns once the deposit is ``credited`` or ``failed``; ``pending`` when
         neither shows within 30 s (testnet) or 90 s (mainnet).
 
+        A tx that reverted on the chain raises ``TxFailed``. A tx with no receipt after 300 s raises
+        ``SendUnknown`` with its hash: it can still be mined. Check it before you send again.
+
         On Solana the seat's bound authority signs one tx: pass its ``keypair`` (a keypair file, list or
         bytes; needs ``crx-python[solana]``), or ``unsigned=True`` and the wallet's ``authority`` (base58;
         default: the client's own keypair) for the checked, unsigned tx in ``txs`` (base64) with status

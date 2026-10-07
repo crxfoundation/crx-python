@@ -4,6 +4,7 @@ import copy
 import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -12,6 +13,7 @@ from eth_account import Account
 from eth_utils import keccak, to_checksum_address
 
 import crx
+import crx._chain
 from crx import _eip712 as e7
 from crx._chain import revert_name
 from crx.signer import LocalSigner
@@ -92,6 +94,32 @@ def test_deposit_mints_approves_deposits(make_client, session, health, account):
     assert all(Account.recover_transaction(r) == account.address for r in chain.sent)
     body = next(c for c in session.calls if c["path"] == "/deposit")["body"]
     assert body == {"chain": "avax-fuji", "amount": "1000"}
+
+
+def test_deposit_with_no_receipt_is_send_unknown_and_sends_once(make_client, session, health, account, monkeypatch):
+    """No receipt after 300 s: the deposit can still be mined. SendUnknown with its hash, never TxFailed;
+    one deposit tx sent."""
+    chain = Chain(session, held=10**12)
+    deposit_route(session, health, account, 1000 * 10**6, approve=False)
+    session.rpc["eth_getTransactionReceipt"] = None
+    clock = Clock(time.time())
+    monkeypatch.setattr(crx._chain, "time", SimpleNamespace(monotonic=clock))
+    with pytest.raises(crx.SendUnknown) as ei:
+        make_client(clock=clock).deposit(1000, mint=False)
+    e = ei.value
+    h = "0x" + f"{1:064x}"  # the hash the node answered
+    assert not isinstance(e, crx.TxFailed) and e.code == "send_unknown" and e.tx == h and len(chain.sent) == 1
+    assert str(e) == f"deposit tx {h}. Status unknown; check this transaction before you send again."
+
+
+def test_deposit_mined_revert_is_tx_failed(make_client, session, health, account):
+    chain = Chain(session, held=10**12)
+    deposit_route(session, health, account, 1000 * 10**6, approve=False)
+    session.rpc["eth_getTransactionReceipt"] = lambda p: {"status": "0x0", "blockNumber": "0x1", "logs": []}
+    with pytest.raises(crx.TxFailed) as ei:
+        make_client(clock=Clock(time.time())).deposit(1000, mint=False)
+    assert type(ei.value) is crx.TxFailed and ei.value.details["tx"] == "0x" + f"{1:064x}" and len(chain.sent) == 1
+    assert str(ei.value).endswith(" reverted")
 
 
 def test_deposit_no_mint(make_client, session, health, account):

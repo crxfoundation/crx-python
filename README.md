@@ -5,7 +5,7 @@ Trade FX forwards on CRX from Python.
 ## Install
 
 ```bash
-pip install "git+https://github.com/crxfoundation/crx-python@v0.2.2"
+pip install "git+https://github.com/crxfoundation/crx-python@v0.2.3"
 ```
 
 Python 3.10 or newer.
@@ -158,10 +158,10 @@ A viewer reads `balance()`, `positions()` and `trades()` only. Other calls raise
 
 Sign up first at portal.crxfx.com/sign-up with the same wallet. The sign-up runs in a browser wallet: for a keypair file, import the key into a browser wallet first.
 
-Install version 0.2.2 with the extra:
+Install version 0.2.3 with the extra:
 
 ```bash
-pip install "crx-python[solana] @ git+https://github.com/crxfoundation/crx-python@v0.2.2"
+pip install "crx-python[solana] @ git+https://github.com/crxfoundation/crx-python@v0.2.3"
 ```
 
 ```python
@@ -251,8 +251,8 @@ Every error is a `crx.CrxError`. Branch on `.code`. Show `str(e)`: on a gateway 
 | `refused_to_sign` | The gateway served something unexpected. Nothing signed. |
 | `bad_answer` | The gateway sent an answer the SDK cannot read, or queued a withdraw other than the one signed. Read `balance()`. |
 | `trade_unknown` | The trade may still open. Do not trade again. Read `positions()` after the time the error names. |
-| `tx_failed` | A transaction would revert, or reverted. |
-| `send_unknown` | A deposit tx was sent and its outcome is not known. `.tx` is its signature. Check it on the chain before a new deposit. |
+| `tx_failed` | A transaction would revert and was not sent, the node refused it, or it reverted on the chain. |
+| `send_unknown` | A transaction was sent and its outcome is not known: it can still land. `.tx` is its hash (Ethereum) or signature (Solana). Check it on the chain before you send again. Ethereum: no receipt after 300 s. |
 | `network` | The gateway or the RPC did not answer. A GET is sent once more first, also after a 5xx or `mark_unavailable`. |
 
 ## Safety

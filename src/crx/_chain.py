@@ -18,7 +18,7 @@ from eth_abi import decode
 from eth_abi.exceptions import DecodingError
 from eth_utils import keccak, to_checksum_address
 
-from .errors import BadAnswer, NetworkError, TxFailed, clean
+from .errors import BadAnswer, NetworkError, SendUnknown, TxFailed, clean
 
 try:
     import fcntl
@@ -228,6 +228,21 @@ class TxLog:
             os.close(lock)  # ends the lock
 
 
+UNKNOWN_LINE = "Status unknown; check this transaction before you send again."
+
+
+def receipt_status(receipt: Any) -> int | None:
+    """1 for a receipt of a mined tx that succeeded, 0 for one that reverted, None for no receipt or one
+    with no status this SDK can read."""
+    if not isinstance(receipt, dict):
+        return None
+    try:
+        v = int(receipt.get("status"), 16)
+    except (TypeError, ValueError):
+        return None
+    return v if v in (0, 1) else None
+
+
 def underpriced(error: Any) -> bool:
     """True when the node refused a tx as an underpriced replacement of a pending tx at its nonce."""
     m = str(error.get("message") if isinstance(error, dict) else error).lower()
@@ -322,6 +337,10 @@ def send_tx(
     gets one more send at that nonce on the same terms. Each tx the node takes, or may hold, goes
     into ``log``. A replacement waits for its own receipt and for those of the txs it replaces:
     the first receipt ends the step, and its hash is the result.
+
+    A receipt with status 0 raises ``TxFailed``: the tx reverted on the chain. With no receipt of status 0
+    or 1 after ``wait_s``, the tx can still be mined: ``SendUnknown``, the hash in ``details['tx']`` and
+    every hash that can still be mined in ``details['txs']``.
     """
     sender = account.address
     chain_id = int(chain_id)
@@ -382,10 +401,11 @@ def send_tx(
                 receipt = rpc("eth_getTransactionReceipt", h)
             except (RpcError, NetworkError, BadAnswer):
                 receipt = None
-            if receipt:
-                if receipt.get("status") != "0x1":
-                    raise TxFailed(f"{what} tx {h} reverted", details={"step": what, "tx": h})
+            mined = receipt_status(receipt)
+            if mined == 1:
                 return h
+            if mined == 0:
+                raise TxFailed(f"{what} tx {h} reverted", details={"step": what, "tx": h})
         if time.monotonic() > deadline:
-            raise TxFailed(f"{what} tx {tx} has no receipt after {int(wait_s)} s", details={"step": what, "tx": tx})
+            raise SendUnknown(f"{what} tx {tx}. {UNKNOWN_LINE}", details={"step": what, "tx": tx, "txs": watch})
         sleep(2)
