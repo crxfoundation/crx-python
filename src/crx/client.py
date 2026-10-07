@@ -756,7 +756,7 @@ class Client:
 
         Returns once the trade is ``open`` or ``refused``. When neither shows within
         30 s (testnet) or 90 s (mainnet), returns ``sending`` or ``pending``.
-        ``RelayUnavailable`` raises when CRX's relay takes no trade now: no trade opened.
+        ``ServiceUnavailable`` raises when the service takes no trade now: no trade opened.
         """
         self._need_seat()
         if not isinstance(quote, Quote):

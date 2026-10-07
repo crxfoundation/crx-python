@@ -23,7 +23,7 @@ from ._http import Gateway
 from .signer import as_signer, sign_typed
 from .errors import (
     CrxError, Declined, NetworkError, OwnRoundOpen, QuoteDropped, QuoteExpired, QuoteNotYours, RateLimited,
-    RefusedToSign, RelayUnavailable, TradeUnknown, clean, gateway_code,
+    RefusedToSign, ServiceUnavailable, TradeUnknown, clean, gateway_code,
 )
 
 QUOTE_WINDOW = 630  # s: the chain arms only while the quote end is at most 600 s ahead, plus 30 s of clock slack
@@ -31,11 +31,12 @@ NONCE_AHEAD_MS = 86_400_000  # the gateway's bound: ownNonce at most 24 h past n
 NEW_QUOTE = "not opened; request a new quote"
 MAX_POSTS = 3  # accept bodies per trade; a re-post of the same body after 409 rejected does not count
 # Accept refusals that reserve nothing and send nothing, even after a signed post.
-NOTHING_SENT = (QuoteExpired, OwnRoundOpen, QuoteNotYours, RateLimited, Declined, RelayUnavailable)
+NOTHING_SENT = (QuoteExpired, OwnRoundOpen, QuoteNotYours, RateLimited, Declined, ServiceUnavailable)
 # The gateway's band declines: answered before the accept reserves anything, whatever the HTTP status.
 DECLINES = ("rate_out_of_band", "mark_unavailable", "position_matured")
-# The relay takes no new item: answered before the accept reserves anything, whatever the HTTP status.
-RELAY = "relay_unavailable"
+# The service takes no new trade: answered before the accept reserves anything, whatever the HTTP status.
+# relay_unavailable is the code a gateway before service_unavailable sends.
+UNAVAILABLE = ("service_unavailable", "relay_unavailable")
 TEMPLATE = "trade_template"
 STALE = "trade_stale"
 
@@ -84,9 +85,9 @@ def accept_refused(r: Any) -> CrxError:
     if k == (409, "rejected"):
         return QuoteExpired(f"the maker refused the accept; {NEW_QUOTE}", status=409, gateway_code="rejected",
                             details=d)
-    if k[1] == RELAY:
-        return RelayUnavailable(f"CRX cannot send trades now: the trade is {NEW_QUOTE}", status=k[0],
-                                gateway_code=RELAY, details=d)
+    if k[1] in UNAVAILABLE:
+        return ServiceUnavailable(f"service temporarily unavailable: the trade is {NEW_QUOTE}", status=k[0],
+                                  gateway_code=k[1], details=d)
     return refused(r)
 
 
@@ -277,7 +278,7 @@ class Binder:
 
         Returns (the 200 answer, the template signed, the answer time). When the gateway
         does not answer a signed post, the answer is ``{}``: the gateway may hold the
-        signature, so the trade status decides. A band decline or ``relay_unavailable`` raises as
+        signature, so the trade status decides. A band decline or ``service_unavailable`` raises as
         is: the gateway reserved nothing. Before the first signature, a refusal
         raises as is. After it, the trade can still open, so any failure other than a
         NOTHING_SENT refusal raises TradeUnknown.
@@ -304,7 +305,7 @@ class Binder:
                 except NetworkError:
                     r = None
                 posts += 1
-                if status_code(r)[1] in DECLINES + (RELAY,):
+                if status_code(r)[1] in DECLINES + UNAVAILABLE:
                     raise accept_refused(r)
                 if r is None or r.status_code >= 500:
                     return {}, t, self.now()

@@ -210,11 +210,21 @@ class ServerError(CrxError):
     code = "server_error"
 
 
-class RelayUnavailable(ServerError):
-    """CRX's relay takes no new item now. The gateway refused the call before it reserved or sent anything.
-    On an accept: no trade opened, nothing armed or sent. Accept again later, or request a new quote."""
+class ServiceUnavailable(ServerError):
+    """The service takes no new trade or withdrawal now. The gateway refused the call before it reserved or
+    sent anything. On an accept: no trade opened. Accept again later, or request a new quote."""
 
-    code = "relay_unavailable"
+    code = "service_unavailable"
+
+
+# The 0.1.0 name of ServiceUnavailable.
+RelayUnavailable = ServiceUnavailable
+
+
+class SeatCannotSign(CrxError):
+    """This address cannot sign trades: it is a smart-contract wallet. Nothing was sent."""
+
+    code = "seat_cannot_sign"
 
 
 class RefusedToSign(CrxError):
@@ -330,7 +340,10 @@ _BY_GATEWAY_CODE: dict[str, type[CrxError]] = {
     "viewer_invalid": BadRequest,
     "viewer_is_maker": BadRequest,
     "viewers_unavailable": ServerError,
-    "relay_unavailable": RelayUnavailable,
+    "service_unavailable": ServiceUnavailable,
+    # The code a gateway before service_unavailable sends.
+    "relay_unavailable": ServiceUnavailable,
+    "seat_cannot_sign": SeatCannotSign,
     "upstream": ServerError,
     "internal": ServerError,
     "timeout": ServerError,

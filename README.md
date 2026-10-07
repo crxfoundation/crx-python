@@ -5,7 +5,7 @@ Trade FX forwards on CRX from Python.
 ## Install
 
 ```bash
-pip install "git+https://github.com/crxfoundation/crx-python@v0.1.0"
+pip install "git+https://github.com/crxfoundation/crx-python@v0.1.1"
 ```
 
 Python 3.10 or newer.
@@ -162,7 +162,8 @@ Every error is a `crx.CrxError`. Branch on `.code`.
 | `below_min`, `above_max` | Notional out of range. |
 | `no_quotes` | No maker quoted in time. From `rfqs(only=)`: the RFQ did not reach your seat in time. |
 | `rate_out_of_band`, `mark_unavailable` | The gateway declined the accept: the quote's rate is outside the off-market band, or no market price was read. Nothing was reserved or sent. Ask for a new quote. `except crx.Declined` catches both. |
-| `relay_unavailable` | CRX's relay takes no trade now. Nothing was reserved or sent: no trade opened. Accept again later, or ask for a new quote. `except crx.ServerError` catches it too. |
+| `service_unavailable` | The service takes no trade now. Nothing was reserved or sent: no trade opened. Accept again later, or ask for a new quote. `except crx.ServerError` catches it too. |
+| `seat_cannot_sign` | This address cannot sign trades: it is a smart-contract wallet. Use an EOA or MPC address. Nothing was sent. |
 | `rfq_cancelled` | The gateway cancelled the RFQ. `.reason`: `rate_out_of_band` (no quote inside the off-market band) or `mark_unavailable` (no market price). `except crx.NoQuotes` catches it too. |
 | `quote_lost` | Your maker quote opened no trade. `reason`: `another_maker`, `expired`, `cancelled`, `dropped` or `timeout`. |
 | `quote_format_outdated` | The gateway takes a newer quote format. Update the SDK. Nothing was written. |

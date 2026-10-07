@@ -614,43 +614,45 @@ def test_decline_on_the_unsigned_ask_is_typed(make_client, venue, session, clock
     assert accepts(session) == [{"quote_id": QID}]
 
 
-# ---------- the accept's relay_unavailable: typed, nothing reserved, never a pending trade ----------
+# ---------- the accept's service_unavailable: typed, nothing reserved, never a pending trade ----------
 
-RELAY_BODY = {"code": "relay_unavailable", "outcome": "unavailable", "error": "service temporarily unavailable",
-              "message": "Service temporarily unavailable: trade not executed."}
+DOWN_BODY = {"code": "service_unavailable", "outcome": "unavailable", "error": "service temporarily unavailable",
+             "message": "Service temporarily unavailable: trade not executed."}
 
 
-def relay_down(venue, session, signed_only=True, status=503):
-    """The accept answers ``relay_unavailable``: on a signed post, or on any post."""
+def service_down(venue, session, signed_only=True, status=503, code="service_unavailable"):
+    """The accept answers ``code``: on a signed post, or on any post."""
     def accept(req):
         if signed_only and "sig" not in req["body"]:
             return venue.accept(req)
-        return (status, RELAY_BODY)
+        return (status, dict(DOWN_BODY, code=code))
     session.routes[("POST", f"/rfqs/{RFQ}/accept")] = accept
 
 
-@pytest.mark.parametrize("status", [503, 409])  # the code decides, whatever the HTTP status
-def test_relay_unavailable_on_the_signed_accept_raises(make_client, venue, session, clock, status):
-    relay_down(venue, session, status=status)
+# The code decides, whatever the HTTP status. relay_unavailable: a gateway before service_unavailable.
+@pytest.mark.parametrize("status,code", [(503, "service_unavailable"), (409, "service_unavailable"),
+                                         (503, "relay_unavailable")])
+def test_service_unavailable_on_the_signed_accept_raises(make_client, venue, session, clock, status, code):
+    service_down(venue, session, status=status, code=code)
     c = make_client(clock=clock)
     q = c.quote("USD/MXN", "buy", 25_000)
     polls, start = len(trade_polls(session)), clock()
-    with pytest.raises(crx.RelayUnavailable) as ei:
+    with pytest.raises(crx.ServiceUnavailable) as ei:
         c.trade(q)
     e = ei.value
     assert isinstance(e, crx.ServerError) and not isinstance(e, crx.TradeUnknown)
-    assert (e.code, e.status, e.gateway_code) == ("relay_unavailable", status, "relay_unavailable")
-    assert "not opened" in str(e)
+    assert (e.code, e.status, e.gateway_code) == ("service_unavailable", status, code)
+    assert "not opened" in str(e) and "relay" not in str(e).lower()
     assert len(trade_polls(session)) == polls and clock() == start  # no status polls: no pending trade
     assert len(signed_posts(session)) == 1 and sent_nothing(session)
 
 
-def test_relay_unavailable_on_the_unsigned_ask_raises(make_client, venue, session, clock):
+def test_service_unavailable_on_the_unsigned_ask_raises(make_client, venue, session, clock):
     venue.winner = False  # the row carries no template: the SDK asks for one first
-    relay_down(venue, session, signed_only=False)
+    service_down(venue, session, signed_only=False)
     c = make_client(clock=clock)
     q = c.quote("USD/MXN", "buy", 25_000, wait=1)
-    with pytest.raises(crx.RelayUnavailable) as ei:
+    with pytest.raises(crx.ServiceUnavailable) as ei:
         c.trade(q)
     assert not isinstance(ei.value, crx.TradeUnknown)
     assert accepts(session) == [{"quote_id": QID}]
@@ -661,17 +663,30 @@ def test_other_503_on_the_signed_accept_still_reads_status(make_client, venue, s
     def accept(req):
         if "sig" in req["body"]:
             venue.sig = req["body"]["sig"]
-            return (503, dict(RELAY_BODY, code="upstream"))
+            return (503, dict(DOWN_BODY, code="upstream"))
         return venue.accept(req)
     session.routes[("POST", f"/rfqs/{RFQ}/accept")] = accept
     c = make_client(clock=clock)
     assert c.trade(c.quote("USD/MXN", "buy", 25_000)).status == "open"
 
 
-def test_relay_unavailable_maps_to_its_own_server_error():
-    e = crx.errors.from_gateway(503, RELAY_BODY)
-    assert type(e) is crx.RelayUnavailable and isinstance(e, crx.ServerError) and e.code == "relay_unavailable"
-    assert type(crx.errors.from_gateway(503, dict(RELAY_BODY, code="upstream"))) is crx.ServerError
+@pytest.mark.parametrize("code", ["service_unavailable", "relay_unavailable"])
+def test_service_unavailable_maps_to_its_own_server_error(code):
+    e = crx.errors.from_gateway(503, dict(DOWN_BODY, code=code))
+    assert type(e) is crx.ServiceUnavailable and isinstance(e, crx.ServerError) and e.code == "service_unavailable"
+    assert e.gateway_code == code
+    assert type(crx.errors.from_gateway(503, dict(DOWN_BODY, code="upstream"))) is crx.ServerError
+    assert crx.RelayUnavailable is crx.ServiceUnavailable  # the 0.1.0 name
+    assert "RelayUnavailable" not in crx.__all__ and "ServiceUnavailable" in crx.__all__
+
+
+def test_seat_cannot_sign_maps_to_its_own_error():
+    body = {"code": "seat_cannot_sign", "outcome": "not_permitted", "error": "this address cannot sign trades",
+            "message": "This address cannot sign trades."}
+    e = crx.errors.from_gateway(403, body)
+    assert type(e) is crx.SeatCannotSign and not isinstance(e, crx.AuthError)
+    assert (e.code, e.status, e.gateway_code) == ("seat_cannot_sign", 403, "seat_cannot_sign")
+    assert "SeatCannotSign" in crx.__all__
 
 
 # ---------- what the SDK checks before it signs (SPEC §5.2): one refusal each ----------
