@@ -84,6 +84,18 @@ def test_quote_format_outdated_is_a_bad_request():
     assert type(from_gateway(400, {"error": "quote_format_outdated"})) is crx.QuoteFormatOutdated
 
 
+def test_the_message_is_the_gateways_message_and_its_error_goes_to_details():
+    body = {"code": "not_whitelisted", "error": "not whitelisted: account 0x11 is not approved on solana",
+            "message": "Account not approved. Complete onboarding first.", "details": {"chain": "solana"}}
+    e = from_gateway(403, body)
+    assert type(e) is crx.NotWhitelisted and str(e) == "Account not approved. Complete onboarding first."
+    assert e.details == {"chain": "solana", "error": body["error"]}
+    e = from_gateway(403, dict(body, message=" "))
+    assert str(e) == body["error"] and e.details == {"chain": "solana"}
+    e = from_gateway(409, {"code": "conflict", "message": "Request conflict.", "error": ["not text"]})
+    assert str(e) == "Request conflict." and e.details == {}
+
+
 def test_leg_live_and_already_accepted_read_their_details():
     e = from_gateway(409, {"code": "leg_live", "error": "live", "details": {"leg_id": "0xAB"}})
     assert e.leg_id == "0xab" and from_gateway(409, {"code": "leg_live", "error": "live"}).leg_id is None

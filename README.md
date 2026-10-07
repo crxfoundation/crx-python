@@ -205,7 +205,7 @@ c.withdraw("500")      # paid to the wallet's USDC account fixed at bind
 
 ## Errors
 
-Every error is a `crx.CrxError`. Branch on `.code`.
+Every error is a `crx.CrxError`. Branch on `.code`. Show `str(e)`: on a gateway refusal it is the gateway's `message`.
 
 | Code | Meaning |
 |---|---|

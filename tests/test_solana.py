@@ -1512,7 +1512,7 @@ def test_an_ethereum_client_reads_that_answer_as_before(make_client, session):
         c.balance()
     e = ei.value
     assert type(e) is crx.NotWhitelisted and e.code == "not_whitelisted" and e.status == 403
-    assert str(e) == STOPPED_TRADE[1]["error"] and e.details == {}
+    assert str(e) == STOPPED_TRADE[1]["message"] and e.details == {"error": STOPPED_TRADE[1]["error"]}
 
 
 # ---------- the README's Solana quickstart ----------
@@ -1838,7 +1838,7 @@ def test_a_tenor_refusal_with_figures_of_any_size_raises_no_other_error(solnet, 
 
 def test_an_ethereum_client_makes_no_tenor_check_and_keeps_the_gateways_error(make_client, session, markets):
     """The band is checked on Solana only. An Ethereum client sends the RFQ whatever the row serves, and a
-    tenor refusal is the gateway's own error."""
+    tenor refusal carries the gateway's own message."""
     m = copy.deepcopy(markets)
     for row in m["markets"]:
         row["tenor"] = dict(BAND)
@@ -1851,7 +1851,8 @@ def test_an_ethereum_client_makes_no_tenor_check_and_keeps_the_gateways_error(ma
         with pytest.raises(crx.BadRequest) as ei:
             call("USD/MXN", "buy", 25_000, expiry=timedelta(seconds=60))
         e = ei.value
-        assert str(e) == answer[1]["error"] and e.details == answer[1]["details"] and e.status == 400
+        assert str(e) == answer[1]["message"] and e.status == 400
+        assert e.details == dict(answer[1]["details"], error=answer[1]["error"])
     assert len(rfqs_sent(session)) == 2
 
 
@@ -2232,7 +2233,7 @@ def test_a_bind_in_progress_with_other_keys_raises_before_a_signature(solnet, so
      "conflict: the gateway's own line"),
     ((409, {"error": "conflict: the gateway's own line", "code": "conflict", "outcome": "rejected"}), crx.CrxError,
      "conflict: the gateway's own line"),
-    ((400, dict(IN_FLIGHT[1])), crx.CrxError, IN_FLIGHT[1]["error"]),
+    ((400, dict(IN_FLIGHT[1])), crx.CrxError, IN_FLIGHT[1]["message"]),
 ], ids=["in_flight", "door_closed_409", "service_503", "service_409", "relay_503", "relay_409",
         "conflict_no_outcome", "conflict_other_outcome", "other_status"])
 def test_the_bind_door_refusals(solnet, solsession, tmp_path, account, door, err, text):

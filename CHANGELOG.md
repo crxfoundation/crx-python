@@ -2,8 +2,9 @@
 
 ## 0.2.0
 
-Adds the Solana network. Every Ethereum network behaves as in 0.1.1.
+Adds the Solana network. Every Ethereum network behaves as in 0.1.1, except for the first line below.
 
+- On every network, a gateway refusal's `str(e)` is the gateway's `message`; `details['error']` holds its `error`. A body with no `message` gives its `error`, as before.
 - `network="solana"`: Solana mainnet at `https://portal.crxfx.com/api`. Off until `allow_mainnet=True` or `CRX_ALLOW_MAINNET=1`; needs an RPC (`rpc_url=` or `CRX_RPC`). Every signing call refuses until the SDK pins the program.
 - `Client(keypair=)` takes the Solana wallet: a `solana-keygen` JSON file (mode 600), a list or bytes. The seat key is derived from the wallet's signature of one fixed text, the same key the site derives. Install the extra: `crx-python[solana]`.
 - Before the first signature the client checks the cluster, the program, the 3-field domain (no chain id) and the core and vault addresses. A mismatch refuses (`RefusedToSign` or `ConfigError`); nothing is signed.

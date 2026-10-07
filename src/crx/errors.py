@@ -406,14 +406,18 @@ def wait_secs(details: dict) -> float | None:
 def from_gateway(status: int, body: Any, text: str = "", *, host: str = "", retry_after: Any = None) -> CrxError:
     """Map one gateway refusal to a typed error.
 
-    A body that is not a JSON object gives the message ``HTTP <status> from <host>``;
-    its first text line goes to ``details['body']``. A Retry-After header fills
-    ``details['retry_after_secs']`` when the body has none.
+    The message is the gateway's ``message``; with none, its ``error``. When the body has both,
+    ``details['error']`` holds the ``error``. A body that is not a JSON object gives the message
+    ``HTTP <status> from <host>``; its first text line goes to ``details['body']``. A Retry-After
+    header fills ``details['retry_after_secs']`` when the body has none.
     """
     if isinstance(body, dict):
         gw = gateway_code(body) or None
-        msg = clean(body.get("error") or body.get("detail") or f"HTTP {status}")
+        said, why = (v if isinstance(v, str) and v.strip() else None for v in (body.get("message"), body.get("error")))
+        msg = clean(said or why or body.get("detail") or f"HTTP {status}")
         details = dict(body["details"]) if isinstance(body.get("details"), dict) else {}
+        if said and why:
+            details.setdefault("error", clean(why))
     else:
         gw = None
         msg = f"HTTP {status} from {clean(host, 100)}" if host else f"HTTP {status}"

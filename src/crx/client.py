@@ -1156,7 +1156,8 @@ class Client:
                 r = self._gw.request("POST", "/withdraw", body=body, ok=(200, 202))
                 break
             except CrxError as e:
-                text = str(e).removeprefix("conflict: ")  # crx-api displays its conflict as "conflict: <why>"
+                # crx-api writes its conflict as "conflict: <why>" in the body's error.
+                text = str(e.details.get("error") or e).removeprefix("conflict: ")
                 if not (e.status == 409 and e.code == "conflict" and text.startswith(UNREAD_SETTLEMENT)):
                     raise
                 left = until - self._clock()
