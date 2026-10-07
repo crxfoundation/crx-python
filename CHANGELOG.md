@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.2
 
 - A Solana deposit sends its tx once. A send with no clear answer (none, not JSON, HTTP 5xx) is never read as not sent: the status reads decide. With no confirmed status at the end of the wait, `deposit()` raises `SendUnknown` (`send_unknown`), `.tx` the signature. `TxFailed` with `details['reason']` `expired` (not sent) only when two RPCs each read their block height past the tx's last valid height and hold no status for it. The second RPC: `check_rpc_url=`, `CRX_CHECK_RPC`, or the row's `https://api.mainnet-beta.solana.com`.
 - Any network: an RPC answer with HTTP 5xx raises `BadAnswer`. An Ethereum send with such an answer is watched by its hash and recorded, as a send with no answer.
