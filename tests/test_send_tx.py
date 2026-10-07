@@ -89,6 +89,32 @@ def test_a_base_fee_rise_after_the_send_still_mines(session, account):
     assert len(chain.sent) == 1 and fee_cap(chain.sent[0]) >= 129_000_000
 
 
+@pytest.mark.parametrize("page", [(502, "<html>502 Bad Gateway</html>"), (504, "<html>504</html>"),
+                                  (502, {"jsonrpc": "2.0", "id": 1, "error": {"code": -32603, "message": "x"}})],
+                         ids=["502", "504", "502_json"])
+def test_a_send_with_no_clear_answer_is_watched_and_recorded(session, account, tmp_path, page):
+    """A proxy page after the send is no refusal: the node may hold the tx. Its own hash is watched, the
+    tx record holds it, and it is sent once."""
+    chain = Chain(session, base=30 * GWEI, gas_price=31 * GWEI, tip=GWEI)
+    first = chain.send
+
+    def send_then_page(params):
+        first(params)
+        return {"__http__": page}
+    session.rpc["eth_sendRawTransaction"] = send_then_page
+    log = TxLog(tmp_path / "txs.json")
+    h = send_tx(Rpc(RPC, session), account, CHAIN_ID, "approve", TOKEN, APPROVE, sleep=lambda s: None, log=log)
+    want = "0x" + keccak(bytes.fromhex(chain.sent[0][2:])).hex()
+    assert h == want and len(chain.sent) == 1 and [r["hash"] for r in log.rows()] == [want]
+
+
+def test_a_5xx_rpc_answer_is_no_node_answer(session):
+    session.rpc["eth_chainId"] = {"__http__": (502, {"jsonrpc": "2.0", "id": 1, "error": {"code": 1, "message": "x"}})}
+    with pytest.raises(BadAnswer) as ei:
+        Rpc(RPC, session)("eth_chainId")
+    assert str(ei.value) == "the RPC answered HTTP 502"
+
+
 @pytest.mark.parametrize("served, tip", [(2 * GWEI, 2 * GWEI), (0, TIP_FLOOR), (None, TIP_FLOOR)])
 def test_a_type_2_tx_carries_the_fee_fields(session, account, served, tip):
     base = 30 * GWEI

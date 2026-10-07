@@ -18,10 +18,11 @@ from typing import Any, Callable
 from eth_utils import keccak
 
 from ._bind import UNAVAILABLE, Binder
+from ._chain import RpcError
 from ._http import Gateway
 from .errors import (
-    BadAnswer, BadRequest, ConfigError, CrxError, NetworkError, NotWhitelisted, RefusedToSign, ServerError,
-    ServiceUnavailable, TradeUnknown, TxFailed, clean, gateway_code,
+    BadAnswer, BadRequest, ConfigError, CrxError, NetworkError, NotWhitelisted, RefusedToSign, SendUnknown,
+    ServerError, ServiceUnavailable, TradeUnknown, TxFailed, clean, gateway_code,
 )
 
 B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
@@ -445,42 +446,79 @@ def deposit_failed(lead: str, err: Any, sig: str, limit: int) -> TxFailed:
     return TxFailed(f"{lead}: {clean(err, limit)}", details={"tx": sig})
 
 
-def send_and_confirm(rpc: Any, raw: bytes, *, last_valid: int | None, wait_s: float = 90,
-                     sleep: Callable[[float], None] = time.sleep) -> str:
-    """sendTransaction, then poll getSignatureStatuses until confirmed. Returns the base58 signature."""
+SEND_UNKNOWN_LINE = "deposit outcome unknown: check transaction {sig} on the chain before a new deposit"
+EXPIRED_LINE = "deposit not sent: the transaction expired before it reached the chain; no USDC left the wallet"
+FOUND, ABSENT, UNREAD = "found", "absent", "unread"
+
+
+def sig_status(rpc: Any, sig: str) -> tuple[str, dict | None]:
+    """The status of ``sig`` on one RPC: (FOUND, its row), (ABSENT, None) when the RPC answers that it holds
+    none, (UNREAD, None) when the read has no clear answer."""
+    try:
+        row = rpc("getSignatureStatuses", [sig], {"searchTransactionHistory": True})["value"][0]
+    except Exception:
+        return UNREAD, None
+    if row is None:
+        return ABSENT, None
+    return (FOUND, row) if isinstance(row, dict) else (UNREAD, None)
+
+
+def past(rpc: Any, last_valid: int) -> bool:
+    """True when the RPC reads its confirmed block height above ``last_valid``: the tx can no longer land."""
+    try:
+        return int(rpc("getBlockHeight", {"commitment": "confirmed"})) > last_valid
+    except Exception:
+        return False
+
+
+def expired_on_both(rpcs: tuple, sig: str, last_valid: int) -> tuple[str, dict | None]:
+    """The verdict of two RPCs after the blockhash expired. (FOUND, row) when one holds ``sig``; (ABSENT, None)
+    only when each RPC reads its height past ``last_valid`` and then holds no status; else (UNREAD, None)."""
+    verdict: tuple[str, dict | None] = (ABSENT, None)
+    for r in rpcs:
+        if not past(r, last_valid):
+            verdict = (UNREAD, None)
+            continue
+        kind, row = sig_status(r, sig)
+        if kind == FOUND:
+            return kind, row
+        if kind == UNREAD:
+            verdict = (UNREAD, None)
+    return verdict
+
+
+def send_and_confirm(rpc: Any, raw: bytes, *, last_valid: int | None, check_rpc: Any = None, wait_s: float = 120,
+                     sleep: Callable[[float], None] = time.sleep, clock: Callable[[], float] = time.monotonic) -> str:
+    """sendTransaction once, then poll getSignatureStatuses until confirmed. Returns the base58 signature.
+
+    The tx is sent once only. A send refused by the node (an RPC error object) raises ``TxFailed``: not sent.
+    A send with no clear answer (none, not JSON, HTTP 5xx) can be on the chain: the status reads decide.
+    ``TxFailed`` "not sent" after the send only when ``rpc`` and ``check_rpc`` each read their block height
+    past ``last_valid`` and hold no status for the signature. Any other end without a confirmed status
+    raises ``SendUnknown`` with the signature in ``details['tx']``."""
     sig = b58encode(raw[1:65])
     try:
         rpc("sendTransaction", base64.b64encode(raw).decode(),
             {"encoding": "base64", "preflightCommitment": "confirmed"})
-    except NetworkError:
-        pass  # the node may hold it; its own signature is the handle
-    except Exception as e:  # RpcError: preflight refused it
-        raise deposit_failed("deposit not sent", getattr(e, "error", e), sig, 160) from None
-    deadline = time.monotonic() + wait_s
+    except RpcError as e:  # the node refused it: preflight or the send
+        raise deposit_failed("deposit not sent", e.error, sig, 160) from None
+    except Exception:
+        pass  # no clear answer: the node may hold it; its own signature is the handle
+    rpcs = (rpc,) if check_rpc is None else (rpc, check_rpc)
+    deadline = clock() + wait_s
     while True:
-        st = None
-        try:
-            v = rpc("getSignatureStatuses", [sig], {"searchTransactionHistory": True})
-            st = (v or {}).get("value", [None])[0]
-        except Exception:
-            st = None
-        if st:
+        kind, st = sig_status(rpc, sig)
+        if kind != FOUND and last_valid is not None and past(rpc, last_valid):
+            kind, st = expired_on_both(rpcs, sig, last_valid)
+            if kind == ABSENT and check_rpc is not None:
+                raise TxFailed(EXPIRED_LINE, details={"tx": sig, "reason": "expired"})
+        if kind == FOUND and st is not None:
             if st.get("err"):
                 raise deposit_failed(f"deposit tx {sig} failed", st["err"], sig, 120)
             if st.get("confirmationStatus") in ("confirmed", "finalized"):
                 return sig
-        if last_valid is not None:
-            try:
-                if int(rpc("getBlockHeight", {"commitment": "confirmed"})) > last_valid:
-                    raise TxFailed(f"deposit tx {sig} expired unconfirmed; ask again", details={"tx": sig})
-            except (TypeError, ValueError):
-                pass
-            except TxFailed:
-                raise
-            except Exception:
-                pass
-        if time.monotonic() > deadline:
-            raise TxFailed(f"deposit tx {sig} not confirmed after {int(wait_s)} s", details={"tx": sig})
+        if clock() > deadline:
+            raise SendUnknown(SEND_UNKNOWN_LINE.format(sig=sig), details={"tx": sig})
         sleep(2)
 
 

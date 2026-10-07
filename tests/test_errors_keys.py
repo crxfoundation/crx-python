@@ -249,6 +249,8 @@ def test_rpc_non_json_is_bad_answer(make_client, session):
     import requests
 
     class NotJson:
+        status_code = 200
+
         def json(self):
             raise requests.exceptions.JSONDecodeError("x", "doc", 0)
 

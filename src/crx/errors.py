@@ -239,6 +239,18 @@ class TxFailed(CrxError):
     code = "tx_failed"
 
 
+class SendUnknown(CrxError):
+    """A transaction was sent and its outcome is not known: it can be on the chain. ``tx`` is its signature.
+    Read its status on the chain before a new deposit."""
+
+    code = "send_unknown"
+
+    @property
+    def tx(self) -> str | None:
+        v = self.details.get("tx")
+        return v if isinstance(v, str) else None
+
+
 class QuoteLost(CrxError):
     """Your quote opened no trade. ``reason`` says why:
 

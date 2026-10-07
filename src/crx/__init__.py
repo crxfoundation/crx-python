@@ -6,7 +6,8 @@ from .errors import (
     InsufficientCollateral, LegIdTaken, LegLive, MarkUnavailable, MarketClosed, MarketPaused, NetworkError, NoQuotes,
     NotWhitelisted, OwnRoundOpen, PositionMatured, QuoteDropped, QuoteExpired, QuoteFillsFull, QuoteFormatOutdated,
     QuoteLost, QuoteNotYours, RateLimited, RateOutOfBand, RefusedToSign, Rejected, RelayUnavailable, RfqCancelled,
-    SeatCannotSign, SeatNotReady, ServerError, ServiceUnavailable, TradeUnknown, TxFailed, UnknownOrEnded,
+    SeatCannotSign, SeatNotReady, SendUnknown, ServerError, ServiceUnavailable, TradeUnknown, TxFailed,
+    UnknownOrEnded,
 )
 from ._solana import BindFailed, BindInProgress, SeatBoundOtherPayout, SeatStopped
 from .models import (
@@ -24,7 +25,7 @@ __all__ = [
     "InsufficientCollateral", "LegIdTaken", "LegLive", "MarketClosed", "MarketPaused", "NetworkError", "NoQuotes",
     "NotWhitelisted", "OwnRoundOpen", "QuoteDropped", "QuoteExpired", "QuoteFillsFull", "QuoteFormatOutdated",
     "QuoteLost", "QuoteNotYours", "RateLimited", "RefusedToSign", "Rejected", "RfqCancelled",
-    "SeatCannotSign", "SeatNotReady", "SeatStopped", "ServerError", "ServiceUnavailable", "TradeUnknown", "TxFailed",
-    "UnknownOrEnded",
+    "SeatCannotSign", "SeatNotReady", "SeatStopped", "SendUnknown", "ServerError", "ServiceUnavailable",
+    "TradeUnknown", "TxFailed", "UnknownOrEnded",
     "BindFailed", "BindInProgress", "SeatBoundOtherPayout",
 ]

@@ -16,6 +16,7 @@ import crx
 FIX = Path(__file__).parent / "fixtures"
 BASE = "https://gateway.test"
 RPC = "https://rpc.test/secret-path-key"
+RPC2 = "https://rpc2.test/other-key"  # the second RPC that reads a send's status
 CHAIN_ID = 43113
 
 
@@ -38,7 +39,8 @@ class Resp:
 
 
 class FakeSession:
-    """Routes gateway calls to ``routes[(METHOD, path)]`` and RPC calls to ``rpc[method]``.
+    """Routes gateway calls to ``routes[(METHOD, path)]``, RPC calls to ``rpc[method]`` and calls to the
+    second RPC to ``rpc2[method]``. An RPC answer ``{"__http__": (status, body)}`` is that HTTP answer.
 
     A route is a response body (200), a (status, body[, headers]) tuple, a list of either
     (served in order, the last one repeats), or a callable(req) -> one of those.
@@ -49,6 +51,8 @@ class FakeSession:
         self.rpc: dict = {}
         self.calls: list = []
         self.rpc_calls: list = []
+        self.rpc2: dict = {}
+        self.rpc2_calls: list = []
 
     def _serve(self, spec, req):
         if isinstance(spec, list):
@@ -77,13 +81,16 @@ class FakeSession:
         return r
 
     def post(self, url, json=None, timeout=None):
-        assert url == RPC
+        assert url in (RPC, RPC2), "RPC call went to an unexpected host"
+        table, calls = (self.rpc, self.rpc_calls) if url == RPC else (self.rpc2, self.rpc2_calls)
         method, params = json["method"], json["params"]
-        self.rpc_calls.append((method, params))
-        if method not in self.rpc:
+        calls.append((method, params))
+        if method not in table:
             return Resp(200, {"jsonrpc": "2.0", "id": 1, "error": {"code": -32601, "message": f"no {method}"}})
-        out = self.rpc[method]
+        out = table[method]
         out = out(params) if callable(out) else out
+        if isinstance(out, dict) and "__http__" in out:
+            return Resp(*out["__http__"])
         if isinstance(out, dict) and "__error__" in out:
             return Resp(200, {"jsonrpc": "2.0", "id": 1, "error": out["__error__"]})
         return Resp(200, {"jsonrpc": "2.0", "id": 1, "result": out})

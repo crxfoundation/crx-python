@@ -70,6 +70,8 @@ NETWORKS = {
         "genesis_hash": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
         "cluster_tag": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
         "program_id": "A32Z1LwBwyE6UB8SmcF1mwHKQfEhtVQ95s9jfpqDFvWE",
+        # The second RPC that reads a deposit's status before it reads as not sent.
+        "check_rpc_url": "https://api.mainnet-beta.solana.com",
         "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     },
 }
@@ -238,6 +240,10 @@ class Client:
     ``base_url`` or ``CRX_BASE`` names another. It has no default RPC: pass ``rpc_url``
     or set ``CRX_RPC``.
 
+    On Solana, ``check_rpc_url`` or ``CRX_CHECK_RPC`` names a second RPC (default: the row's public one). A
+    deposit tx with no confirmed status is "not sent" only when both RPCs read it absent after its
+    blockhash expired; else ``deposit()`` raises ``SendUnknown``. The same URL as the RPC counts as none.
+
     A GET that fails on the network or with a 5xx is sent once more after 0.5 s.
     POST, PUT and DELETE are sent once.
 
@@ -256,6 +262,7 @@ class Client:
         network: str = "testnet",
         base_url: str | None = None,
         rpc_url: str | None = None,
+        check_rpc_url: str | None = None,
         state_dir: str | os.PathLike | None = None,
         timeout: float = 10.0,
         session: requests.Session | None = None,
@@ -328,6 +335,8 @@ class Client:
             key = None
             raise
         self._rpc = Rpc(rpc, self._session, max(timeout, 20.0))
+        check = check_rpc_url or os.environ.get("CRX_CHECK_RPC") or net.get("check_rpc_url")
+        self._check_rpc = Rpc(check, self._session, max(timeout, 20.0)) if check and check != rpc else None
         try:
             custody = None if account is None else _address(account, "account", ConfigError)
         except ConfigError:
@@ -1108,7 +1117,8 @@ class Client:
         if kp is None:
             return Deposit(amount=amount, txs=[t["tx"]], status="unsigned")
         before = _last(self.balance().raw, "deposit")
-        sig = sol.send_and_confirm(self._rpc, sol.signed_tx(parsed, kp), last_valid=last_valid, sleep=self._sleep)
+        sig = sol.send_and_confirm(self._rpc, sol.signed_tx(parsed, kp), last_valid=last_valid,
+                                   check_rpc=self._check_rpc, sleep=self._sleep, clock=self._clock)
 
         def credited() -> dict | None:
             # The gateway names the tx when it knows it; else a new record of this amount is this deposit.

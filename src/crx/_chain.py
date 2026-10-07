@@ -94,6 +94,9 @@ class Rpc:
             )
         except requests.RequestException as e:
             err = NetworkError(f"the RPC did not answer ({type(e).__name__})")
+        if err is None and r.status_code >= 500:
+            # A proxy's error page, or a node that failed in the call: not an answer of the node.
+            err = BadAnswer(f"the RPC answered HTTP {r.status_code}")
         if err is None:
             try:
                 body = r.json()
@@ -364,8 +367,8 @@ def send_tx(
                                details={"step": what, "nonce": nonce}) from None
             held = nonce
             continue
-        except NetworkError:
-            # The node may hold it. Its own hash is the handle.
+        except (NetworkError, BadAnswer):
+            # No answer, or none of the node's: the node may hold it. Its own hash is the handle.
             tx = "0x" + bytes(signed.hash).hex()
         if log is not None:
             log.add({"chain_id": chain_id, "from": sender, "nonce": nonce, "hash": "0x" + bytes(signed.hash).hex(),
@@ -377,7 +380,7 @@ def send_tx(
         for h in watch:
             try:
                 receipt = rpc("eth_getTransactionReceipt", h)
-            except (RpcError, NetworkError):
+            except (RpcError, NetworkError, BadAnswer):
                 receipt = None
             if receipt:
                 if receipt.get("status") != "0x1":

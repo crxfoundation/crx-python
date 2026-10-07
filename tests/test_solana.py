@@ -14,7 +14,7 @@ import crx
 from crx import _eip712 as e7
 from crx import _solana as sol
 
-from .conftest import BASE, RPC, Clock
+from .conftest import BASE, RPC, RPC2, Clock, FakeSession
 
 PID = sol.b58encode(bytes(range(1, 33)))  # a test program id
 GENESIS = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d"
@@ -1291,6 +1291,152 @@ def test_any_other_program_error_reads_as_the_node_sent_it():
         sol.send_and_confirm(landed, WIRE, last_valid=None, sleep=lambda s: None)
     assert str(ei.value) == f"deposit tx {WIRE_SIG} failed: " + crx.errors.clean(err, 120)
     assert ei.value.details == {"tx": WIRE_SIG}
+
+
+# ---------- a send with no clear answer: never resent; two RPCs decide "not sent" ----------
+
+PAGE_502 = {"__http__": (502, "<html><body>502 Bad Gateway</body></html>")}
+PAGE_504 = {"__http__": (504, "<html><body>504 Gateway Time-out</body></html>")}
+JSON_502 = {"__http__": (502, {"jsonrpc": "2.0", "id": 1, "error": {"code": -32603, "message": "bad gateway"}})}
+CONFIRMED = {"value": [{"slot": 9, "confirmationStatus": "confirmed", "err": None}]}
+NONE_HELD = {"value": [None]}
+LAST_VALID = 500
+
+
+class Ticks:
+    """A monotonic clock that sleep() moves."""
+
+    def __init__(self):
+        self.t = 0.0
+
+    def __call__(self):
+        return self.t
+
+    def sleep(self, s):
+        self.t += s
+
+
+def rpcs(session):
+    from crx._chain import Rpc
+    return Rpc(RPC, session), Rpc(RPC2, session)
+
+
+def no_answer(p):
+    import requests
+    raise requests.ConnectionError("reset")
+
+
+def send_once(session, answer, statuses=NONE_HELD, height=10, statuses2=NONE_HELD, height2=10, check=True):
+    """send_and_confirm over a fake RPC pair; the send answers ``answer``. Returns the result or the error."""
+    session.rpc.update({"sendTransaction": answer, "getSignatureStatuses": statuses, "getBlockHeight": height})
+    session.rpc2.update({"getSignatureStatuses": statuses2, "getBlockHeight": height2})
+    rpc, rpc2 = rpcs(session)
+    t = Ticks()
+    try:
+        return sol.send_and_confirm(rpc, WIRE, last_valid=LAST_VALID, check_rpc=rpc2 if check else None,
+                                    sleep=t.sleep, clock=t)
+    except crx.CrxError as e:
+        return e
+
+
+def sends(session):
+    return [m for m, _ in session.rpc_calls + session.rpc2_calls].count("sendTransaction")
+
+
+@pytest.mark.parametrize("answer", [PAGE_502, PAGE_504, JSON_502, no_answer], ids=["502", "504", "502_json", "none"])
+def test_a_send_with_no_clear_answer_is_never_resent_and_reads_unknown(answer):
+    """The node may hold the tx: no "not sent", no second send. With no status by the end of the wait, the
+    error is SendUnknown with the signature; it is not a TxFailed."""
+    session = FakeSession()
+    e = send_once(session, answer)
+    assert type(e) is crx.SendUnknown and not isinstance(e, crx.TxFailed)
+    assert e.code == "send_unknown" and e.tx == WIRE_SIG and e.details == {"tx": WIRE_SIG}
+    assert str(e) == f"deposit outcome unknown: check transaction {WIRE_SIG} on the chain before a new deposit"
+    assert sends(session) == 1 and "not sent" not in str(e)
+
+
+@pytest.mark.parametrize("answer", [PAGE_502, PAGE_504, JSON_502, no_answer], ids=["502", "504", "502_json", "none"])
+def test_a_send_with_no_clear_answer_that_landed_returns_its_signature(answer):
+    session = FakeSession()
+    assert send_once(session, answer, statuses=CONFIRMED) == WIRE_SIG
+    assert sends(session) == 1
+
+
+def test_not_sent_only_when_both_rpcs_read_past_the_blockhash_and_hold_no_status():
+    session = FakeSession()
+    e = send_once(session, PAGE_502, height=LAST_VALID + 1, height2=LAST_VALID + 1)
+    assert type(e) is crx.TxFailed and e.details == {"tx": WIRE_SIG, "reason": "expired"}
+    assert str(e) == "deposit not sent: the transaction expired before it reached the chain; no USDC left the wallet"
+    assert sends(session) == 1 and "getSignatureStatuses" in [m for m, _ in session.rpc2_calls]
+
+
+@pytest.mark.parametrize("statuses2, height2", [
+    (PAGE_502, LAST_VALID + 1),  # the second RPC gives no clear status
+    ({"__error__": {"code": -32005, "message": "node is behind"}}, LAST_VALID + 1),
+    (NONE_HELD, LAST_VALID),  # the second RPC is not past the blockhash yet
+    (NONE_HELD, PAGE_504),  # nor reads its height
+], ids=["status_502", "status_error", "height_behind", "height_502"])
+def test_one_rpc_reading_no_status_is_not_enough(statuses2, height2):
+    session = FakeSession()
+    e = send_once(session, PAGE_502, height=LAST_VALID + 1, statuses2=statuses2, height2=height2)
+    assert type(e) is crx.SendUnknown and e.tx == WIRE_SIG and sends(session) == 1
+
+
+def test_without_a_second_rpc_an_expired_tx_reads_unknown():
+    session = FakeSession()
+    e = send_once(session, PAGE_502, height=LAST_VALID + 1, height2=LAST_VALID + 1, check=False)
+    assert type(e) is crx.SendUnknown and sends(session) == 1 and session.rpc2_calls == []
+
+
+def test_a_first_rpc_with_no_clear_status_never_reads_absent():
+    session = FakeSession()
+    e = send_once(session, PAGE_502, statuses=PAGE_502, height=LAST_VALID + 1, height2=LAST_VALID + 1)
+    assert type(e) is crx.SendUnknown and sends(session) == 1
+
+
+def test_the_second_rpc_holding_the_tx_decides():
+    session = FakeSession()
+    assert send_once(session, PAGE_502, height=LAST_VALID + 1, statuses2=CONFIRMED, height2=LAST_VALID + 1) == WIRE_SIG
+    err = {"InstructionError": [2, {"Custom": 660}]}
+    failed = {"value": [{"slot": 9, "confirmationStatus": "confirmed", "err": err}]}
+    session = FakeSession()
+    e = send_once(session, PAGE_502, height=LAST_VALID + 1, statuses2=failed, height2=LAST_VALID + 1)
+    assert type(e) is crx.TxFailed and e.details["reason"] == "intake_full" and sends(session) == 1
+
+
+def test_a_node_refusal_still_reads_not_sent_at_once():
+    session = FakeSession()
+    e = send_once(session, {"__error__": node_refusal(660, "json")})
+    assert type(e) is crx.TxFailed and str(e) == "deposit not sent: " + RING_TEXT
+    assert [m for m, _ in session.rpc_calls] == ["sendTransaction"] and session.rpc2_calls == []
+
+
+def test_client_deposit_after_a_502_page_never_resends(solnet, solsession, tmp_path, account):
+    pytest.importorskip("cryptography")
+    c = sclient(solsession, tmp_path, account, check_rpc_url=RPC2)
+    clk = Clock(1_760_000_000)
+    c._clock, c._sleep = clk, clk.sleep
+    deposit_routes(solsession, c)
+    solsession.routes[("GET", "/balance")] = {"account": c.address, "deposit": {"last": None}}
+    solsession.rpc.update({"sendTransaction": PAGE_502, "getSignatureStatuses": NONE_HELD, "getBlockHeight": 10})
+    solsession.rpc2.update({"getSignatureStatuses": NONE_HELD, "getBlockHeight": 10})
+    with pytest.raises(crx.SendUnknown) as ei:
+        c.deposit("100", keypair=list(SEED))
+    sig = ei.value.tx
+    assert sig and sends(solsession) == 1 and _no_secret(ei.value)
+    solsession.rpc["getBlockHeight"] = solsession.rpc2["getBlockHeight"] = 501
+    with pytest.raises(crx.TxFailed) as ei:
+        c.deposit("100", keypair=list(SEED))
+    assert ei.value.details["reason"] == "expired" and sends(solsession) == 2
+
+
+def test_the_second_rpc_comes_from_the_row_the_env_or_the_argument(solnet, solsession, tmp_path, account,
+                                                                  monkeypatch):
+    assert crx.NETWORKS["solana"]["check_rpc_url"] == "https://api.mainnet-beta.solana.com"
+    assert sclient(solsession, tmp_path, account)._check_rpc._url == "https://api.mainnet-beta.solana.com"
+    monkeypatch.setenv("CRX_CHECK_RPC", RPC2)
+    assert sclient(solsession, tmp_path, account)._check_rpc._url == RPC2
+    assert sclient(solsession, tmp_path, account, check_rpc_url=RPC)._check_rpc is None  # the RPC itself: none
 
 
 def test_client_deposit_on_a_full_intake_raises_the_plain_line(solnet, solsession, tmp_path, account):
