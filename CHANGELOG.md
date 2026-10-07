@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.6
 
 - On Solana, a seat CRX removed can deposit to itself: `deposit()` takes the gateway's `crx_core.deposit_for` tx when its payer and account are this seat (same row and seat key); any other `deposit_for` is refused, nothing signed. The `seat_stopped` line reads "no new trade; deposit() and withdraw() still work".
 
