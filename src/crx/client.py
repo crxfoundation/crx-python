@@ -241,8 +241,9 @@ class Client:
     or set ``CRX_RPC``.
 
     On Solana, ``check_rpc_url`` or ``CRX_CHECK_RPC`` names a second RPC (default: the row's public one). A
-    deposit tx with no confirmed status is "not sent" only when both RPCs read it absent after its
-    blockhash expired; else ``deposit()`` raises ``SendUnknown``. The same URL as the RPC counts as none.
+    deposit tx with no confirmed status is "not sent" only when both RPCs read its own blockhash expired
+    and then hold no status for it; else ``deposit()`` raises ``SendUnknown``. The same URL as the RPC counts
+    as none.
 
     A GET that fails on the network or with a 5xx is sent once more after 0.5 s.
     POST, PUT and DELETE are sent once.
@@ -1108,7 +1109,6 @@ class Client:
             (t,) = r["transactions"]
             ok = (t["family"], t["encoding"], t["version"]) == ("solana", "base64", "legacy")
             rawtx = base64.b64decode(t["tx"], validate=True)
-            last_valid = int(t["last_valid_block_height"]) if t.get("last_valid_block_height") is not None else None
             served_raw = int(r["amount_raw"])
         except (KeyError, TypeError, ValueError, binascii.Error):
             raise RefusedToSign("the gateway served a deposit this SDK cannot read; nothing sent") from None
@@ -1120,8 +1120,8 @@ class Client:
         if kp is None:
             return Deposit(amount=amount, txs=[t["tx"]], status="unsigned")
         before = _last(self.balance().raw, "deposit")
-        sig = sol.send_and_confirm(self._rpc, sol.signed_tx(parsed, kp), last_valid=last_valid,
-                                   check_rpc=self._check_rpc, sleep=self._sleep, clock=self._clock)
+        sig = sol.send_and_confirm(self._rpc, sol.signed_tx(parsed, kp), check_rpc=self._check_rpc,
+                                   sleep=self._sleep, clock=self._clock)
 
         def credited() -> dict | None:
             # The gateway names the tx when it knows it; else a new record of this amount is this deposit.

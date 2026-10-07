@@ -448,7 +448,11 @@ def deposit_failed(lead: str, err: Any, sig: str, limit: int) -> TxFailed:
 
 SEND_UNKNOWN_LINE = "deposit outcome unknown: check transaction {sig} on the chain before a new deposit"
 EXPIRED_LINE = "deposit not sent: the transaction expired before it reached the chain; no USDC left the wallet"
+STALE_LINE = "deposit not sent: the transaction expired before it was sent; no USDC left the wallet"
 FOUND, ABSENT, UNREAD = "found", "absent", "unread"
+# sendTransaction errors after which the node surely did not take the tx: a failed preflight, a bad signature,
+# a malformed request. After any other error object the status reads decide.
+SURE_REFUSALS = (-32002, -32003, -32602)
 
 
 def sig_status(rpc: Any, sig: str) -> tuple[str, dict | None]:
@@ -463,20 +467,35 @@ def sig_status(rpc: Any, sig: str) -> tuple[str, dict | None]:
     return (FOUND, row) if isinstance(row, dict) else (UNREAD, None)
 
 
-def past(rpc: Any, last_valid: int) -> bool:
-    """True when the RPC reads its confirmed block height above ``last_valid``: the tx can no longer land."""
+def tx_blockhash(raw: bytes) -> str | None:
+    """The recent blockhash of a wire tx; None when the tx does not parse."""
     try:
-        return int(rpc("getBlockHeight", {"commitment": "confirmed"})) > last_valid
+        return parse_tx(raw)["blockhash"]
+    except (ValueError, IndexError, KeyError):
+        return None
+
+
+def blockhash_valid(rpc: Any, blockhash: str) -> tuple[bool | None, int | None]:
+    """``isBlockhashValid`` at the confirmed commitment on one RPC: (valid, the slot of that read). (None, None)
+    when the read has no clear answer."""
+    try:
+        v = rpc("isBlockhashValid", blockhash, {"commitment": "confirmed"})
+        ok, slot = v["value"], v["context"]["slot"]
     except Exception:
-        return False
+        return None, None
+    if type(ok) is not bool or type(slot) is not int:
+        return None, None
+    return ok, slot
 
 
-def expired_on_both(rpcs: tuple, sig: str, last_valid: int) -> tuple[str, dict | None]:
-    """The verdict of two RPCs after the blockhash expired. (FOUND, row) when one holds ``sig``; (ABSENT, None)
-    only when each RPC reads its height past ``last_valid`` and then holds no status; else (UNREAD, None)."""
+def expired_on_both(rpcs: tuple, sig: str, blockhash: str, known: int) -> tuple[str, dict | None]:
+    """The verdict of two RPCs on a tx whose blockhash read valid at confirmed slot ``known``. (FOUND, row) when
+    one holds ``sig``. (ABSENT, None) only when each RPC reads the blockhash not valid at a slot above
+    ``known`` and then holds no status for ``sig``. Else (UNREAD, None)."""
     verdict: tuple[str, dict | None] = (ABSENT, None)
     for r in rpcs:
-        if not past(r, last_valid):
+        ok, slot = blockhash_valid(r, blockhash)
+        if ok is not False or slot is None or slot <= known:
             verdict = (UNREAD, None)
             continue
         kind, row = sig_status(r, sig)
@@ -487,31 +506,52 @@ def expired_on_both(rpcs: tuple, sig: str, last_valid: int) -> tuple[str, dict |
     return verdict
 
 
-def send_and_confirm(rpc: Any, raw: bytes, *, last_valid: int | None, check_rpc: Any = None, wait_s: float = 120,
+def send_refused(err: Any) -> bool:
+    """True when a sendTransaction error object is a sure refusal (``SURE_REFUSALS``)."""
+    code = err.get("code") if isinstance(err, dict) else None
+    return type(code) is int and code in SURE_REFUSALS
+
+
+def send_and_confirm(rpc: Any, raw: bytes, *, check_rpc: Any = None, wait_s: float = 120,
                      sleep: Callable[[float], None] = time.sleep, clock: Callable[[], float] = time.monotonic) -> str:
     """sendTransaction once, then poll getSignatureStatuses until confirmed. Returns the base58 signature.
 
-    The tx is sent once only. A send refused by the node (an RPC error object) raises ``TxFailed``: not sent.
-    A send with no clear answer (none, not JSON, HTTP 5xx) can be on the chain: the status reads decide.
-    ``TxFailed`` "not sent" after the send only when ``rpc`` and ``check_rpc`` each read their block height
-    past ``last_valid`` and hold no status for the signature. Any other end without a confirmed status
-    raises ``SendUnknown`` with the signature in ``details['tx']``."""
+    Before the send, ``rpc`` reads the tx's own blockhash (``isBlockhashValid``, confirmed). Not valid: the tx
+    is not sent and ``TxFailed`` (``reason`` ``expired``) raises. Valid: its slot is the reference.
+    The tx is sent once only. A sure refusal (``SURE_REFUSALS``) raises ``TxFailed``: not sent. Any other
+    answer (none, not JSON, HTTP 5xx, another error object) can leave the tx on the chain: the status
+    reads decide. ``TxFailed`` "not sent" after the send only when ``rpc`` and ``check_rpc`` each read the
+    blockhash not valid at a slot above the reference and then hold no status for the signature. Any
+    other end without a confirmed status raises ``SendUnknown`` with the signature in ``details['tx']``."""
     sig = b58encode(raw[1:65])
+    blockhash = tx_blockhash(raw)
+    known = None  # the highest confirmed slot at which an RPC read the blockhash valid
+    if blockhash is not None:
+        ok, slot = blockhash_valid(rpc, blockhash)
+        if ok is False:
+            raise TxFailed(STALE_LINE, details={"tx": sig, "reason": "expired"})
+        if ok:
+            known = slot
     try:
         rpc("sendTransaction", base64.b64encode(raw).decode(),
             {"encoding": "base64", "preflightCommitment": "confirmed"})
-    except RpcError as e:  # the node refused it: preflight or the send
-        raise deposit_failed("deposit not sent", e.error, sig, 160) from None
+    except RpcError as e:
+        if send_refused(e.error):
+            raise deposit_failed("deposit not sent", e.error, sig, 160) from None
     except Exception:
         pass  # no clear answer: the node may hold it; its own signature is the handle
     rpcs = (rpc,) if check_rpc is None else (rpc, check_rpc)
     deadline = clock() + wait_s
     while True:
         kind, st = sig_status(rpc, sig)
-        if kind != FOUND and last_valid is not None and past(rpc, last_valid):
-            kind, st = expired_on_both(rpcs, sig, last_valid)
-            if kind == ABSENT and check_rpc is not None:
-                raise TxFailed(EXPIRED_LINE, details={"tx": sig, "reason": "expired"})
+        if kind != FOUND and blockhash is not None:
+            ok, slot = blockhash_valid(rpc, blockhash)
+            if ok:
+                known = slot if known is None else max(known, slot)
+            elif ok is False and known is not None and check_rpc is not None:
+                kind, st = expired_on_both(rpcs, sig, blockhash, known)
+                if kind == ABSENT:
+                    raise TxFailed(EXPIRED_LINE, details={"tx": sig, "reason": "expired"})
         if kind == FOUND and st is not None:
             if st.get("err"):
                 raise deposit_failed(f"deposit tx {sig} failed", st["err"], sig, 120)

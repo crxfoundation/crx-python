@@ -205,7 +205,8 @@ c.withdraw("500")      # paid to the wallet's USDC account fixed at bind
   `intake_full`: no USDC left the wallet. Deposit again after the hourly check.
 - `deposit()` sends its tx once. With no confirmed status at the end of its wait it raises `send_unknown`:
   the deposit can be on the chain. `.tx` is its signature: check it on the chain before a new deposit.
-  `tx_failed` with `details["reason"]` `expired` means not sent: two RPCs read no status after the tx expired.
+  `tx_failed` with `details["reason"]` `expired` means not sent: the tx's own blockhash expired before the
+  send, or two RPCs read it expired and then no status for the tx.
   `check_rpc_url=` or `CRX_CHECK_RPC` names the second RPC.
 - `quote()` and `ask()` read the pair's tenor band from `/markets` (`tenor.min_secs`, `tenor.max_secs`) and send
   no RFQ outside it. The error is `bad_request` with `details["limit"]` `tenor`. Its message names when the

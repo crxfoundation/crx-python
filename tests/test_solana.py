@@ -1249,7 +1249,7 @@ def test_a_deposit_refused_at_the_send_on_a_full_intake_reads_one_line(code, sha
         calls.append(method)
         raise RpcError(node_refusal(code, shape))
     with pytest.raises(crx.TxFailed) as ei:
-        sol.send_and_confirm(rpc, WIRE, last_valid=None, sleep=lambda s: None)
+        sol.send_and_confirm(rpc, WIRE, sleep=lambda s: None)
     e = ei.value
     assert str(e) == "deposit not sent: " + RING_TEXT and e.code == "tx_failed"
     assert e.details == {"tx": WIRE_SIG, "program_error": code, "reason": "intake_full"}
@@ -1266,7 +1266,7 @@ def test_a_landed_deposit_that_failed_on_a_full_intake_reads_one_line(code):
         assert method == "getSignatureStatuses"
         return {"value": [{"slot": 7, "confirmationStatus": "confirmed", "err": err, "status": {"Err": err}}]}
     with pytest.raises(crx.TxFailed) as ei:
-        sol.send_and_confirm(rpc, WIRE, last_valid=500, sleep=lambda s: None)
+        sol.send_and_confirm(rpc, WIRE, sleep=lambda s: None)
     e = ei.value
     assert str(e) == f"deposit tx {WIRE_SIG} failed: " + RING_TEXT
     assert e.details == {"tx": WIRE_SIG, "program_error": code, "reason": "intake_full"}
@@ -1280,7 +1280,7 @@ def test_any_other_program_error_reads_as_the_node_sent_it():
         def rpc(method, *params):
             raise RpcError(refusal)
         with pytest.raises(crx.TxFailed) as ei:
-            sol.send_and_confirm(rpc, WIRE, last_valid=None, sleep=lambda s: None)
+            sol.send_and_confirm(rpc, WIRE, sleep=lambda s: None)
         assert str(ei.value) == "deposit not sent: " + crx.errors.clean(refusal, 160)
         assert ei.value.details == {"tx": WIRE_SIG} and RING_TEXT not in str(ei.value)
     err = {"InstructionError": [2, {"Custom": 6}]}
@@ -1288,19 +1288,41 @@ def test_any_other_program_error_reads_as_the_node_sent_it():
     def landed(method, *params):
         return WIRE_SIG if method == "sendTransaction" else {"value": [{"confirmationStatus": "confirmed", "err": err}]}
     with pytest.raises(crx.TxFailed) as ei:
-        sol.send_and_confirm(landed, WIRE, last_valid=None, sleep=lambda s: None)
+        sol.send_and_confirm(landed, WIRE, sleep=lambda s: None)
     assert str(ei.value) == f"deposit tx {WIRE_SIG} failed: " + crx.errors.clean(err, 120)
     assert ei.value.details == {"tx": WIRE_SIG}
 
 
-# ---------- a send with no clear answer: never resent; two RPCs decide "not sent" ----------
+# ---------- a send with no clear answer: never resent; two RPCs decide "not sent" on the tx's blockhash ----------
 
 PAGE_502 = {"__http__": (502, "<html><body>502 Bad Gateway</body></html>")}
 PAGE_504 = {"__http__": (504, "<html><body>504 Gateway Time-out</body></html>")}
 JSON_502 = {"__http__": (502, {"jsonrpc": "2.0", "id": 1, "error": {"code": -32603, "message": "bad gateway"}})}
 CONFIRMED = {"value": [{"slot": 9, "confirmationStatus": "confirmed", "err": None}]}
 NONE_HELD = {"value": [None]}
-LAST_VALID = 500
+TX_BLOCKHASH = sol.b58encode(bytes([9]) * 32)
+# A parseable wire tx with its own blockhash and the signature of WIRE.
+BH_WIRE = bytes([1]) + bytes([5]) * 64 + build_tx(AUTH, [], blockhash=TX_BLOCKHASH)[65:]
+KNOWN = 100  # the confirmed slot at which the blockhash reads valid
+
+
+def bv(ok, slot):
+    """An isBlockhashValid answer."""
+    return {"context": {"slot": slot}, "value": ok}
+
+
+VALID = bv(True, KNOWN)
+GONE = bv(False, KNOWN + 160)
+
+
+def seq(*items):
+    """An RPC answer that serves ``items`` in order, the last one again and again."""
+    left = list(items)
+
+    def serve(params):
+        assert params[0] == TX_BLOCKHASH
+        return left.pop(0) if len(left) > 1 else left[0]
+    return serve
 
 
 class Ticks:
@@ -1326,15 +1348,18 @@ def no_answer(p):
     raise requests.ConnectionError("reset")
 
 
-def send_once(session, answer, statuses=NONE_HELD, height=10, statuses2=NONE_HELD, height2=10, check=True):
-    """send_and_confirm over a fake RPC pair; the send answers ``answer``. Returns the result or the error."""
-    session.rpc.update({"sendTransaction": answer, "getSignatureStatuses": statuses, "getBlockHeight": height})
-    session.rpc2.update({"getSignatureStatuses": statuses2, "getBlockHeight": height2})
+def send_once(session, answer, statuses=NONE_HELD, valid=(VALID,), statuses2=NONE_HELD, valid2=(VALID,),
+              check=True, raw=BH_WIRE):
+    """send_and_confirm over a fake RPC pair; the send answers ``answer``; ``valid`` and ``valid2`` are the
+    isBlockhashValid answers of each RPC, in order. Returns the result or the error."""
+    session.rpc.update({"sendTransaction": answer, "getSignatureStatuses": statuses, "isBlockhashValid": seq(*valid),
+                        "getBlockHeight": 10_000})
+    session.rpc2.update({"getSignatureStatuses": statuses2, "isBlockhashValid": seq(*valid2),
+                         "getBlockHeight": 10_000})
     rpc, rpc2 = rpcs(session)
     t = Ticks()
     try:
-        return sol.send_and_confirm(rpc, WIRE, last_valid=LAST_VALID, check_rpc=rpc2 if check else None,
-                                    sleep=t.sleep, clock=t)
+        return sol.send_and_confirm(rpc, raw, check_rpc=rpc2 if check else None, sleep=t.sleep, clock=t)
     except crx.CrxError as e:
         return e
 
@@ -1343,7 +1368,16 @@ def sends(session):
     return [m for m, _ in session.rpc_calls + session.rpc2_calls].count("sendTransaction")
 
 
-@pytest.mark.parametrize("answer", [PAGE_502, PAGE_504, JSON_502, no_answer], ids=["502", "504", "502_json", "none"])
+def err(code, message="x"):
+    return {"__error__": {"code": code, "message": message}}
+
+
+UNCLEAR = [PAGE_502, PAGE_504, JSON_502, no_answer, err(-32603, "internal error"), err(-32005, "node is behind"),
+           err(-32000, "timeout"), err(-32601, "method not found")]
+UNCLEAR_IDS = ["502", "504", "502_json", "none", "-32603", "-32005", "-32000", "-32601"]
+
+
+@pytest.mark.parametrize("answer", UNCLEAR, ids=UNCLEAR_IDS)
 def test_a_send_with_no_clear_answer_is_never_resent_and_reads_unknown(answer):
     """The node may hold the tx: no "not sent", no second send. With no status by the end of the wait, the
     error is SendUnknown with the signature; it is not a TxFailed."""
@@ -1355,60 +1389,99 @@ def test_a_send_with_no_clear_answer_is_never_resent_and_reads_unknown(answer):
     assert sends(session) == 1 and "not sent" not in str(e)
 
 
-@pytest.mark.parametrize("answer", [PAGE_502, PAGE_504, JSON_502, no_answer], ids=["502", "504", "502_json", "none"])
+@pytest.mark.parametrize("answer", UNCLEAR, ids=UNCLEAR_IDS)
 def test_a_send_with_no_clear_answer_that_landed_returns_its_signature(answer):
     session = FakeSession()
     assert send_once(session, answer, statuses=CONFIRMED) == WIRE_SIG
     assert sends(session) == 1
 
 
-def test_not_sent_only_when_both_rpcs_read_past_the_blockhash_and_hold_no_status():
+@pytest.mark.parametrize("code", [-32002, -32003, -32602])
+def test_only_a_sure_refusal_reads_not_sent_at_once(code):
     session = FakeSession()
-    e = send_once(session, PAGE_502, height=LAST_VALID + 1, height2=LAST_VALID + 1)
+    e = send_once(session, err(code, "refused"))
+    assert type(e) is crx.TxFailed and e.details == {"tx": WIRE_SIG}
+    assert str(e) == "deposit not sent: " + crx.errors.clean({"code": code, "message": "refused"}, 160)
+    assert [m for m, _ in session.rpc_calls] == ["isBlockhashValid", "sendTransaction"] and session.rpc2_calls == []
+
+
+def test_a_node_refusal_on_a_full_intake_still_reads_not_sent_at_once():
+    session = FakeSession()
+    e = send_once(session, {"__error__": node_refusal(660, "json")})
+    assert type(e) is crx.TxFailed and str(e) == "deposit not sent: " + RING_TEXT and sends(session) == 1
+
+
+@pytest.mark.parametrize("answer", [PAGE_502, err(-32603)], ids=["502", "-32603"])
+def test_not_sent_only_when_both_rpcs_read_the_blockhash_gone_and_hold_no_status(answer):
+    session = FakeSession()
+    e = send_once(session, answer, valid=(VALID, GONE), valid2=(GONE,))
     assert type(e) is crx.TxFailed and e.details == {"tx": WIRE_SIG, "reason": "expired"}
     assert str(e) == "deposit not sent: the transaction expired before it reached the chain; no USDC left the wallet"
-    assert sends(session) == 1 and "getSignatureStatuses" in [m for m, _ in session.rpc2_calls]
+    assert sends(session) == 1 and [m for m, _ in session.rpc2_calls] == ["isBlockhashValid", "getSignatureStatuses"]
 
 
-@pytest.mark.parametrize("statuses2, height2", [
-    (PAGE_502, LAST_VALID + 1),  # the second RPC gives no clear status
-    ({"__error__": {"code": -32005, "message": "node is behind"}}, LAST_VALID + 1),
-    (NONE_HELD, LAST_VALID),  # the second RPC is not past the blockhash yet
-    (NONE_HELD, PAGE_504),  # nor reads its height
-], ids=["status_502", "status_error", "height_behind", "height_502"])
-def test_one_rpc_reading_no_status_is_not_enough(statuses2, height2):
+@pytest.mark.parametrize("statuses2, valid2", [
+    (PAGE_502, (GONE,)),  # the second RPC gives no clear status
+    (err(-32005, "node is behind"), (GONE,)),
+    (NONE_HELD, (VALID,)),  # the blockhash still valid there
+    (NONE_HELD, (bv(False, KNOWN),)),  # not valid at a slot not past the one it read valid: a node behind
+    (NONE_HELD, (bv(False, KNOWN - 50),)),
+    (NONE_HELD, (PAGE_504,)),  # no clear read of the blockhash
+    (NONE_HELD, ({"context": {"slot": KNOWN + 160}, "value": "false"},)),
+], ids=["status_502", "status_error", "still_valid", "same_slot", "behind", "valid_504", "not_a_bool"])
+def test_one_rpc_reading_no_status_is_not_enough(statuses2, valid2):
     session = FakeSession()
-    e = send_once(session, PAGE_502, height=LAST_VALID + 1, statuses2=statuses2, height2=height2)
+    e = send_once(session, PAGE_502, valid=(VALID, GONE), statuses2=statuses2, valid2=valid2)
     assert type(e) is crx.SendUnknown and e.tx == WIRE_SIG and sends(session) == 1
+
+
+def test_the_served_height_decides_nothing():
+    """Both RPCs read a block height far past any served last valid height; the blockhash still reads valid."""
+    session = FakeSession()
+    e = send_once(session, PAGE_502, valid=(VALID,), valid2=(VALID,))
+    assert type(e) is crx.SendUnknown and "getBlockHeight" not in session.rpc_methods()
+
+
+def test_a_blockhash_never_read_valid_never_reads_not_sent():
+    session = FakeSession()
+    e = send_once(session, PAGE_502, valid=(PAGE_502, GONE), valid2=(GONE,))
+    assert type(e) is crx.SendUnknown and sends(session) == 1
+
+
+def test_a_blockhash_not_valid_before_the_send_sends_nothing():
+    session = FakeSession()
+    e = send_once(session, PAGE_502, valid=(GONE,))
+    assert type(e) is crx.TxFailed and e.details == {"tx": WIRE_SIG, "reason": "expired"}
+    assert str(e) == "deposit not sent: the transaction expired before it was sent; no USDC left the wallet"
+    assert sends(session) == 0 and session.rpc2_calls == []
+
+
+def test_a_tx_that_does_not_parse_never_reads_not_sent():
+    session = FakeSession()
+    e = send_once(session, PAGE_502, valid=(VALID, GONE), valid2=(GONE,), raw=WIRE)
+    assert type(e) is crx.SendUnknown and "isBlockhashValid" not in session.rpc_methods() and sends(session) == 1
 
 
 def test_without_a_second_rpc_an_expired_tx_reads_unknown():
     session = FakeSession()
-    e = send_once(session, PAGE_502, height=LAST_VALID + 1, height2=LAST_VALID + 1, check=False)
+    e = send_once(session, PAGE_502, valid=(VALID, GONE), valid2=(GONE,), check=False)
     assert type(e) is crx.SendUnknown and sends(session) == 1 and session.rpc2_calls == []
 
 
 def test_a_first_rpc_with_no_clear_status_never_reads_absent():
     session = FakeSession()
-    e = send_once(session, PAGE_502, statuses=PAGE_502, height=LAST_VALID + 1, height2=LAST_VALID + 1)
+    e = send_once(session, PAGE_502, statuses=PAGE_502, valid=(VALID, GONE), valid2=(GONE,))
     assert type(e) is crx.SendUnknown and sends(session) == 1
 
 
 def test_the_second_rpc_holding_the_tx_decides():
     session = FakeSession()
-    assert send_once(session, PAGE_502, height=LAST_VALID + 1, statuses2=CONFIRMED, height2=LAST_VALID + 1) == WIRE_SIG
-    err = {"InstructionError": [2, {"Custom": 660}]}
-    failed = {"value": [{"slot": 9, "confirmationStatus": "confirmed", "err": err}]}
+    assert send_once(session, PAGE_502, valid=(VALID, GONE), statuses2=CONFIRMED, valid2=(GONE,)) == WIRE_SIG
+    lost = {"InstructionError": [2, {"Custom": 660}]}
+    failed = {"value": [{"slot": 9, "confirmationStatus": "confirmed", "err": lost}]}
     session = FakeSession()
-    e = send_once(session, PAGE_502, height=LAST_VALID + 1, statuses2=failed, height2=LAST_VALID + 1)
+    e = send_once(session, PAGE_502, valid=(VALID, GONE), statuses2=failed, valid2=(GONE,))
     assert type(e) is crx.TxFailed and e.details["reason"] == "intake_full" and sends(session) == 1
-
-
-def test_a_node_refusal_still_reads_not_sent_at_once():
-    session = FakeSession()
-    e = send_once(session, {"__error__": node_refusal(660, "json")})
-    assert type(e) is crx.TxFailed and str(e) == "deposit not sent: " + RING_TEXT
-    assert [m for m, _ in session.rpc_calls] == ["sendTransaction"] and session.rpc2_calls == []
 
 
 def test_client_deposit_after_a_502_page_never_resends(solnet, solsession, tmp_path, account):
@@ -1416,15 +1489,19 @@ def test_client_deposit_after_a_502_page_never_resends(solnet, solsession, tmp_p
     c = sclient(solsession, tmp_path, account, check_rpc_url=RPC2)
     clk = Clock(1_760_000_000)
     c._clock, c._sleep = clk, clk.sleep
-    deposit_routes(solsession, c)
+    deposit_routes(solsession, c)  # serves last_valid_block_height 500
+    zero = "11111111111111111111111111111111"
     solsession.routes[("GET", "/balance")] = {"account": c.address, "deposit": {"last": None}}
-    solsession.rpc.update({"sendTransaction": PAGE_502, "getSignatureStatuses": NONE_HELD, "getBlockHeight": 10})
-    solsession.rpc2.update({"getSignatureStatuses": NONE_HELD, "getBlockHeight": 10})
+    solsession.rpc.update({"sendTransaction": PAGE_502, "getSignatureStatuses": NONE_HELD, "getBlockHeight": 501,
+                           "isBlockhashValid": lambda p: VALID if p[0] == zero else None})
+    solsession.rpc2.update({"getSignatureStatuses": NONE_HELD, "getBlockHeight": 501, "isBlockhashValid": VALID})
     with pytest.raises(crx.SendUnknown) as ei:
         c.deposit("100", keypair=list(SEED))
     sig = ei.value.tx
     assert sig and sends(solsession) == 1 and _no_secret(ei.value)
-    solsession.rpc["getBlockHeight"] = solsession.rpc2["getBlockHeight"] = 501
+    left = [VALID, GONE]
+    solsession.rpc["isBlockhashValid"] = lambda p: left.pop(0) if len(left) > 1 else left[0]
+    solsession.rpc2["isBlockhashValid"] = GONE
     with pytest.raises(crx.TxFailed) as ei:
         c.deposit("100", keypair=list(SEED))
     assert ei.value.details["reason"] == "expired" and sends(solsession) == 2
