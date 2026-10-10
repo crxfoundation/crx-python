@@ -453,7 +453,7 @@ def test_withdraw_posts_vector_w1(session, tmp_path):
     g = Gate(session, taker, CHAIN_ID, core)
     session.routes[("GET", "/balance")] = [balance_body(taker, nonce=m["nonce"]), g.view("accepted")]
     c = crx.Client(key=v["keys"]["taker"]["private_key"], base_url=BASE, rpc_url=RPC, state_dir=tmp_path / "state",
-                   session=session)
+                   session=session, core=core)
     clock = Clock(int(m["deadline"]) - 22 * 3600)
     c._clock, c._sleep = clock, clock.sleep
     out = c.withdraw(Decimal(m["amount"]).scaleb(-6))

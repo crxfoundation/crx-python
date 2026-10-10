@@ -1,5 +1,6 @@
 """quote() and trade() against a scripted gateway and chain."""
 
+import copy
 import os
 import re
 import time
@@ -304,12 +305,12 @@ def test_trade_refused_expired(make_client, venue, session, clock):
     # The relay's tx never landed inside the quote's life: refused, no tx; the tape names why.
     venue.script = [("sending", None), ("refused", None)]
     session.routes[("GET", "/trades")] = {"seq": 2, "trades": [{"type": "trade.refused", "seq": 2, "ts": 1, "data": {
-        "rfq_id": RFQ, "reason": "expired", "arm_seq": None}}]}
+        "rfq_id": RFQ, "reason": "expired"}}]}
     c = make_client(clock=clock)
     t = c.trade(c.quote("USD/MXN", "buy", 25_000))
     assert (t.status, t.tx) == ("refused", None) and sent_nothing(session)
     (e,) = c.trades()
-    assert (e.type, e.data["reason"], e.data["arm_seq"]) == ("trade.refused", "expired", None)
+    assert (e.type, e.data["reason"]) == ("trade.refused", "expired") and "arm_seq" not in e.data
 
 
 @pytest.mark.parametrize("word", ["open", "refused"])
@@ -1593,6 +1594,108 @@ def test_domain_moved_refuses_the_trade(make_client, venue, session, health, clo
     with pytest.raises(crx.RefusedToSign, match="^domain moved: /health does not match the core; nothing signed$"):
         c.trade(c.quote("USD/MXN", "buy", 25_000))
     assert accepts(session) == []
+
+
+# ---------- the core pin: the SDK signs for its own chain id and core, never for the ones /health names ----------
+
+FUJI_CORE = "0xa2f94aa752d4a703028ecfae8686264dc0928b9c"
+OTHER_CORE = "0x" + "c0" * 20
+
+
+def served_on(health, core, chain_id=CHAIN_ID):
+    """/health with avax-fuji on ``core`` and the domain of ``chain_id`` and that core."""
+    h = copy.deepcopy(health)
+    fuji = next(c for c in h["chains"] if c["key"] == "avax-fuji")
+    fuji.update(core=core, chain_id=chain_id, domain=e7.h0x(e7.domain_separator(chain_id, core)))
+    return h
+
+
+def test_each_network_pins_its_chain_id_core_and_domain():
+    pins = {
+        "testnet": (43113, FUJI_CORE, "0xbc23297610754d54bdddbc951d463fbb935ee9dea70c9644f6f6c8ea06ebc7d5"),
+        "mainnet": (1, "0x90e32979611db01cdfba49c1446995ecb97a26bf",
+                    "0x36426c81e2e05a5a913e0497961d6b43a3108eee2149ed82932ac886f392bc83"),
+    }
+    for name, (chain_id, core, domain) in pins.items():
+        net = crx.NETWORKS[name]
+        assert (net["chain_id"], net["core"].lower()) == (chain_id, core)
+        assert e7.h0x(e7.domain_separator(net["chain_id"], net["core"])) == domain
+    assert "core" not in crx.NETWORKS["solana"] and crx.NETWORKS["solana"]["program_id"]
+
+
+def test_pin_match_signs_for_the_pinned_core(make_client, venue, session, clock, account):
+    c = make_client(clock=clock)
+    assert c.trade(c.quote("USD/MXN", "buy", 25_000)).status == "open"
+    assert c._chain_info()["core"] == FUJI_CORE and c._sep == e7.domain_separator(43113, FUJI_CORE)
+    assert venue.template["typed_data"]["domain"] == e7.domain_json(43113, FUJI_CORE)
+    (body,) = accepts(session)
+    assert recovers(venue.template, body["sig"]) == account.address
+
+
+def test_health_on_another_core_refuses_the_trade(make_client, venue, session, health, clock):
+    # /health names another core with a domain that matches it: the pin decides, nothing signed.
+    session.routes[("GET", "/health")] = served_on(health, OTHER_CORE)
+    c = make_client(clock=clock)
+    with pytest.raises(crx.RefusedToSign, match=f"^core moved: /health names {OTHER_CORE}, the SDK pins "
+                                                f"{FUJI_CORE} on avax-fuji; nothing signed") as ei:
+        c.trade(c.quote("USD/MXN", "buy", 25_000))
+    assert ei.value.details == {"chain": "avax-fuji", "served_core": OTHER_CORE, "pinned_core": FUJI_CORE}
+    assert accepts(session) == [] and sent_nothing(session)
+
+
+def test_health_on_another_core_refuses_the_deposit(make_client, session, health):
+    session.routes[("GET", "/health")] = served_on(health, OTHER_CORE)
+    with pytest.raises(crx.RefusedToSign, match="^core moved"):
+        make_client().deposit(1000)
+    assert "eth_sendRawTransaction" not in session.rpc_methods()
+
+
+def test_health_on_another_chain_id_refuses(make_client, session, health):
+    session.routes[("GET", "/health")] = served_on(health, FUJI_CORE, chain_id=84532)
+    with pytest.raises(crx.ConfigError, match="^avax-fuji is chain 84532, not the pinned chain 43113; nothing signed$"):
+        make_client()._chain_info()
+
+
+def test_core_override_signs_for_that_core(session, health, markets, clock, tmp_path, account):
+    h = served_on(health, OTHER_CORE)
+    session.routes[("GET", "/health")] = h
+    session.rpc["eth_getCode"] = lambda p: "0x6080" if p[0].lower() == OTHER_CORE else "0x"
+    v = Venue(session, h, markets, clock)
+    c = crx.Client(key=account.key.hex(), base_url=BASE, rpc_url=RPC, state_dir=tmp_path / "state",
+                   session=session, core=OTHER_CORE.upper().replace("0X", "0x"))
+    c._clock, c._sleep = clock, clock.sleep
+    assert c.trade(c.quote("USD/MXN", "buy", 25_000)).status == "open"
+    assert c._chain_info()["core"] == OTHER_CORE and v.template["typed_data"]["domain"] == e7.domain_json(43113, OTHER_CORE)
+    (body,) = accepts(session)
+    assert recovers(v.template, body["sig"]) == account.address
+
+
+def test_core_override_still_refuses_another_core(make_client, venue, session, clock):
+    # core= replaces the pin; /health on the old pin is then a mismatch.
+    c = make_client(clock=clock, core=OTHER_CORE)
+    with pytest.raises(crx.RefusedToSign, match=f"^core moved: /health names {FUJI_CORE}, the SDK pins {OTHER_CORE}"):
+        c.trade(c.quote("USD/MXN", "buy", 25_000))
+    assert accepts(session) == []
+
+
+@pytest.mark.parametrize("bad", ["", "0x1234", "0x" + "00" * 20, "0xC0c0C0C0c0C0c0C0c0C0c0C0c0C0c0C0c0C0c0C0", 7])
+def test_core_override_must_be_an_address(session, tmp_path, account, bad):
+    with pytest.raises(crx.ConfigError, match="core is not a wallet address"):
+        crx.Client(key=account.key.hex(), base_url=BASE, rpc_url=RPC, state_dir=tmp_path, session=session, core=bad)
+    assert session.calls == []
+
+
+def test_core_override_is_refused_on_solana(session, tmp_path, account):
+    with pytest.raises(crx.ConfigError, match="^core= is for Ethereum networks"):
+        crx.Client(key=account.key.hex(), network="solana", base_url=BASE, rpc_url=RPC, session=session,
+                   state_dir=tmp_path, allow_mainnet=True, core=OTHER_CORE)
+
+
+def test_a_network_with_no_pin_refuses_to_sign(make_client, session, monkeypatch):
+    monkeypatch.setitem(crx.NETWORKS, "testnet", {k: v for k, v in crx.NETWORKS["testnet"].items() if k != "core"})
+    with pytest.raises(crx.ConfigError, match="pins no chain id or core; nothing signed. Pass core="):
+        make_client().deposit(1000)
+    assert "eth_sendRawTransaction" not in session.rpc_methods()
 
 
 def test_rpc_on_wrong_chain_refused(make_client, session):

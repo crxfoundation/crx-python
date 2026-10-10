@@ -333,12 +333,13 @@ def clock():
 
 
 def new_maker(session, health, tmp_path, clock):
-    """A maker seat on keys.other, on avax-fuji with the vectors' domain (chain 43113, their core)."""
+    """A maker seat on keys.other, on avax-fuji with the vectors' domain (chain 43113, their core: core=)."""
     fuji = next(c for c in health["chains"] if c["key"] == "avax-fuji")
     fuji.update(core=DOMAIN["verifying_contract"], domain=DOMAIN["separator"])
     session.routes[("GET", "/health")] = health
     session.rpc["eth_getCode"] = lambda p: "0x6080" if p[0].lower() == DOMAIN["verifying_contract"] else "0x"
-    c = crx.Client(key=KEY, base_url=BASE, rpc_url=RPC, state_dir=tmp_path / "state", session=session)
+    c = crx.Client(key=KEY, base_url=BASE, rpc_url=RPC, state_dir=tmp_path / "state", session=session,
+                   core=DOMAIN["verifying_contract"])
     c._clock, c._sleep = clock, clock.sleep
     return c
 

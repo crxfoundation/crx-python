@@ -5,8 +5,8 @@
   {
    "base_token": "0xa52c60e6e14190dad2739f4b401aa3264ae68cb8",
    "chain_id": 43113,
-   "core": "0x0f6fba28791dfd909bd023e63bc072081610eeea",
-   "domain": "0xa360b83ea212664bd3328ac11dd6558752fee818bba2807d51049806a9f7fd84",
+   "core": "0xa2f94aa752d4a703028ecfae8686264dc0928b9c",
+   "domain": "0xbc23297610754d54bdddbc951d463fbb935ee9dea70c9644f6f6c8ea06ebc7d5",
    "domain_verified": true,
    "enabled": true,
    "key": "avax-fuji",

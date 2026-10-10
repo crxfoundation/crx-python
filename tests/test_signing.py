@@ -12,7 +12,7 @@ from crx._http import Gateway, rest_message
 
 from .conftest import BASE, FakeSession
 
-CORE = "0x0f6fba28791dfd909bd023e63bc072081610eeea"
+CORE = "0xa2f94aa752d4a703028ecfae8686264dc0928b9c"
 DOMAIN = {"name": "CRX", "version": "rulebook-1.0", "chainId": 43113, "verifyingContract": CORE}
 
 

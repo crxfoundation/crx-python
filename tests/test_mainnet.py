@@ -9,7 +9,7 @@ from crx import _eip712 as e7
 
 from .conftest import BASE, RPC
 
-CORE = "0x00000000000000000000000000000000000c0e01"
+CORE = "0x90e32979611db01cdfba49c1446995ecb97a26bf"  # the pinned mainnet core
 
 
 def mainnet_health():

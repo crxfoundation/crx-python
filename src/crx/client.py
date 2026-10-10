@@ -39,6 +39,9 @@ log = logging.getLogger("crx")
 
 # settle_wait: s that trade(), deposit() and withdraw() poll their own status at most.
 # check_minute: the minute past each hour of the hourly check.
+# chain_id and core (Ethereum rows): the chain and the CRX core contract the SDK signs for. The EIP-712 domain
+# is name "CRX", version "rulebook-1.0", this chain_id and this core. /health must name the same chain id, core
+# and domain separator, else every signing call refuses. Client(core=) replaces the row's core.
 NETWORKS = {
     "testnet": {
         "chain": "avax-fuji",
@@ -46,6 +49,8 @@ NETWORKS = {
         "rpc_url": "https://api.avax-test.network/ext/bc/C/rpc",
         "settle_wait": 30.0,
         "check_minute": 5,
+        "chain_id": 43113,
+        "core": "0xa2F94aA752D4a703028eCfAE8686264dC0928B9c",
     },
     # Ethereum mainnet. Off unless the caller opts in; no default RPC.
     "mainnet": {
@@ -54,6 +59,8 @@ NETWORKS = {
         "rpc_url": None,
         "settle_wait": 90.0,
         "check_minute": 35,
+        "chain_id": 1,
+        "core": "0x90e32979611dB01CDFbA49C1446995EcB97a26bf",
     },
     # Solana mainnet. Off unless the caller opts in (allow_mainnet); no default RPC. program_id is the one
     # place the SDK names the CRX program: base58, in full, from the birth record (birth-pins.py emit).
@@ -235,6 +242,10 @@ class Client:
     ``account`` is another seat this key may read (see ``add_viewer``). With it,
     ``balance``, ``positions`` and ``trades`` read that seat; every other call is refused.
 
+    Each Ethereum network pins its chain id and core (``NETWORKS``); the signing domain is built from that
+    pin. When /health names another chain id, core or domain, every signing call refuses and nothing is
+    signed. ``core`` replaces the pinned core: pass it only with an address CRX publishes.
+
     ``network="mainnet"`` (Ethereum, chain 1) is off unless ``allow_mainnet=True``
     or ``CRX_ALLOW_MAINNET=1``. Its gateway is ``https://api.crxfx.com`` unless
     ``base_url`` or ``CRX_BASE`` names another. It has no default RPC: pass ``rpc_url``
@@ -272,6 +283,7 @@ class Client:
         signer: Any = None,
         keepalive: float | None = _maker.KEEPALIVE_S,
         keypair: Any = None,
+        core: str | None = None,
     ) -> None:
         self._account = None
         self._signer = None
@@ -294,6 +306,17 @@ class Client:
             raise ConfigError(f"unknown network {clean(network, 20)!r}; known: {', '.join(NETWORKS)}")
         self.network = name
         self._net = net
+        pin_core = net.get("core")
+        if core is not None:
+            if net.get("family") == "solana":
+                key = keypair = None
+                raise ConfigError("core= is for Ethereum networks; on Solana the SDK pins the program")
+            try:
+                pin_core = _address(core, "core", ConfigError)
+            except ConfigError:
+                key = keypair = None
+                raise
+        self._pin_core = pin_core.lower() if isinstance(pin_core, str) else None
         self._keypair = None
         seat = None
         if keypair is not None:
@@ -427,9 +450,9 @@ class Client:
             raise ConfigError("a viewer (account=) only reads: balance, positions, trades")
 
     def _chain_info(self) -> dict:
-        """This network's chain from /health, by the network's chain key. The chain id must be the
-        network's (testnet or mainnet), and the served domain separator must equal the one of that
-        chain id and core. The typed-data domain is that chain id and core."""
+        """This network's chain from /health, by the network's chain key. The served chain id and core must
+        equal the pinned ones (the network row, or ``core=``), and the served domain separator must equal the
+        one of the pinned chain id and core. The typed-data domain is the pinned chain id and core."""
         if self._chain is not None:
             return self._chain
         chains = self.health().get("chains")
@@ -443,8 +466,11 @@ class Client:
             c = sol.check_cluster(self._rpc, self._net, c)
             self._chain, self._sep, self._rpc_checked = c, e7.domain_separator(None, c["core"]), True
             return self._chain
+        pin_id, pin_core = self._net.get("chain_id"), self._pin_core
+        if type(pin_id) is not int or pin_core is None:
+            raise ConfigError(f"network {self.network!r} pins no chain id or core; nothing signed. Pass core=")
         try:
-            chain_id, core, domain = int(c["chain_id"]), str(c["core"]), str(c["domain"]).lower()
+            chain_id, core, domain = int(c["chain_id"]), str(c["core"]).lower(), str(c["domain"]).lower()
         except (KeyError, TypeError, ValueError):
             raise BadAnswer("/health sent a chain this SDK cannot read") from None
         if self.network == "mainnet":
@@ -452,10 +478,17 @@ class Client:
                 raise ConfigError(f"{self.chain_key} is chain {chain_id}, not Ethereum mainnet (chain 1)")
         elif chain_id not in TESTNET_CHAIN_IDS:
             raise ConfigError(f"{self.chain_key} is chain {chain_id}, not a testnet; this SDK runs on testnets only")
-        sep = e7.domain_separator(chain_id, core)
+        if chain_id != pin_id:
+            raise ConfigError(f"{self.chain_key} is chain {chain_id}, not the pinned chain {pin_id}; nothing signed")
+        if core != pin_core:
+            raise RefusedToSign(
+                f"core moved: /health names {clean(core, 44)}, the SDK pins {pin_core} on {self.chain_key}; "
+                "nothing signed. Update crx-python, or pass core= with the address CRX publishes",
+                details={"chain": self.chain_key, "served_core": clean(core, 44), "pinned_core": pin_core})
+        sep = e7.domain_separator(pin_id, pin_core)
         if e7.h0x(sep) != domain:
             raise RefusedToSign("domain moved: /health does not match the core; nothing signed")
-        self._chain, self._sep = dict(c, chain_id=chain_id), sep
+        self._chain, self._sep = dict(c, chain_id=pin_id, core=pin_core), sep
         return self._chain
 
     def _chain_ready(self) -> dict:
@@ -465,7 +498,7 @@ class Client:
             if self._rpc.int("eth_chainId") != c["chain_id"]:
                 raise ConfigError(f"the RPC is not on {self.chain_key} (chain {c['chain_id']})")
             if self._rpc("eth_getCode", c["core"], "latest") in ("0x", "", None):
-                raise ConfigError(f"the core /health names on {self.chain_key} is not a contract; nothing sent")
+                raise ConfigError(f"the pinned core on {self.chain_key} is not a contract; nothing sent")
             self._rpc_checked = True
         return c
 
