@@ -474,6 +474,7 @@ def test_template_below_the_floor_is_asked_again(make_client, venue, session, cl
     floor = int(venue.template["typed_data"]["message"]["ownNonce"])
     venue.reset()
     venue.nonces = [floor]
+    c = make_client(clock=clock)  # the venue reuses the RFQ id: a client that took no accept on it
     q = c.quote("USD/MXN", "buy", 25_000)
     assert int(q.raw["trade_template"]["typed_data"]["message"]["ownNonce"]) == floor
     before = len(accepts(session))
@@ -490,6 +491,7 @@ def test_nonce_floor_refuses_replay(make_client, venue, session, clock, account)
     floor = venue.template["typed_data"]["message"]["ownNonce"]
     venue.reset()
     venue.msg_edit = {"ownNonce": floor}  # the gateway keeps serving the nonce this seat signed
+    c = make_client(clock=clock)  # the venue reuses the RFQ id: a client that took no accept on it
     q = c.quote("USD/MXN", "buy", 25_000)
     before = len(accepts(session))
     with pytest.raises(crx.RefusedToSign, match="^refused to sign: ownNonce is not above the last one this seat signed$"):

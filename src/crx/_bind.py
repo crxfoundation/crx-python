@@ -279,8 +279,10 @@ class Binder:
         Returns (the 200 answer, the template signed, the answer time). When the gateway
         does not answer a signed post, the answer is ``{}``: the gateway may hold the
         signature, so the trade status decides. A band decline or ``service_unavailable`` raises as
-        is: the gateway reserved nothing. Before the first signature, a refusal
-        raises as is. After it, the trade can still open, so any failure other than a
+        is: the gateway reserved nothing, except ``mark_unavailable`` after a signature, which can
+        keep the round (``after_sig`` is True on it). Before the first signature, a refusal
+        raises as is; a 200 to the unsigned ask means the gateway holds an accept already:
+        TradeUnknown. After it, the trade can still open, so any failure other than a
         NOTHING_SENT refusal raises TradeUnknown.
         """
         until = self.until(closes_at_ms)
@@ -291,6 +293,10 @@ class Binder:
                 if ask_for:
                     r = self.post_accept(rfq_id, {"quote_id": quote_id}, until)
                     posts += 1
+                    if r is not None and r.status_code == 200:
+                        # The gateway answers an RFQ it holds an accept on with that accept, and can arm it.
+                        raise TradeUnknown("the gateway holds an accept on this RFQ already; the trade may still "
+                                           "open; " + read_later(ask["quote_expiry_max"]), details={"rfq_id": rfq_id})
                     fresh = stale_template(r, quote_id)
                     if fresh is None:
                         raise accept_refused(r)
@@ -317,7 +323,8 @@ class Binder:
                 if posts >= MAX_POSTS or self.now() >= until:
                     raise QuoteExpired(f"the trade template went stale; {NEW_QUOTE}", status=409, gateway_code=STALE)
                 t, ask_for = fresh, False
-        except NOTHING_SENT:
+        except NOTHING_SENT as e:
+            e.after_sig = signed is not None  # mark_unavailable after a signature: the gateway can keep the round
             raise
         except Exception as e:  # noqa: BLE001 - once a Trade is signed, no failure may read as "nothing happened"
             if signed is None:

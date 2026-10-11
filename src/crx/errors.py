@@ -318,6 +318,20 @@ class TradeUnknown(CrxError):
     code = "trade_unknown"
 
 
+class WithdrawUnknown(CrxError):
+    """The withdraw may still be sent. Do not sign another: call ``withdraw()`` with the same amount to read it."""
+
+    code = "withdraw_unknown"
+
+
+class EarlierOutcome(CrxError):
+    """An earlier ``trade()`` or ``withdraw()`` on this client has its final answer now; that call ended
+    without it. Nothing was signed for this call. ``details`` names the earlier one and its ``status``.
+    The next call proceeds."""
+
+    code = "earlier_outcome"
+
+
 _BY_GATEWAY_CODE: dict[str, type[CrxError]] = {
     "market_paused": MarketPaused,
     "notional_below_minimum": BelowMin,

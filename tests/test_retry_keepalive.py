@@ -111,9 +111,9 @@ def test_withdraw_post_is_sent_once_on_503(make_client, session):
     c._sleep = pauses = Pauses()
     session.routes[("GET", "/balance")] = dict(balance_of(c), withdraw={"nonce": "3"})
     session.routes[("POST", "/withdraw")] = (503, {"code": "upstream", "error": "down"})
-    with pytest.raises(crx.ServerError):
+    with pytest.raises(crx.WithdrawUnknown):  # no answer: the status read decides, and shows no item
         c.withdraw(10)
-    assert len([x for x in session.calls if x["path"] == "/withdraw"]) == 1 and pauses == []
+    assert len([x for x in session.calls if x["path"] == "/withdraw"]) == 1
 
 
 @pytest.mark.parametrize("fail, err", [(down, crx.NetworkError),

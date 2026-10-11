@@ -1918,8 +1918,7 @@ def test_solana_withdraw_stops_at_the_20_minute_bound(solnet, solsession, tmp_pa
     (409, {"error": "a withdraw is in progress", "code": "withdraw_in_progress"}),
     (409, {"error": "conflict: the latest settlement is not read yet; retry shortly", "code": "other"}),
     (409, {"error": "conflict: CRX is paused; the latest settlement is not read yet", "code": "conflict"}),
-    (503, {"error": "conflict: the latest settlement is not read yet; retry shortly", "code": "conflict"}),
-], ids=["paused", "in_progress", "other_code", "text_not_at_start", "other_status"])
+], ids=["paused", "in_progress", "other_code", "text_not_at_start"])
 def test_solana_withdraw_any_other_refusal_raises_at_once(solnet, solsession, tmp_path, account, status, body):
     c = sclient(solsession, tmp_path, account)
     withdraw_routes(solsession, c, refusals=0)
@@ -1941,10 +1940,9 @@ def test_solana_withdraw_does_not_post_again_when_the_gateway_gives_no_answer(so
         posts.append(c._clock())
         raise requests.ConnectionError("down")
     solsession.routes[("POST", "/withdraw")] = down
-    t0 = c._clock()
-    with pytest.raises(crx.NetworkError):
+    with pytest.raises(crx.WithdrawUnknown):  # no answer: the status read decides, and shows no item
         c.withdraw("10")
-    assert len(posts) == 1 and c._clock() == t0
+    assert len(posts) == 1
 
 
 # ---------- the tenor band: on Solana no RFQ leaves outside the band the pair's /markets row serves ----------
