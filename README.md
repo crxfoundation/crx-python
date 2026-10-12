@@ -21,6 +21,26 @@ The seat must be onboarded. It needs ETH for gas on mainnet.
 Or pass `key_file="seat.key"` (the file must be `chmod 600`).
 The SDK never prints or logs the key.
 
+## Register a wallet
+
+Get a firm token on Discover. Then, with no browser:
+
+```python
+import crx
+
+c = crx.Client(network="mainnet", allow_mainnet=True)  # reads CRX_WALLET_PK and CRX_RPC
+r = c.register_wallet()  # reads CRX_FIRM_TOKEN
+print(r.status)  # pending
+```
+
+- The wallet signs one text (EIP-191), five lines joined by `\n`: `CRX-WALLET-REGISTER`, `Token: <the token's
+  12-hex id>`, `Address: <lower-case address>`, `Chain: 1`, `Timestamp: <unix ms>`. The client posts it once, with
+  the token, to `https://discover.crxfx.com`. The key stays in the client.
+- Plain EOA or MPC wallets only. Before it signs, the client reads the address's code on your RPC: a contract
+  wallet or an EIP-7702 delegation raises `seat_cannot_sign`. Nothing is sent.
+- One wallet per firm. `status` reads `pending` until CRX approves the wallet.
+- After a `network` error, call again with the same token: CRX returns the saved request (`repeat` True).
+
 ## Quickstart
 
 ```bash
@@ -79,6 +99,7 @@ print(w.status)  # accepted
 | `balance()` | Collateral, free, margin, withdraw state. |
 | `positions()` | Open positions. |
 | `trades()` | Your event tape: `trade.opened`, `trade.refused`, `trade.settled`, `trade.closed`, `trade.closed_out`, `trade.novated`, `margin.called`, `margin.cured`, and your RFQ events. `market=True` adds every open RFQ a maker seat receives (no owner named). `after=` (the last `Event.seq` you read) reads newer events only. Key trades on `trade_id`. A `trade.opened` with `provisional: true` is followed, once final, by a `trade.opened` with no `provisional` key; that one is the final state. `trade.retracted` removes a provisional open. |
+| `register_wallet(token)` | Registers this wallet as your firm's seat. Mainnet only. See [Register a wallet](#register-a-wallet). |
 | `add_viewer(addr)` | Lets another wallet read your seat. Up to 5. |
 | `remove_viewer(addr)` | Takes that access back. |
 | `viewers()` | Wallets that can read your seat. |
@@ -224,7 +245,7 @@ Every error is a `crx.CrxError`. Branch on `.code`. Show `str(e)`: on a gateway 
 | `no_quotes` | No maker quoted in time. From `rfqs(only=)`: the RFQ did not reach your seat in time. |
 | `rate_out_of_band`, `mark_unavailable` | The gateway declined the accept: the quote's rate is outside the off-market band, or no market price was read. Nothing was reserved or sent. Ask for a new quote. `except crx.Declined` catches both. |
 | `service_unavailable` | The service takes no trade now. Nothing was reserved or sent: no trade opened. Accept again later, or ask for a new quote. `except crx.ServerError` catches it too. |
-| `seat_cannot_sign` | This address cannot sign trades: it is a smart-contract wallet. Use an EOA or MPC address. Nothing was sent. |
+| `seat_cannot_sign` | This address cannot sign trades: it is a smart-contract wallet, or delegates to one (EIP-7702). Use an EOA or MPC address. Nothing was sent. |
 | `rfq_cancelled` | The gateway cancelled the RFQ. `.reason`: `rate_out_of_band` (no quote inside the off-market band) or `mark_unavailable` (no market price). `except crx.NoQuotes` catches it too. |
 | `quote_lost` | Your maker quote opened no trade. `reason`: `another_maker`, `expired`, `cancelled`, `dropped` or `timeout`. |
 | `quote_format_outdated` | The gateway takes a newer quote format. Update the SDK. Nothing was written. |
@@ -245,6 +266,12 @@ Every error is a `crx.CrxError`. Branch on `.code`. Show `str(e)`: on a gateway 
 | `bind_in_progress` | Solana: a bind of the seat has no end yet: the seat is not bound, and the bind has not failed. `bind()` reads its end. No other bind is taken before it. |
 | `bind_failed` | Solana: the bind ended and the seat is not bound. |
 | `seat_not_ready` | Onboarding not finished. Wait. |
+| `unauthorized` | `register_wallet()`: CRX does not take the firm token: missing, expired, revoked or used. Get a new token on Discover. |
+| `invalid_signature` | `register_wallet()`: CRX refused the signature. The timestamp is out of its window, or the signature is not the address's. Check the clock. |
+| `one_wallet` | Your firm holds a wallet already. |
+| `mainnet_wallet_held` | Another firm holds or asks for this address. Use a different address. |
+| `mainnet_wallet_same` | Your firm holds this address already. |
+| `mainnet_wallet_signing` | CRX is recording your firm's last address. Register again once it is recorded. |
 | `conflict` | The venue cannot take this now. |
 | `withdraw_in_progress` | One withdraw at a time. The next opens when this one is paid. |
 | `viewer_cap` | 5 viewers already. Remove one first. |
@@ -270,7 +297,8 @@ Every error is a `crx.CrxError`. Branch on `.code`. Show `str(e)`: on a gateway 
 
 ## Settings
 
-`CRX_BASE` (gateway URL), `CRX_RPC` (chain RPC URL), `CRX_STATE_DIR`, `CRX_ALLOW_MAINNET`.
+`CRX_BASE` (gateway URL), `CRX_RPC` (chain RPC URL), `CRX_STATE_DIR`, `CRX_ALLOW_MAINNET`, `CRX_FIRM_TOKEN`,
+`CRX_DISCOVER` (Discover URL for `register_wallet`).
 
 ## Tests
 

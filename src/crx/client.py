@@ -25,6 +25,7 @@ from . import _solana as sol
 from ._http import Gateway
 from ._keys import load_account
 from . import _maker
+from . import _register
 from .signer import LocalSigner, as_signer, sign_typed
 from .errors import (
     AboveMax, BadAnswer, BadRequest, BelowMin, ConfigError, CrxError, EarlierOutcome, MarkUnavailable,
@@ -32,8 +33,8 @@ from .errors import (
     ServiceUnavailable, TradeUnknown, TxFailed, WithdrawUnknown, clean,
 )
 from .models import (
-    Ask, Balance, Deposit, Drop, Event, MakerQuote, Market, Position, Quote, Rfq, Trade, Viewer, Withdraw, dec,
-    ms_to_dt, side_word,
+    Ask, Balance, Deposit, Drop, Event, MakerQuote, Market, Position, Quote, Registration, Rfq, Trade, Viewer,
+    Withdraw, dec, ms_to_dt, side_word,
 )
 
 log = logging.getLogger("crx")
@@ -1526,6 +1527,37 @@ class Client:
         if not isinstance(rows, list):
             raise BadAnswer("/viewers lists no viewers")
         return [_viewer(v) for v in rows if isinstance(v, dict)]
+
+    def register_wallet(self, token: str | None = None, *, discover_url: str | None = None) -> Registration:
+        """Register this wallet as your firm's seat, with a firm token from Discover. No browser.
+
+        Ethereum mainnet only (``network="mainnet"``). Before it signs, the client reads the address's code
+        on the RPC: a contract wallet, or an EIP-7702 delegation (code ``0xef0100...``), raises
+        ``SeatCannotSign``; an RPC on a chain other than 1, or a read that fails, raises too. Nothing is sent.
+
+        The wallet signs one text (EIP-191), five lines joined by ``\\n``: ``CRX-WALLET-REGISTER``,
+        ``Token: <the token's 12-hex id>``, ``Address: <lower-case address>``, ``Chain: 1``,
+        ``Timestamp: <unix ms>``. The client posts it once to ``discover_url`` (``CRX_DISCOVER``, default
+        ``https://discover.crxfx.com``) with the token as a Bearer header. The key never leaves the client;
+        the token goes to that host only.
+
+        ``token`` defaults to ``CRX_FIRM_TOKEN``. Returns ``status`` ``pending`` until CRX approves the
+        wallet. A call again with the same token after a lost answer returns the saved request
+        (``repeat`` True).
+        """
+        self._need_seat()
+        if self.network != "mainnet":
+            raise ConfigError("register_wallet registers an Ethereum mainnet wallet: use network='mainnet'")
+        tok, tid = _register.token_id(token if token is not None else os.environ.get(_register.ENV_TOKEN))
+        url = discover_url or os.environ.get(_register.ENV_DISCOVER) or _register.DISCOVER_URL
+        try:
+            gw = Gateway(url, None, self._session, _register.TIMEOUT)
+        except ConfigError:
+            raise ConfigError("discover_url must be https, with no credentials (http only for localhost)") from None
+        me = self.address
+        _register.check_eoa(self._rpc, me)
+        payload = _register.body(self._signer, tid, me, int(self._clock() * 1000))
+        return _register.post(gw, tok, payload, me)
 
     # ---------- maker ----------
 

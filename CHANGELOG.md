@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- `Client.register_wallet(token=None)` registers this wallet as the firm's seat with a firm token from Discover (`CRX_FIRM_TOKEN`). No browser. Ethereum mainnet only. The wallet signs one EIP-191 text (`CRX-WALLET-REGISTER`, `Token:`, `Address:`, `Chain: 1`, `Timestamp:`); the client posts it once to Discover with the token as a Bearer header. Before it signs, it reads the address's code on the RPC: a contract wallet or an EIP-7702 delegation raises `SeatCannotSign`, nothing sent. A 200 is the repeat of a saved request. New errors: `InvalidSignature`, `OneWallet`, `WalletHeld`, `WalletSame`, `WalletSigning`. New model: `Registration`.
+
 ## 0.2.8
 
 - A retried trade or withdraw call sends once.
