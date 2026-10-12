@@ -28,7 +28,7 @@ from . import _maker
 from .signer import LocalSigner, as_signer, sign_typed
 from .errors import (
     AboveMax, BadAnswer, BadRequest, BelowMin, ConfigError, CrxError, EarlierOutcome, MarkUnavailable,
-    MarketPaused, NetworkError, NoQuotes, QuoteDropped, RefusedToSign, RfqCancelled, ServerError,
+    MarketPaused, NetworkError, NoQuotes, QuoteDropped, RateLimited, RefusedToSign, RfqCancelled, ServerError,
     ServiceUnavailable, TradeUnknown, TxFailed, WithdrawUnknown, clean,
 )
 from .models import (
@@ -230,13 +230,13 @@ def _text(value: Any) -> str | None:
 def _trade_word(view: Any) -> tuple[str, bool]:
     """(the trade status an RFQ view shows, True when the accept can make no other outcome).
 
-    ``trade_status`` ``open`` or ``refused`` is final; ``pending`` means the arm landed: one trade, its
-    verdict due. An RFQ that opened or settled reads ``open``. An RFQ that expired or was cancelled with
-    no trade status reads ``refused``.
+    ``trade_status`` ``open`` or ``refused`` is final; ``sending`` and ``pending`` are not: a landed arm
+    can still be refused. An RFQ that opened or settled reads ``open``. An RFQ that expired or was
+    cancelled with no trade status reads ``refused``.
     """
     v = view if isinstance(view, dict) else {}
     ts, st = _text(v.get("trade_status")), _text(v.get("status"))
-    if ts in ("open", "refused", "pending"):
+    if ts in ("open", "refused"):
         return ts, True
     if ts is None and st in ("opened", "settled"):
         return "open", True
@@ -892,10 +892,11 @@ class Client:
 
         At most once. One trade() at a time per client. A signed accept is posted once. A
         second trade() on an RFQ this client signed an accept for signs nothing: it reads the
-        trade status and returns it. While an earlier accept has no final answer, trade() on
-        another RFQ signs nothing and raises ``TradeUnknown``. When that answer arrives and
-        the earlier call did not return it, the next trade() raises ``EarlierOutcome`` once.
-        Past the quote end plus 120 s, ``positions()`` gives the final answer.
+        trade status and returns it. While an earlier accept is not ``open`` or ``refused``
+        (``sending`` and ``pending`` included), trade() on another RFQ signs nothing and raises
+        ``TradeUnknown``. When that trade opens and the earlier call did not return ``open``,
+        the next trade() raises ``EarlierOutcome`` once. Past the quote end plus 120 s, a
+        position ``positions()`` lists ``open`` is the final answer.
         """
         self._need_seat()
         if not isinstance(quote, Quote):
@@ -907,7 +908,7 @@ class Client:
             self._earlier_trades()
             b = self._binder()
             rec = {"rfq_id": quote.rfq_id, "quote": quote, "end": quote.rfq["quote_expiry_max"], "final": False,
-                   "told": False, "raw": {}}
+                   "told": False, "raw": {}, "word": "pending", "tx": None}
             self._accepts[quote.rfq_id] = rec
             self._keep_accepts()
             try:
@@ -922,7 +923,7 @@ class Client:
                 self._accepts.pop(quote.rfq_id, None)  # refused before anything was reserved
                 raise
             _, final = _trade_word(view)
-            rec.update(raw=t.raw, final=final, told=final)
+            rec.update(raw=t.raw, final=final, told=final, word=t.status, tx=t.tx)
             return t
 
     def _trade_once(self, b: Binder, quote: Quote, rec: dict) -> tuple[Trade, dict]:
@@ -950,13 +951,14 @@ class Client:
 
     def _trade_read(self, rec: dict) -> tuple[str, bool, dict]:
         """(status, final, view) of the accept ``rec``: one GET /rfqs/{id}. Past its quote end plus
-        READ_AFTER_END, a view with no final answer, or none, defers to ``positions()``: a listed
-        position is the trade, none means no trade."""
+        READ_AFTER_END, a view with no final answer defers to ``positions()``: a position listed
+        ``open`` is the trade. No position means no trade only when the view was read and names no
+        trade status: nothing was held or landed, and the chain arms nothing more."""
         rid, past = rec["rfq_id"], self._clock() >= rec["end"] + READ_AFTER_END
         try:
-            view = self._gw.request("GET", f"/rfqs/{rid}")
+            view, read = self._gw.request("GET", f"/rfqs/{rid}"), True
         except CrxError:
-            view = {}
+            view, read = {}, False
         word, final = _trade_word(view)
         if final or not past:
             return word, final, view
@@ -964,20 +966,28 @@ class Client:
             mine = [p for p in self.positions() if p.rfq_id.lower() == rid.lower()]
         except CrxError:
             return word, False, view
-        return ((_text(mine[0].status) or "open") if mine else "refused"), True, view
+        if mine:
+            listed = _text(mine[0].status) or "pending"
+            return listed, listed == "open", view
+        if read and _text(view.get("trade_status")) is None:
+            return "refused", True, view
+        return word, False, view
 
     def _trade_again(self, rec: dict) -> Trade:
-        """trade() on an RFQ this client signed an accept for: read its status, as the first call did. Signs nothing."""
-        deadline = self._clock() + self._settle_wait
-        while True:
-            word, final, view = self._trade_read(rec)
-            if final or self._clock() >= deadline:
-                break
-            self._sleep(1.0)
-        rec.update(final=final, told=final)
+        """trade() on an RFQ this client signed an accept for: read its status, as the first call did. Signs
+        nothing. A final answer read once is returned as read: never read again."""
         q = rec["quote"]
-        log.info("rfq %s: accept signed already; read %s, nothing signed", q.rfq_id, word)
-        return Trade(status=word, tx=_word(view.get("trade_tx")), raw=rec["raw"], rfq_id=q.rfq_id,
+        if not rec["final"]:
+            deadline = self._clock() + self._settle_wait
+            while True:
+                word, final, view = self._trade_read(rec)
+                if final or self._clock() >= deadline:
+                    break
+                self._sleep(1.0)
+            rec.update(final=final, told=final, word=word, tx=_word(view.get("trade_tx")) or rec.get("tx"))
+        rec["told"] = True if rec["final"] else rec["told"]
+        log.info("rfq %s: accept signed already; read %s, nothing signed", q.rfq_id, rec["word"])
+        return Trade(status=rec["word"], tx=rec.get("tx"), raw=rec["raw"], rfq_id=q.rfq_id,
                      quote_id=q.quote_id, pair=q.pair, side=q.side, notional=q.notional, rate=q.rate)
 
     def _earlier_trades(self) -> None:
@@ -989,7 +999,7 @@ class Client:
             if not final:
                 raise TradeUnknown(f"the trade on rfq {rid} has no final answer yet; nothing signed for this "
                                    "quote; " + read_later(rec["end"]), details={"rfq_id": rid, "status": word})
-            rec.update(final=True, told=True)
+            rec.update(final=True, told=True, word=word)
             if word != "refused":
                 raise EarlierOutcome(f"the trade on rfq {rid} is {word}; nothing signed for this quote; "
                                      "call trade() again to take it", details={"rfq_id": rid, "status": word})
@@ -1393,7 +1403,8 @@ class Client:
     def _withdraw_read(self, held: dict) -> tuple[str, bool, dict | None]:
         """(status, final, the /balance withdraw.last row when it is the held intent's). One /balance read.
 
-        The held intent's row: ``withdraw.last`` with its item. Final: that
+        The held intent's row: ``withdraw.last`` with its item; once the seat's nonce passed the intent's,
+        a row with no item at the intent's nonce. Final: that
         row's status is not ``sending`` or ``pending``; or the seat's withdraw nonce passed the intent's
         (``unknown``: another withdraw shows); or no row and the deadline passed (``refused``).
         """
@@ -1402,10 +1413,13 @@ class Client:
         except CrxError:
             return "pending", False, None
         last = _last(bal.raw, "withdraw")
-        if _word(last.get("item")) == held["item"].lower():
+        it = _word(last.get("item"))
+        moved = bal.withdraw_nonce is not None and bal.withdraw_nonce > held["nonce"]
+        # A row keyed on its arm tx names no item: once the nonce passed, the row at the intent's nonce is its own.
+        if it == held["item"].lower() or (moved and it is None and str(last.get("nonce")) == str(held["nonce"])):
             st = _text(last.get("status")) or "pending"
             return st, st not in WAITING, last
-        if bal.withdraw_nonce is not None and bal.withdraw_nonce > held["nonce"]:
+        if moved:
             return "unknown", True, None
         if self._clock() > held["deadline"]:
             return "refused", True, None
@@ -1425,9 +1439,14 @@ class Client:
                                   details=self._held_details(word))
         if final:
             self._held_withdraw = None
-        if word == "unknown" or (final and last is None):
-            raise EarlierOutcome(f"the withdraw of {_plain(held['amount'])}, item {held['item']}, is {word}; "
-                                 "call withdraw() again for a new one", details=self._held_details(word, held))
+        if word == "unknown":
+            raise EarlierOutcome(f"the withdraw of {_plain(held['amount'])}, item {held['item']}: the seat's "
+                                 "withdraw nonce passed it, so it was paid or can never be; read balance() before "
+                                 "another withdraw", details=self._held_details(word, held))
+        if final and last is None:
+            raise EarlierOutcome(f"the withdraw of {_plain(held['amount'])}, item {held['item']}, is {word}: its "
+                                 "deadline passed; call withdraw() again for a new one",
+                                 details=self._held_details(word, held))
         tx = _word((last or {}).get("tx"))
         log.info("withdraw %s %s, nonce %s, item %s", _plain(held["amount"]), word, held["nonce"], held["item"])
         return Withdraw(amount=held["amount"], nonce=held["nonce"], item=held["item"], tx=tx, status=word)
@@ -1440,8 +1459,16 @@ class Client:
             log.info("withdraw nonce %s: not shown; posting the same signed intent", held["nonce"])
             try:
                 self._gw.request("POST", "/withdraw", body=held["body"], ok=(200, 202))
-            except CrxError as e:
+            except ServiceUnavailable:
+                self._held_withdraw = None  # CRX sends nothing; a held item answers 200 before this check
+                raise
+            except (NetworkError, ServerError, BadAnswer, RateLimited) as e:
                 log.info("withdraw nonce %s: %s on the repeat post; reading its status", held["nonce"], e.code)
+            except CrxError as e:
+                text = str(e.details.get("error") or e).removeprefix("conflict: ")
+                if not (e.status == 409 and e.code == "conflict" and text.startswith(UNREAD_SETTLEMENT)):
+                    self._held_withdraw = None  # refused: the gateway answers a held item with 200 first
+                    raise
         return self._withdraw_settle(held, posted=False)
 
     def _held_details(self, word: str, held: dict | None = None) -> dict:

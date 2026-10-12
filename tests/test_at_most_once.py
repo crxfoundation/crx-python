@@ -119,8 +119,8 @@ def test_a_refused_first_trade_lets_the_second_quote_go(make_client, venue, sess
     assert len(accepts_on(session, RFQ2)) >= 1
 
 
-def test_past_the_quote_end_positions_give_the_final_answer(make_client, venue, session, clock):
-    # The RFQ view keeps no final answer: past the quote end plus 120 s, no listed position means no trade.
+def test_past_the_quote_end_no_trade_status_and_no_position_is_no_trade(make_client, venue, session, clock):
+    # The view names no trade status (nothing held or landed) and no position is listed: no trade.
     faulty_accept(venue, session, "timeout")
     venue.script = [("sending", None)]
     c = make_client(clock=clock)
@@ -128,10 +128,56 @@ def test_past_the_quote_end_positions_give_the_final_answer(make_client, venue, 
     c.trade(q)
     with pytest.raises(crx.TradeUnknown):
         c.trade(other_rfq(q))
+    venue.sig = None  # the view serves no trade status from here on
     session.routes[("GET", "/positions")] = {"positions": []}
     clock.t = q.rfq["quote_expiry_max"] + 121
     t = c.trade(q)
     assert t.status == "refused" and len(accepts(session)) == 1
+
+
+@pytest.mark.parametrize("word", ["sending", "pending"])
+def test_past_the_quote_end_a_live_status_with_no_position_stays_unknown(make_client, venue, session, clock, word):
+    # A view still sending or pending is no final answer, even with no position listed.
+    faulty_accept(venue, session, "timeout")
+    venue.script = [(word, None)]
+    c = make_client(clock=clock)
+    q = c.quote("USD/MXN", "buy", 25_000)
+    assert c.trade(q).status == word
+    session.routes[("GET", "/positions")] = {"positions": []}
+    clock.t = q.rfq["quote_expiry_max"] + 121
+    with pytest.raises(crx.TradeUnknown):
+        c.trade(other_rfq(q))
+    assert accepts_on(session, RFQ2) == []
+
+
+def test_past_the_quote_end_an_unreadable_view_and_no_position_stays_unknown(make_client, venue, session, clock):
+    # positions() lists open positions only: no listing is no answer while the view cannot be read.
+    faulty_accept(venue, session, "dropped")
+    venue.script = [("sending", None)]
+    c = make_client(clock=clock)
+    q = c.quote("USD/MXN", "buy", 25_000)
+    c.trade(q)
+    session.routes[("GET", f"/rfqs/{RFQ}")] = (429, {"code": "rate_limited", "error": "slow down"})
+    session.routes[("GET", "/positions")] = {"positions": []}
+    clock.t = q.rfq["quote_expiry_max"] + 121
+    with pytest.raises(crx.TradeUnknown):
+        c.trade(other_rfq(q))
+    assert accepts_on(session, RFQ2) == []
+
+
+def test_a_pending_trade_blocks_the_second_quote_until_it_opens(make_client, venue, session, clock):
+    # pending: the arm landed and its verdict is due. Not final: no second quote until open or refused.
+    venue.script = [("pending", None)]
+    c = make_client(clock=clock)
+    q = c.quote("USD/MXN", "buy", 25_000)
+    assert c.trade(q).status == "pending"
+    with pytest.raises(crx.TradeUnknown):
+        c.trade(other_rfq(q))
+    venue.script = [("open", TXH)]
+    with pytest.raises(crx.EarlierOutcome) as ei:
+        c.trade(other_rfq(q))
+    assert ei.value.details == {"rfq_id": RFQ, "status": "open"}
+    assert accepts_on(session, RFQ2) == [] and len(signed_posts(session)) == 1
 
 
 def test_past_the_quote_end_an_unreadable_view_defers_to_positions(make_client, venue, session, clock):
@@ -194,6 +240,73 @@ class Money:
         if not self.shown:
             return balance_body(self.account)
         return balance_body(self.account, nonce="4", withdraw=item_row(self.word, self.g.item, LANDED))
+
+
+def test_withdraw_nonce_passed_with_no_item_reads_the_row_at_its_nonce(make_client, session, health, account):
+    # A row keyed on its arm tx names no item: once the nonce passed, the row at the intent's nonce is its own.
+    Chain(session)
+    g = gate(session, health, account)
+    session.routes[("POST", "/withdraw")] = fault_after(g.answer, "timeout")
+    money = Money(account, g)
+    session.routes[("GET", "/balance")] = money
+    c = make_client(clock=Clock(time.time()))
+    with pytest.raises(crx.WithdrawUnknown):
+        c.withdraw(1000)
+    session.routes[("GET", "/balance")] = balance_body(account, nonce="4", withdraw=item_row("accepted", None, LANDED))
+    out = c.withdraw(1000)
+    assert (out.status, out.nonce) == ("accepted", 3) and len(withdraw_posts(session)) == 1
+
+
+def test_withdraw_nonce_passed_by_another_row_is_no_new_intent(make_client, session, health, account):
+    # The nonce passed and the newest row is another withdraw: the held intent was paid or can never be.
+    Chain(session)
+    g = gate(session, health, account)
+    session.routes[("POST", "/withdraw")] = fault_after(g.answer, "timeout")
+    session.routes[("GET", "/balance")] = Money(account, g)
+    c = make_client(clock=Clock(time.time()))
+    with pytest.raises(crx.WithdrawUnknown):
+        c.withdraw(1000)
+    other = dict(item_row("accepted", "0x" + "ee" * 32, LANDED), nonce="4")
+    session.routes[("GET", "/balance")] = balance_body(account, nonce="5", withdraw=other)
+    with pytest.raises(crx.EarlierOutcome, match="read balance"):
+        c.withdraw(1000)
+    assert len(withdraw_posts(session)) == 1
+
+
+def test_withdraw_repeat_post_refused_ends_the_hold(make_client, session, health, account):
+    # The first post never arrived; the repeat of the same intent is refused: nothing is held, the next call signs.
+    Chain(session)
+    g = gate(session, health, account)
+    money = Money(account, g)
+    lost = fault_after(lambda req: None, "dropped")
+    refusal = (422, {"code": "unprocessable_entity", "error": "amount above free", "outcome": "insufficient_collateral"})
+
+    def post(req):
+        n = len(withdraw_posts(session))
+        return lost(req) if n == 1 else refusal if n == 2 else g.answer(req)
+    session.routes[("POST", "/withdraw")] = post
+    session.routes[("GET", "/balance")] = money
+    c = make_client(clock=Clock(time.time()))
+    with pytest.raises(crx.WithdrawUnknown):
+        c.withdraw(1000)
+    with pytest.raises(crx.CrxError) as ei:
+        c.withdraw(1000)
+    assert ei.value.status == 422 and not isinstance(ei.value, crx.WithdrawUnknown)
+    c.withdraw(500)  # a new intent: the hold ended
+    first, again, third = withdraw_posts(session)
+    assert first == again and third["amount"] == "500"
+
+
+def test_a_final_trade_answer_is_never_read_again(make_client, venue, session, clock):
+    # A told "open" stays "open": a later failed read never turns it into "refused".
+    c = make_client(clock=clock)
+    q = c.quote("USD/MXN", "buy", 25_000)
+    assert c.trade(q).status == "open"
+    session.routes[("GET", f"/rfqs/{RFQ}")] = (404, {"code": "not_found", "error": "no such rfq"})
+    session.routes[("GET", "/positions")] = {"positions": []}
+    clock.t = q.rfq["quote_expiry_max"] + 121
+    t = c.trade(q)
+    assert (t.status, t.tx) == ("open", TXH) and len(accepts(session)) == 1
 
 
 def withdraw_posts(session):
