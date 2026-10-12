@@ -171,18 +171,6 @@ class Viewer:
 
 
 @dataclass(frozen=True)
-class Registration:
-    """A wallet registration CRX holds. ``status`` is the served word: ``pending`` until CRX approves the
-    wallet. ``repeat`` is True when CRX had saved this request before (the same token and address).
-    ``address`` is lower case."""
-
-    address: str
-    status: str
-    repeat: bool
-    raw: dict = field(repr=False, compare=False)
-
-
-@dataclass(frozen=True)
 class Event:
     """One row of ``Client.trades()``. ``seq`` is its place in this client's own tape: seqs count
     per account and role. Pass the last one as ``trades(after=)``."""

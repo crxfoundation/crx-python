@@ -332,37 +332,6 @@ class EarlierOutcome(CrxError):
     code = "earlier_outcome"
 
 
-class InvalidSignature(BadRequest):
-    """CRX refused the wallet's registration signature: the timestamp is out of its window, or the signature
-    is not the address's. Nothing was registered."""
-
-    code = "invalid_signature"
-
-
-class OneWallet(CrxError):
-    """Your firm holds a wallet already: one wallet per firm. Nothing was registered."""
-
-    code = "one_wallet"
-
-
-class WalletHeld(CrxError):
-    """Another firm holds or asks for this address. Use a different address. Nothing was registered."""
-
-    code = "mainnet_wallet_held"
-
-
-class WalletSame(CrxError):
-    """Your firm holds this address already. Nothing was changed."""
-
-    code = "mainnet_wallet_same"
-
-
-class WalletSigning(CrxError):
-    """CRX is recording your firm's last address. Register again once it is recorded. Nothing was registered."""
-
-    code = "mainnet_wallet_signing"
-
-
 _BY_GATEWAY_CODE: dict[str, type[CrxError]] = {
     "market_paused": MarketPaused,
     "notional_below_minimum": BelowMin,
@@ -499,33 +468,3 @@ def from_gateway(status: int, body: Any, text: str = "", *, host: str = "", retr
     if status >= 500:
         return ServerError(msg, **kw)
     return CrxError(msg, code=gw or f"http_{status}", **kw)
-
-
-# The wallet registration's codes. Its own table: there ``invalid_signature`` is the wallet's proof (400),
-# not the gateway login. Other codes (``unauthorized``, ``seat_cannot_sign``, ``rate_limited``, ``internal``,
-# ``upstream``) map as the gateway's do.
-_BY_REGISTER_CODE: dict[str, type[CrxError]] = {
-    "invalid_signature": InvalidSignature,
-    "one_wallet": OneWallet,
-    "mainnet_wallet_held": WalletHeld,
-    "mainnet_wallet_same": WalletSame,
-    "mainnet_wallet_signing": WalletSigning,
-    "payload_too_large": BadRequest,
-    "seat_unread": ServerError,
-}
-
-
-def from_register(status: int, body: Any, text: str = "", *, host: str = "", retry_after: Any = None) -> CrxError:
-    """Map one refusal of the wallet registration to a typed error: its own codes first (``code``, else an
-    ``error`` that is one), then ``from_gateway``."""
-    e = from_gateway(status, body, text, host=host, retry_after=retry_after)
-    code = body.get("code") if isinstance(body, dict) else None
-    if not code and isinstance(body, dict):
-        code = body.get("error")
-    cls = _BY_REGISTER_CODE.get(code) if isinstance(code, str) else None
-    if cls is None:
-        return e
-    msg = str(e)
-    if msg in (code, f"HTTP {status}"):
-        msg = " ".join((cls.__doc__ or code).split()).split(". ")[0].rstrip(".") + "."
-    return cls(msg, status=status, details=e.details, gateway_code=code)
