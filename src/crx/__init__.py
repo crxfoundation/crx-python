@@ -15,7 +15,7 @@ from .models import (
     Ask, Balance, Deposit, Drop, Event, MakerQuote, Market, Position, Quote, Rfq, Trade, Viewer, Withdraw,
 )
 
-__version__ = "0.2.7"
+__version__ = "0.2.8"
 
 __all__ = [
     "Client", "NETWORKS", "__version__",

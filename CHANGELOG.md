@@ -1,7 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.2.8
 
+- A retried trade or withdraw call sends once.
 - Ethereum: each network pins its chain id and core: testnet (chain 43113) `0xa2F94aA752D4a703028eCfAE8686264dC0928B9c`, mainnet (chain 1) `0x90e32979611dB01CDFbA49C1446995EcB97a26bf`. The signing domain is built from the pin, not from `/health`. A `/health` core other than the pin raises `RefusedToSign` ("core moved"); another chain id raises `ConfigError`. Nothing is signed.
 - `Client(core=)` replaces the pinned core. A value that is not an address raises `ConfigError`. On Solana, `core=` raises `ConfigError`.
 - `trade()` is at most once. One `trade()` at a time per client. A second `trade()` on an RFQ this client signed an accept for signs nothing: it reads the trade status and returns it. While an earlier accept is not `open` or `refused` (`sending` and `pending` included), `trade()` on another RFQ signs nothing and raises `TradeUnknown`. When that trade opens unread, the next `trade()` raises `EarlierOutcome` once. A final answer is never read again. Past the quote end plus 120 s, a position `positions()` lists `open` is the final answer.
