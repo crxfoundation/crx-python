@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- `Trade.provisional` (`trade()`, maker `confirm()`): True while CRX marks the open provisional (`trade_provisional`). No key reads False.
+- An `open` is not final. The SDK reads final only from a mark the gateway sends; no response carries one, so no trade reads final. A missing key or elapsed time never reads final.
+- A repeat `trade()` on an accept read `open` or `refused` reads its status again. A failed read keeps the answer. A read of `pending` (the open was taken back) holds other quotes again.
+- Docs: a `trade.opened` with no `provisional` key is open; `trade.retracted` can still take it back.
+
 ## 0.2.8
 
 - A retried trade or withdraw call sends once.

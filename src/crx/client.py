@@ -33,7 +33,7 @@ from .errors import (
 )
 from .models import (
     Ask, Balance, Deposit, Drop, Event, MakerQuote, Market, Position, Quote, Rfq, Trade, Viewer, Withdraw, dec,
-    ms_to_dt, side_word,
+    _provisional, ms_to_dt, side_word,
 )
 
 log = logging.getLogger("crx")
@@ -229,22 +229,28 @@ def _text(value: Any) -> str | None:
     return clean(value, 40) if isinstance(value, str) and value else None
 
 
-def _trade_word(view: Any) -> tuple[str, bool]:
-    """(the trade status an RFQ view shows, True when the accept can make no other outcome).
-
-    ``trade_status`` ``open`` or ``refused`` is final; ``sending`` and ``pending`` are not: a landed arm
-    can still be refused. An RFQ that opened or settled reads ``open``. An RFQ that expired or was
-    cancelled with no trade status reads ``refused``.
-    """
+def _trade_word(view: Any) -> str:
+    """The trade status an RFQ view shows: ``trade_status``, else ``pending``. With no trade status, an
+    RFQ that opened or settled reads ``open``; one that expired or was cancelled reads ``refused``."""
     v = view if isinstance(view, dict) else {}
     ts, st = _text(v.get("trade_status")), _text(v.get("status"))
-    if ts in ("open", "refused"):
-        return ts, True
     if ts is None and st in ("opened", "settled"):
-        return "open", True
+        return "open"
     if ts is None and st in ("expired", "cancelled"):
-        return "refused", True
-    return ts or "pending", False
+        return "refused"
+    return ts or "pending"
+
+
+def _answered(word: str) -> bool:
+    """True for ``open`` or ``refused``: the accept has an answer and ends the hold on other quotes.
+    ``sending`` and ``pending`` have none: a landed arm can still be refused."""
+    return word in ("open", "refused")
+
+
+def _final(view: Any) -> bool:
+    """True when the RFQ view marks its trade final: no reorg can take it back. Reads no mark: every trade
+    reads not final. A missing key, an ``open`` or elapsed time never reads final."""
+    return False
 
 
 def _same(row: dict, held: dict) -> bool:
@@ -673,9 +679,9 @@ class Client:
         ``margin.called`` and ``margin.cured``. ``rfq.accepted`` names ``rfq_id``, ``quote_id`` and
         ``client_quote_id`` only.
 
-        Key trades on ``trade_id``. A ``trade.opened`` with ``provisional: true`` is followed, once final, by a
-        ``trade.opened`` with no ``provisional`` key; that one is the final state. ``trade.retracted`` removes a
-        provisional open.
+        Key trades on ``trade_id``. A ``trade.opened`` with ``provisional: true`` can be taken back by
+        ``trade.retracted``; a later ``trade.opened`` with no ``provisional`` key replaces it. A ``trade.opened``
+        with no ``provisional`` key is open. ``trade.retracted`` can still take it back; this is rare.
 
         ``after`` is a seq of this client's tape: pass the last ``Event.seq`` to read only newer
         events. Seqs count per account and role (a viewer reads as a taker), so a seq read by
@@ -919,7 +925,10 @@ class Client:
         (``sending`` and ``pending`` included), trade() on another RFQ signs nothing and raises
         ``TradeUnknown``. When that trade opens and the earlier call did not return ``open``,
         the next trade() raises ``EarlierOutcome`` once. Past the quote end plus 120 s, a
-        position ``positions()`` lists ``open`` is the final answer.
+        position ``positions()`` lists ``open`` is the answer.
+
+        An ``open`` is not final: a reorg can still take it back (``trade.retracted`` in
+        ``trades()``). ``provisional`` is True while the gateway marks the open provisional.
         """
         self._need_seat()
         if not isinstance(quote, Quote):
@@ -931,7 +940,7 @@ class Client:
             self._earlier_trades()
             b = self._binder()
             rec = {"rfq_id": quote.rfq_id, "quote": quote, "end": quote.rfq["quote_expiry_max"], "final": False,
-                   "told": False, "raw": {}, "word": "pending", "tx": None}
+                   "told": False, "raw": {}, "word": "pending", "tx": None, "provisional": False}
             self._accepts[quote.rfq_id] = rec
             self._keep_accepts()
             try:
@@ -945,8 +954,8 @@ class Client:
             except CrxError:
                 self._accepts.pop(quote.rfq_id, None)  # refused before anything was reserved
                 raise
-            _, final = _trade_word(view)
-            rec.update(raw=t.raw, final=final, told=final, word=t.status, tx=t.tx)
+            rec.update(raw=t.raw, word=t.status, told=_answered(t.status), final=_final(view),
+                       provisional=t.provisional, tx=t.tx)
             return t
 
     def _trade_once(self, b: Binder, quote: Quote, rec: dict) -> tuple[Trade, dict]:
@@ -968,61 +977,74 @@ class Client:
             raise
 
     def _keep_accepts(self) -> None:
-        """Drop the oldest accepts with a final answer the caller read, past TRADES_KEPT."""
+        """Drop the oldest accepts with an answer the caller read, past TRADES_KEPT."""
         for rid in [k for k, r in self._accepts.items() if r["told"]][: max(len(self._accepts) - TRADES_KEPT, 0)]:
             del self._accepts[rid]
 
     def _trade_read(self, rec: dict) -> tuple[str, bool, dict]:
         """(status, final, view) of the accept ``rec``: one GET /rfqs/{id}. Past its quote end plus
-        READ_AFTER_END, a view with no final answer defers to ``positions()``: a position listed
+        READ_AFTER_END, a view with no answer defers to ``positions()``: a position listed
         ``open`` is the trade. No position means no trade only when the view was read and names no
-        trade status: nothing was held or landed, and the chain arms nothing more."""
+        trade status: nothing was held or landed, and the chain arms nothing more. ``final`` reads
+        the view's mark only (``_final``)."""
         rid, past = rec["rfq_id"], self._clock() >= rec["end"] + READ_AFTER_END
         try:
             view, read = self._gw.request("GET", f"/rfqs/{rid}"), True
         except CrxError:
             view, read = {}, False
-        word, final = _trade_word(view)
-        if final or not past:
-            return word, final, view
+        view = view if isinstance(view, dict) else {}
+        word = _trade_word(view)
+        if _answered(word) or not past:
+            return word, _final(view), view
         try:
             mine = [p for p in self.positions() if p.rfq_id.lower() == rid.lower()]
         except CrxError:
             return word, False, view
         if mine:
-            listed = _text(mine[0].status) or "pending"
-            return listed, listed == "open", view
+            return _text(mine[0].status) or "pending", False, view
         if read and _text(view.get("trade_status")) is None:
-            return "refused", True, view
+            return "refused", False, view
         return word, False, view
 
     def _trade_again(self, rec: dict) -> Trade:
         """trade() on an RFQ this client signed an accept for: read its status, as the first call did. Signs
-        nothing. A final answer read once is returned as read: never read again."""
+        nothing. An answer the caller read is read once more, and moves only when that read names a trade
+        status: a failed read keeps it. A final answer is never read again."""
         q = rec["quote"]
-        if not rec["final"]:
+        if rec["told"] and not rec["final"]:
+            try:
+                view = self._gw.request("GET", f"/rfqs/{rec['rfq_id']}")
+            except CrxError:
+                view = {}
+            view = view if isinstance(view, dict) else {}
+            if _text(view.get("trade_status")) is not None:
+                word = _trade_word(view)
+                rec.update(word=word, told=_answered(word), final=_final(view), provisional=_provisional(view),
+                           tx=_word(view.get("trade_tx")) or rec.get("tx"))
+        if not rec["told"]:
             deadline = self._clock() + self._settle_wait
             while True:
                 word, final, view = self._trade_read(rec)
-                if final or self._clock() >= deadline:
+                if _answered(word) or self._clock() >= deadline:
                     break
                 self._sleep(1.0)
-            rec.update(final=final, told=final, word=word, tx=_word(view.get("trade_tx")) or rec.get("tx"))
-        rec["told"] = True if rec["final"] else rec["told"]
+            rec.update(word=word, told=_answered(word), final=final, provisional=_provisional(view),
+                       tx=_word(view.get("trade_tx")) or rec.get("tx"))
         log.info("rfq %s: accept signed already; read %s, nothing signed", q.rfq_id, rec["word"])
         return Trade(status=rec["word"], tx=rec.get("tx"), raw=rec["raw"], rfq_id=q.rfq_id,
-                     quote_id=q.quote_id, pair=q.pair, side=q.side, notional=q.notional, rate=q.rate)
+                     quote_id=q.quote_id, pair=q.pair, side=q.side, notional=q.notional, rate=q.rate,
+                     provisional=rec.get("provisional", False))
 
     def _earlier_trades(self) -> None:
-        """Raise while an earlier accept has no final answer, or once when its final answer is one the caller
-        did not read. Signs nothing."""
+        """Raise while an earlier accept has no answer (``open`` or ``refused``), or once when its answer is
+        one the caller did not read. Signs nothing."""
         for rec in [r for r in self._accepts.values() if not r["told"]]:
-            word, final, _ = self._trade_read(rec)
+            word, final, view = self._trade_read(rec)
             rid = rec["rfq_id"]
-            if not final:
+            if not _answered(word):
                 raise TradeUnknown(f"the trade on rfq {rid} has no final answer yet; nothing signed for this "
                                    "quote; " + read_later(rec["end"]), details={"rfq_id": rid, "status": word})
-            rec.update(final=True, told=True, word=word)
+            rec.update(word=word, told=True, final=final, provisional=_provisional(view))
             if word != "refused":
                 raise EarlierOutcome(f"the trade on rfq {rid} is {word}; nothing signed for this quote; "
                                      "call trade() again to take it", details={"rfq_id": rid, "status": word})
@@ -1059,7 +1081,7 @@ class Client:
         status, view = self._settle(lambda: self._gw.request("GET", f"/rfqs/{rfq_id}"), "trade_status")
         tx = _word(view.get("trade_tx"))
         log.info("rfq %s %s: tx %s", rfq_id, status, tx)
-        return Trade(status=status, tx=tx, raw=r, **base), view
+        return Trade(status=status, tx=tx, raw=r, provisional=_provisional(view), **base), view
 
     def _settle(self, read: Callable[[], Any], key: str = "status") -> tuple[str, dict]:
         """Poll ``read()`` for a ``key`` status other than ``sending`` or ``pending``, at most

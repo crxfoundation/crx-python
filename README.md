@@ -73,12 +73,12 @@ print(w.status)  # accepted
 | `next_check()` | The next hourly check, UTC. No key needed. |
 | `quote(pair, side, notional)` | Opens an RFQ. Returns the best firm quote after the 10 s window. Accepts nothing. |
 | `ask(pair, side, notional)` | Opens an RFQ and returns at once. `.quote()` on the result returns the winning quote after the 10 s window. Accepts nothing. |
-| `trade(quote)` | Accepts and opens. CRX sends the tx and pays gas. `status`: `sending`, `open`, `pending` or `refused`. `pending` with no `tx`: no status within the wait. |
+| `trade(quote)` | Accepts and opens. CRX sends the tx and pays gas. `status`: `sending`, `open`, `pending` or `refused`. `pending` with no `tx`: no status within the wait. `open` is not final: a reorg can still take it back. `provisional`: true while CRX marks the open provisional. |
 | `deposit(amount)` | Approve, then deposit USDC. On testnet, mints the test USDC you lack. `status`: `credited`, `pending` or `failed`. |
 | `withdraw(amount)` | Signs a withdraw to your own wallet and sends it in one request. CRX sends the tx and pays gas. `status`: `sending`, `accepted`, `pending`, `paid`, `partial`, `refused` or `returned`. |
 | `balance()` | Collateral, free, margin, withdraw state. |
 | `positions()` | Open positions. |
-| `trades()` | Your event tape: `trade.opened`, `trade.refused`, `trade.settled`, `trade.closed`, `trade.closed_out`, `trade.novated`, `margin.called`, `margin.cured`, and your RFQ events. `market=True` adds every open RFQ a maker seat receives (no owner named). `after=` (the last `Event.seq` you read) reads newer events only. Key trades on `trade_id`. A `trade.opened` with `provisional: true` is followed, once final, by a `trade.opened` with no `provisional` key; that one is the final state. `trade.retracted` removes a provisional open. |
+| `trades()` | Your event tape: `trade.opened`, `trade.refused`, `trade.settled`, `trade.closed`, `trade.closed_out`, `trade.novated`, `margin.called`, `margin.cured`, and your RFQ events. `market=True` adds every open RFQ a maker seat receives (no owner named). `after=` (the last `Event.seq` you read) reads newer events only. Key trades on `trade_id`. A `trade.opened` with `provisional: true` can be taken back by `trade.retracted`; a later `trade.opened` with no `provisional` key replaces it. A `trade.opened` with no `provisional` key is open. `trade.retracted` can still take it back; this is rare. |
 | `add_viewer(addr)` | Lets another wallet read your seat. Up to 5. |
 | `remove_viewer(addr)` | Takes that access back. |
 | `viewers()` | Wallets that can read your seat. |

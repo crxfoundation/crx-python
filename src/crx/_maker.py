@@ -27,7 +27,7 @@ from .errors import (
     BadAnswer, BadRequest, LegIdTaken, LegLive, NetworkError, NoQuotes, QuoteLost, RateLimited,
     RefusedToSign, ServerError, UnknownOrEnded, clean,
 )
-from .models import Drop, MakerQuote, Rfq, Trade, _side_of, dec, ms_to_dt
+from .models import Drop, MakerQuote, Rfq, Trade, _provisional, _side_of, dec, ms_to_dt
 
 if TYPE_CHECKING:
     from .client import Client
@@ -543,4 +543,4 @@ def confirm(c: "Client", q: Any, timeout: float | None, poll: float) -> Trade:
     tx = _word(view.get("trade_tx"))
     log.info("rfq %s %s: tx %s", q.rfq_id, status, tx)
     return Trade(status=status, rfq_id=q.rfq_id, quote_id=q.quote_id, pair=q.pair, side=q.side,
-                 notional=q.notional, rate=q.rate, tx=tx, raw=view)
+                 notional=q.notional, rate=q.rate, tx=tx, raw=view, provisional=_provisional(view))

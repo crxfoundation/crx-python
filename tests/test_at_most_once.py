@@ -300,7 +300,7 @@ def test_withdraw_repeat_post_refused_ends_the_hold(make_client, session, health
     assert first == again and third["amount"] == "500"
 
 
-def test_a_final_trade_answer_is_never_read_again(make_client, venue, session, clock):
+def test_a_told_open_stays_open_on_a_failed_read(make_client, venue, session, clock):
     # A told "open" stays "open": a later failed read never turns it into "refused".
     c = make_client(clock=clock)
     q = c.quote("USD/MXN", "buy", 25_000)

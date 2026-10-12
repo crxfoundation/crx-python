@@ -114,11 +114,18 @@ class Ask:
         return self._client._winner(self.rfq, wait)
 
 
+def _provisional(view: Any) -> bool:
+    """True when an RFQ view marks its open ``trade_provisional``. An absent or false key reads False."""
+    return (isinstance(view, dict) and view.get("trade_status") == "open"
+            and view.get("trade_provisional") not in (None, False))
+
+
 @dataclass(frozen=True)
 class Trade:
     """``status`` is ``sending`` (CRX is sending the tx), ``open`` (the trade counts now),
-    ``pending`` (not final yet; ``trade.opened`` or ``trade.refused`` follows) or ``refused``.
-    ``tx`` is the landed tx; None before it lands."""
+    ``pending`` (no answer yet; ``trade.opened`` or ``trade.refused`` follows) or ``refused``.
+    ``tx`` is the landed tx; None before it lands. An ``open`` is not final: a reorg can still take
+    it back (``trade.retracted``). ``provisional`` is True while the gateway marks the open provisional."""
 
     status: str
     rfq_id: str
@@ -129,6 +136,7 @@ class Trade:
     rate: Decimal
     tx: str | None
     raw: dict = field(repr=False, compare=False)
+    provisional: bool = False
 
 
 @dataclass(frozen=True)
