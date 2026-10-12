@@ -279,7 +279,8 @@ def test_withdraw_repeat_post_refused_ends_the_hold(make_client, session, health
     g = gate(session, health, account)
     money = Money(account, g)
     lost = fault_after(lambda req: None, "dropped")
-    refusal = (422, {"code": "unprocessable_entity", "error": "amount above free", "outcome": "insufficient_collateral"})
+    refusal = (422, {"code": "unprocessable_entity", "error": "amount 1000.000000 is above free collateral 900.000000",
+                     "details": {"free": "900.000000", "requested": "1000.000000", "currency": "USD"}})
 
     def post(req):
         n = len(withdraw_posts(session))
@@ -379,6 +380,77 @@ def test_withdraw_no_repeat_post_while_the_first_may_be_in_flight(make_client, s
     with pytest.raises(crx.CrxError) as ei:
         c.withdraw(1000)  # nothing can be in flight now: the refusal ends the hold
     assert ei.value.status == 409 and c._held_withdraw is None and len(withdraw_posts(session)) == 2
+
+
+@pytest.mark.parametrize("answer", [
+    (503, {"code": "mark_unavailable", "error": "starting", "details": {"venue_status": "unknown"}}),  # boot hold
+    (401, {"code": "unauthorized", "error": "stale timestamp"}),
+    (403, "<html>forbidden</html>"),
+    (503, {"code": "service_unavailable", "error": "down"}),
+    (422, {"code": "unprocessable_entity", "error": "deadline too near", "details": {"min_secs": 120, "max_secs": 86400}}),
+])
+def test_withdraw_repeat_refused_before_the_held_check_keeps_the_hold(make_client, session, health, account, answer):
+    # A refusal that can come before the gateway's held-item check proves nothing: the first may be queued.
+    Chain(session)
+    g = gate(session, health, account)
+    session.routes[("POST", "/withdraw")] = fault_after(g.answer, "timeout")  # queued, answer lost
+    session.routes[("GET", "/balance")] = Money(account, g)
+    clock = Clock(time.time())
+    c = make_client(clock=clock)
+    with pytest.raises(crx.WithdrawUnknown):
+        c.withdraw(1000)
+    session.routes[("POST", "/withdraw")] = answer
+    clock.t += 300
+    with pytest.raises(crx.WithdrawUnknown):
+        c.withdraw(1000)
+    assert c._held_withdraw is not None
+    with pytest.raises(crx.WithdrawUnknown):
+        c.withdraw(500)  # still no new intent
+    assert len(withdraw_posts(session)) == 2
+
+
+def test_withdraw_unread_balance_is_no_repeat(make_client, session, health, account):
+    # /balance not read is not "not shown": no repeat post.
+    Chain(session)
+    g = gate(session, health, account)
+    session.routes[("POST", "/withdraw")] = fault_after(g.answer, "timeout")
+    session.routes[("GET", "/balance")] = Money(account, g)
+    clock = Clock(time.time())
+    c = make_client(clock=clock)
+    with pytest.raises(crx.WithdrawUnknown):
+        c.withdraw(1000)
+    session.routes[("GET", "/balance")] = (503, {"code": "mark_unavailable", "error": "starting"})
+    clock.t += 300
+    with pytest.raises(crx.WithdrawUnknown):
+        c.withdraw(1000)
+    assert len(withdraw_posts(session)) == 1
+
+
+def test_withdraw_sent_is_stamped_on_each_post_of_the_conflict_loop(make_client, session, health, account):
+    # 409 "not read yet" posts the intent again; the last of them starts the in-flight window.
+    Chain(session)
+    g = gate(session, health, account)
+    unread = (409, {"code": "conflict", "error": "conflict: the latest settlement is not read yet; retry shortly"})
+    posts = []
+
+    def post(req):
+        posts.append(req)
+        if len(posts) < 4:
+            return unread
+        g.answer(req)
+        raise requests.ReadTimeout("read timed out")
+    session.routes[("POST", "/withdraw")] = post
+    session.routes[("GET", "/balance")] = Money(account, g)
+    clock = Clock(time.time())
+    c = make_client(clock=clock)
+    with pytest.raises(crx.WithdrawUnknown):
+        c.withdraw(1000)
+    last_post = c._held_withdraw["sent"]
+    assert clock() - last_post < 300  # the window runs from the last post, not the first
+    session.routes[("POST", "/withdraw")] = (409, {"code": "withdraw_in_progress", "error": "in progress"})
+    with pytest.raises(crx.WithdrawUnknown):
+        c.withdraw(1000)  # inside the window: read only
+    assert len(posts) == 4 and c._held_withdraw is not None
 
 
 def withdraw_posts(session):
