@@ -286,9 +286,11 @@ def test_withdraw_repeat_post_refused_ends_the_hold(make_client, session, health
         return lost(req) if n == 1 else refusal if n == 2 else g.answer(req)
     session.routes[("POST", "/withdraw")] = post
     session.routes[("GET", "/balance")] = money
-    c = make_client(clock=Clock(time.time()))
+    clock = Clock(time.time())
+    c = make_client(clock=clock)
     with pytest.raises(crx.WithdrawUnknown):
         c.withdraw(1000)
+    clock.t += 300  # past the in-flight window of the first post
     with pytest.raises(crx.CrxError) as ei:
         c.withdraw(1000)
     assert ei.value.status == 422 and not isinstance(ei.value, crx.WithdrawUnknown)
@@ -307,6 +309,76 @@ def test_a_final_trade_answer_is_never_read_again(make_client, venue, session, c
     clock.t = q.rfq["quote_expiry_max"] + 121
     t = c.trade(q)
     assert (t.status, t.tx) == ("open", TXH) and len(accepts(session)) == 1
+
+
+def test_withdraw_returned_pending_then_paid_is_told_once(make_client, session, health, account):
+    # The first call returned "pending"; the next call of the same amount is a new withdraw, not that one's "paid".
+    Chain(session)
+    g = gate(session, health, account)
+    money = Money(account, g)
+    session.routes[("POST", "/withdraw")] = g.answer
+    session.routes[("GET", "/balance")] = money
+    c = make_client(clock=Clock(time.time()))
+    assert c.withdraw(1000).status == "pending"  # the item never shows within the wait
+    with pytest.raises(crx.WithdrawUnknown):
+        c.withdraw(1000)
+    money.shown, money.word = True, "paid"
+    with pytest.raises(crx.EarlierOutcome) as ei:
+        c.withdraw(1000)
+    assert ei.value.details["status"] == "paid" and len(withdraw_posts(session)) == 1
+    c.withdraw(1000)  # told: a new intent at the next nonce
+    first, second = withdraw_posts(session)
+    assert (first["nonce"], second["nonce"]) == ("3", "4")
+
+
+def test_withdraw_nonce_passed_row_of_another_amount_is_not_the_intent(make_client, session, health, account):
+    # A row with no item at the intent's nonce but another amount is not the held intent.
+    Chain(session)
+    g = gate(session, health, account)
+    session.routes[("POST", "/withdraw")] = fault_after(lambda req: None, "dropped")
+    session.routes[("GET", "/balance")] = Money(account, g)
+    c = make_client(clock=Clock(time.time()))
+    with pytest.raises(crx.WithdrawUnknown):
+        c.withdraw(1000)
+    row = dict(item_row("paid", None, LANDED), amount="250.000000")
+    session.routes[("GET", "/balance")] = balance_body(account, nonce="4", withdraw=row)
+    with pytest.raises(crx.EarlierOutcome, match="read balance"):
+        c.withdraw(1000)
+
+
+def test_withdraw_no_repeat_post_near_the_deadline(make_client, session, health, account):
+    Chain(session)
+    g = gate(session, health, account)
+    session.routes[("POST", "/withdraw")] = fault_after(lambda req: None, "dropped")
+    session.routes[("GET", "/balance")] = Money(account, g)
+    clock = Clock(time.time())
+    c = make_client(clock=clock)
+    with pytest.raises(crx.WithdrawUnknown):
+        c.withdraw(1000)
+    clock.t = c._held_withdraw["deadline"] - 200
+    with pytest.raises(crx.WithdrawUnknown):
+        c.withdraw(1000)
+    assert len(withdraw_posts(session)) == 1
+
+
+def test_withdraw_no_repeat_post_while_the_first_may_be_in_flight(make_client, session, health, account):
+    # A slow first post can still be queued: a repeat refused at step 5 then would drop the hold.
+    Chain(session)
+    g = gate(session, health, account)
+    session.routes[("POST", "/withdraw")] = fault_after(lambda req: None, "timeout")
+    session.routes[("GET", "/balance")] = Money(account, g)
+    clock = Clock(time.time())
+    c = make_client(clock=clock)
+    with pytest.raises(crx.WithdrawUnknown):
+        c.withdraw(1000)
+    with pytest.raises(crx.WithdrawUnknown):
+        c.withdraw(1000)  # within 300 s of the first post: read only
+    assert len(withdraw_posts(session)) == 1
+    session.routes[("POST", "/withdraw")] = (409, {"code": "withdraw_in_progress", "error": "in progress"})
+    clock.t += 300
+    with pytest.raises(crx.CrxError) as ei:
+        c.withdraw(1000)  # nothing can be in flight now: the refusal ends the hold
+    assert ei.value.status == 409 and c._held_withdraw is None and len(withdraw_posts(session)) == 2
 
 
 def withdraw_posts(session):
@@ -345,9 +417,11 @@ def test_withdraw_not_taken_posts_the_same_intent_again(make_client, session, he
         return g.answer(req)
     session.routes[("POST", "/withdraw")] = post
     session.routes[("GET", "/balance")] = money
-    c = make_client(clock=Clock(time.time()))
+    clock = Clock(time.time())
+    c = make_client(clock=clock)
     with pytest.raises(crx.WithdrawUnknown):
         c.withdraw(1000)
+    clock.t += 300  # past the in-flight window of the first post
     out = c.withdraw(1000)
     assert out.status == "accepted"
     first, again = withdraw_posts(session)

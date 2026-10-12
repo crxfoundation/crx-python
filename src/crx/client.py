@@ -94,6 +94,8 @@ OPEN_TIMEOUT = 30.0  # s; POST /rfqs answers after the 10 s window, the gateway 
 UNREAD_SETTLEMENT = "the latest settlement is not read yet"
 UNREAD_RETRY_S = 1200.0  # s that withdraw() posts the same signed intent again on that 409
 UNREAD_BACKOFF = (15.0, 60.0)  # s: the first pause between posts, doubled up to the second
+REPOST_MARGIN = 300  # s before the deadline: no repeat post; the gateway checks the deadline before a held item
+IN_FLIGHT_S = 300  # s after a withdraw post: it may still reach the gateway (30 s request cap, plus proxies)
 OPEN_STATUSES = ("open", "quoted")  # RFQ statuses that still take an accept
 READ_AFTER_END = 120  # s past the leg's quote end: the chain arms nothing more, positions() is final
 TRADES_KEPT = 64  # accepts a client remembers; one with no final answer is never dropped
@@ -243,6 +245,14 @@ def _trade_word(view: Any) -> tuple[str, bool]:
     if ts is None and st in ("expired", "cancelled"):
         return "refused", True
     return ts or "pending", False
+
+
+def _same(row: dict, held: dict) -> bool:
+    """True when the /balance withdraw row stands at the held intent's nonce and amount."""
+    try:
+        return str(row.get("nonce")) == str(held["nonce"]) and Decimal(str(row.get("amount"))) == held["amount"]
+    except (InvalidOperation, ValueError):
+        return False
 
 
 def _default_expiry(now: datetime) -> datetime:
@@ -1321,10 +1331,11 @@ class Client:
 
         At most once. One withdraw() at a time per client. When the post gets no answer (network,
         timeout, 5xx), the status read decides; when the item does not show, ``WithdrawUnknown``
-        raises. Until that withdraw has a final answer the caller read, withdraw() signs nothing:
-        with the same amount it reads that withdraw's status, and posts the same signed intent
-        again when ``/balance`` does not show it; with another amount it raises ``WithdrawUnknown``,
-        or ``EarlierOutcome`` once when the final answer arrived.
+        raises. Until that withdraw has a final answer the caller read, withdraw() signs nothing.
+        After a call that raised, the same amount reads that withdraw's status and returns it,
+        and posts the same signed intent again when ``/balance`` does not show it, 300 s or more
+        after the last post and not within 300 s of its deadline; a refusal of that repeat ends it. Any other call raises ``WithdrawUnknown`` while it has no final
+        answer, then ``EarlierOutcome`` once. A new ``Client`` holds no earlier withdraw.
         """
         self._need_seat()
         amount = _amount(amount)
@@ -1337,13 +1348,14 @@ class Client:
         with self._withdraw_mx:
             held = self._held_withdraw
             if held is not None:
-                if amount == held["amount"]:
-                    return self._withdraw_again(held)
+                if amount == held["amount"] and not held["returned"]:
+                    return self._withdraw_again(held)  # the call that got no answer, again
                 word, final, _ = self._withdraw_read(held)
                 what = f"the withdraw of {_plain(held['amount'])}, item {held['item']}"
                 if not final:
-                    raise WithdrawUnknown(f"{what}, has no final answer yet; nothing signed; call withdraw("
-                                          f"{_plain(held['amount'])}) to read it", details=self._held_details(word))
+                    again = "" if held["returned"] else f"; call withdraw({_plain(held['amount'])}) to read it"
+                    raise WithdrawUnknown(f"{what}, is {word} with no final answer yet; nothing signed{again}",
+                                          details=self._held_details(word))
                 self._held_withdraw = None
                 raise EarlierOutcome(f"{what}, is {word}; nothing signed for this amount; call withdraw() again",
                                      details=self._held_details(word, held))
@@ -1362,8 +1374,9 @@ class Client:
         body = {"chain": self.chain_key, "amount": _plain(amount), "nonce": str(nonce), "deadline": w["deadline"],
                 "sig": sig}
         item = e7.h0x(e7.withdraw_item(w))
+        # returned: the caller got a Withdraw for it, with no final status.
         held = self._held_withdraw = {"amount": amount, "nonce": nonce, "deadline": w["deadline"], "item": item,
-                                      "body": body}
+                                      "body": body, "returned": False, "sent": self._clock()}
         until, pause = self._clock() + UNREAD_RETRY_S, UNREAD_BACKOFF[0]
         while True:
             try:
@@ -1404,7 +1417,7 @@ class Client:
         """(status, final, the /balance withdraw.last row when it is the held intent's). One /balance read.
 
         The held intent's row: ``withdraw.last`` with its item; once the seat's nonce passed the intent's,
-        a row with no item at the intent's nonce. Final: that
+        a row with no item at the intent's nonce and amount. Final: that
         row's status is not ``sending`` or ``pending``; or the seat's withdraw nonce passed the intent's
         (``unknown``: another withdraw shows); or no row and the deadline passed (``refused``).
         """
@@ -1415,8 +1428,9 @@ class Client:
         last = _last(bal.raw, "withdraw")
         it = _word(last.get("item"))
         moved = bal.withdraw_nonce is not None and bal.withdraw_nonce > held["nonce"]
-        # A row keyed on its arm tx names no item: once the nonce passed, the row at the intent's nonce is its own.
-        if it == held["item"].lower() or (moved and it is None and str(last.get("nonce")) == str(held["nonce"])):
+        # A row keyed on its arm tx names no item: once the nonce passed, the row at the intent's nonce and
+        # amount is its own.
+        if it == held["item"].lower() or (moved and it is None and _same(last, held)):
             st = _text(last.get("status")) or "pending"
             return st, st not in WAITING, last
         if moved:
@@ -1448,26 +1462,32 @@ class Client:
                                  "deadline passed; call withdraw() again for a new one",
                                  details=self._held_details(word, held))
         tx = _word((last or {}).get("tx"))
+        if not final:
+            held["returned"] = True
         log.info("withdraw %s %s, nonce %s, item %s", _plain(held["amount"]), word, held["nonce"], held["item"])
         return Withdraw(amount=held["amount"], nonce=held["nonce"], item=held["item"], tx=tx, status=word)
 
     def _withdraw_again(self, held: dict) -> Withdraw:
-        """withdraw() of the held amount: read the held intent. When /balance does not show it and its deadline
-        is not past, post the same signed intent: the same item and nonce, never a new signature."""
+        """withdraw() of the held amount after a call that raised: read the held intent. When /balance does not
+        show it, IN_FLIGHT_S after the last post and REPOST_MARGIN before its deadline, post the same signed
+        intent: the same item and nonce, never a new signature."""
         word, final, last = self._withdraw_read(held)
-        if last is None and not final:
+        now = self._clock()
+        # A post still in flight can be queued after a repeat is refused: no repeat until none can be.
+        if last is None and not final and held["sent"] + IN_FLIGHT_S <= now < held["deadline"] - REPOST_MARGIN:
             log.info("withdraw nonce %s: not shown; posting the same signed intent", held["nonce"])
+            held["sent"] = now
             try:
                 self._gw.request("POST", "/withdraw", body=held["body"], ok=(200, 202))
             except ServiceUnavailable:
-                self._held_withdraw = None  # CRX sends nothing; a held item answers 200 before this check
+                self._held_withdraw = None  # nothing in flight, and a held item answers 200 before this check
                 raise
             except (NetworkError, ServerError, BadAnswer, RateLimited) as e:
                 log.info("withdraw nonce %s: %s on the repeat post; reading its status", held["nonce"], e.code)
             except CrxError as e:
                 text = str(e.details.get("error") or e).removeprefix("conflict: ")
                 if not (e.status == 409 and e.code == "conflict" and text.startswith(UNREAD_SETTLEMENT)):
-                    self._held_withdraw = None  # refused: the gateway answers a held item with 200 first
+                    self._held_withdraw = None  # nothing in flight, and the gateway answers a held item 200 first
                     raise
         return self._withdraw_settle(held, posted=False)
 
