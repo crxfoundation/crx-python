@@ -120,12 +120,20 @@ def _provisional(view: Any) -> bool:
             and view.get("trade_provisional") not in (None, False))
 
 
+def _final(row: Any, status: str = "trade_status", mark: str = "trade_final") -> bool:
+    """True when ``row`` reads ``open`` and its ``mark`` is true: no ``trade.retracted`` can follow. An RFQ
+    view: ``trade_status``, ``trade_final``. A ``/positions`` row: ``status``, ``final``. A missing mark (a
+    gateway that sends none), a non-boolean one, any other status or elapsed time reads False."""
+    return isinstance(row, dict) and row.get(status) == "open" and row.get(mark) is True
+
+
 @dataclass(frozen=True)
 class Trade:
     """``status`` is ``sending`` (CRX is sending the tx), ``open`` (the trade counts now),
     ``pending`` (no answer yet; ``trade.opened`` or ``trade.refused`` follows) or ``refused``.
     ``tx`` is the landed tx; None before it lands. An ``open`` is not final: a reorg can still take
-    it back (``trade.retracted``). ``provisional`` is True while the gateway marks the open provisional."""
+    it back (``trade.retracted``). ``provisional`` is True while the gateway marks the open provisional.
+    ``final`` is True once the gateway marks the trade final: no ``trade.retracted`` can follow."""
 
     status: str
     rfq_id: str
@@ -137,6 +145,7 @@ class Trade:
     tx: str | None
     raw: dict = field(repr=False, compare=False)
     provisional: bool = False
+    final: bool = False
 
 
 @dataclass(frozen=True)
@@ -166,6 +175,7 @@ class Position:
     rate: Decimal | None
     status: str | None
     raw: dict = field(repr=False, compare=False)
+    final: bool = False  # True once the row is ``open`` and marked ``final``: no ``trade.retracted`` can follow
 
 
 @dataclass(frozen=True)

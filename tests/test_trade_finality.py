@@ -1,7 +1,7 @@
 """Trade finality reads explicit fields only. ``open`` or ``refused`` answers the accept and ends the hold, as
-before. ``final`` reads only a mark the view sends: a missing key, an ``open`` or elapsed time is never final.
-``provisional`` reads only ``trade_provisional``. Fixtures: (a) provisional, (b) an open with no key, (c) the
-API17 and API18 shapes."""
+before. ``final`` reads only the mark (``trade_final``; ``final`` on a /positions row) on an ``open``: a missing
+mark, an ``open`` or elapsed time is never final. ``provisional`` reads only ``trade_provisional``. Fixtures:
+(a) provisional, (b) an open not final yet, (c) API17 and API18 shapes with no mark, (d) final, (e) bad marks."""
 
 import dataclasses
 
@@ -28,10 +28,18 @@ def test_each_view_reads_its_word_answer_and_marks(row):
         row["word"], row["answered"], row["final"], row["provisional"])
 
 
-def test_no_view_is_final_without_a_mark():
-    # (b) and (c): no key, and every word, still reads not final.
+def test_no_view_is_final_without_a_true_mark_on_an_open():
     for row in FIX["views"]:
-        assert cl._final(row["view"]) is False
+        v = row["view"]
+        if not (v.get("trade_status") == "open" and v.get("trade_final") is True):
+            assert cl._final(v) is False, row["case"]
+
+
+@pytest.mark.parametrize("row", FIX["positions"], ids=[r["case"] for r in FIX["positions"]])
+def test_each_position_row_reads_its_mark(make_client, session, row):
+    session.routes[("GET", "/positions")] = {"positions": [row["row"]]}
+    (p,) = make_client().positions()
+    assert (p.status, p.final) == (row["row"]["status"], row["final"])
 
 
 def other_rfq(q):
@@ -112,6 +120,56 @@ def test_a_failed_reread_keeps_the_open(make_client, venue, session, clock):
     assert (c.trade(q).status, c._accepts[RFQ]["told"]) == ("open", True)
 
 
+def test_trades_keeps_the_final_marks_as_served(make_client, session):
+    session.routes[("GET", "/trades")] = {"trades": FIX["events_api19"], "seq": 10}
+    got = [(e.type, e.data.get("provisional"), e.data.get("final")) for e in make_client().trades()]
+    assert got == [("trade.opened", True, False), ("trade.retracted", None, None), ("trade.opened", None, False),
+                   ("trade.final", None, True)]
+
+
+def test_a_final_trade_reads_final_and_is_never_read_again(make_client, venue, session, clock):
+    # (d): trade_final true on an open. No take-back follows: a repeat call reads nothing.
+    venue.script = [("open", TXH)]
+    served(venue, session, {"trade_final": True})
+    c = make_client(clock=clock)
+    q = c.quote("USD/MXN", "buy", 25_000)
+    t = c.trade(q)
+    assert (t.status, t.provisional, t.final) == ("open", False, True)
+    n = len(trade_polls(session))
+    again = c.trade(q)
+    assert (again.status, again.final) == ("open", True) and len(trade_polls(session)) == n
+
+
+def test_a_provisional_open_reads_final_once_marked(make_client, venue, session, clock):
+    # (a) then (d): the repeat call reads the mark; from then on it reads nothing.
+    venue.script = [("open", TXH)]
+    extra = {"trade_provisional": True, "trade_final": False}
+    served(venue, session, extra)
+    c = make_client(clock=clock)
+    q = c.quote("USD/MXN", "buy", 25_000)
+    t = c.trade(q)
+    assert (t.provisional, t.final) == (True, False)
+    extra.clear()
+    extra["trade_final"] = True
+    t = c.trade(q)
+    assert (t.status, t.provisional, t.final) == ("open", False, True)
+    n = len(trade_polls(session))
+    assert c.trade(q).final is True and len(trade_polls(session)) == n
+
+
+def test_past_the_quote_end_a_final_position_reads_final(make_client, venue, session, clock):
+    venue.script = [("sending", None)]
+    c = make_client(clock=clock)
+    q = c.quote("USD/MXN", "buy", 25_000)
+    assert c.trade(q).status == "sending"
+    session.routes[("GET", f"/rfqs/{RFQ}")] = (503, {"code": "upstream", "error": "down"})
+    row = dict(FIX["positions"][2]["row"], rfq_id=RFQ)
+    session.routes[("GET", "/positions")] = {"positions": [row]}
+    clock.t = q.rfq["quote_expiry_max"] + 121
+    t = c.trade(q)
+    assert (t.status, t.final) == ("open", True)
+
+
 def test_trades_keeps_the_provisional_key_as_served(make_client, session):
     session.routes[("GET", "/trades")] = {"trades": FIX["events"], "seq": 9}
     c = make_client()
@@ -119,8 +177,13 @@ def test_trades_keeps_the_provisional_key_as_served(make_client, session):
     assert got == [("trade.opened", True), ("trade.retracted", None), ("trade.opened", None)]
 
 
-@pytest.mark.parametrize("extra, want", [({"trade_provisional": True}, True), ({}, False)])
-def test_maker_confirm_reads_the_provisional_mark(session, health, tmp_path, extra, want):
+@pytest.mark.parametrize("extra, want", [
+    ({"trade_provisional": True, "trade_final": False}, (True, False)),
+    ({"trade_provisional": True}, (True, False)),
+    ({"trade_final": True}, (False, True)),
+    ({}, (False, False)),
+])
+def test_maker_confirm_reads_the_marks(session, health, tmp_path, extra, want):
     clock = Clock(MAKER_T0)
     maker = new_maker(session, health, tmp_path, clock)
     gw = Gateway(session, clock)
@@ -128,4 +191,4 @@ def test_maker_confirm_reads_the_provisional_mark(session, health, tmp_path, ext
     gw.accept()
     session.routes[("GET", f"/rfqs/{sent.rfq_id}")] = lambda req: {**gw.view(req), **extra}
     t = maker.confirm(sent)
-    assert (t.status, t.tx, t.provisional) == ("open", MAKER_TXH, want)
+    assert (t.status, t.tx, (t.provisional, t.final)) == ("open", MAKER_TXH, want)

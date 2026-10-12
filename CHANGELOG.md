@@ -3,9 +3,9 @@
 ## Unreleased
 
 - `Trade.provisional` (`trade()`, maker `confirm()`): True while CRX marks the open provisional (`trade_provisional`). No key reads False.
-- An `open` is not final. The SDK reads final only from a mark the gateway sends; no response carries one, so no trade reads final. A missing key or elapsed time never reads final.
+- `Trade.final` and `Position.final`: True once CRX marks the trade final (`trade_final` on the RFQ, `final` on a `/positions` row): no `trade.retracted` can follow. An `open` is not final. A gateway that sends no mark marks no trade final; a missing key or elapsed time never reads final.
 - A repeat `trade()` on an accept read `open` or `refused` reads its status again. A failed read keeps the answer. A read of `pending` (the open was taken back) holds other quotes again.
-- Docs: a `trade.opened` with no `provisional` key is open; `trade.retracted` can still take it back.
+- Docs: a `trade.opened` with no `provisional` key is open; `trade.retracted` can still take it back. `trade.final`, or a `trade.opened` with `final: true`, marks it final.
 
 ## 0.2.8
 

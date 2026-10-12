@@ -1,46 +1,420 @@
 {
-  "_shape": "GET /rfqs/{id} as the RFQ's taker reads it once accepted: trade_status, trade_tx, as_of_block, and trade_provisional only when true. trade.opened data carries provisional only when true.",
-  "views": [
-    {"case": "provisional", "kind": "a",
-     "view": {"status": "opened", "trade_status": "open", "trade_tx": "0x1111111111111111111111111111111111111111111111111111111111111111", "as_of_block": 23561200, "trade_provisional": true},
-     "word": "open", "answered": true, "final": false, "provisional": true},
-    {"case": "exact_open", "kind": "b",
-     "view": {"status": "opened", "trade_status": "open", "trade_tx": "0x1111111111111111111111111111111111111111111111111111111111111111", "as_of_block": 23561204},
-     "word": "open", "answered": true, "final": false, "provisional": false},
-    {"case": "provisional_false", "kind": "b",
-     "view": {"status": "opened", "trade_status": "open", "trade_tx": "0x1111111111111111111111111111111111111111111111111111111111111111", "as_of_block": 23561204, "trade_provisional": false},
-     "word": "open", "answered": true, "final": false, "provisional": false},
-    {"case": "sending", "kind": "c",
-     "view": {"status": "accepted", "trade_status": "sending", "trade_tx": null, "as_of_block": 23561190},
-     "word": "sending", "answered": false, "final": false, "provisional": false},
-    {"case": "pending", "kind": "c",
-     "view": {"status": "opened", "trade_status": "pending", "trade_tx": "0x1111111111111111111111111111111111111111111111111111111111111111", "as_of_block": 23561195},
-     "word": "pending", "answered": false, "final": false, "provisional": false},
-    {"case": "confirmed_open", "kind": "c",
-     "view": {"status": "opened", "trade_status": "open", "trade_tx": "0x1111111111111111111111111111111111111111111111111111111111111111", "as_of_block": 23561300},
-     "word": "open", "answered": true, "final": false, "provisional": false},
-    {"case": "refused", "kind": "c",
-     "view": {"status": "opened", "trade_status": "refused", "trade_tx": "0x1111111111111111111111111111111111111111111111111111111111111111", "as_of_block": 23561300},
-     "word": "refused", "answered": true, "final": false, "provisional": false},
-    {"case": "null_status_expired", "kind": "c",
-     "view": {"status": "expired", "trade_status": null, "trade_tx": null, "as_of_block": 23561300},
-     "word": "refused", "answered": true, "final": false, "provisional": false},
-    {"case": "no_trade_status_open", "kind": "c",
-     "view": {"status": "open"},
-     "word": "pending", "answered": false, "final": false, "provisional": false},
-    {"case": "no_trade_status_settled", "kind": "c",
-     "view": {"status": "settled"},
-     "word": "open", "answered": true, "final": false, "provisional": false},
-    {"case": "no_trade_status_cancelled", "kind": "c",
-     "view": {"status": "cancelled"},
-     "word": "refused", "answered": true, "final": false, "provisional": false},
-    {"case": "provisional_on_pending", "kind": "c",
-     "view": {"status": "opened", "trade_status": "pending", "trade_tx": null, "as_of_block": 23561195, "trade_provisional": true},
-     "word": "pending", "answered": false, "final": false, "provisional": false}
-  ],
-  "events": [
-    {"type": "trade.opened", "seq": 7, "ts": 1760300000000, "data": {"rfq_id": "0x2222222222222222222222222222222222222222222222222222222222222222", "trade_id": "0x3333333333333333333333333333333333333333333333333333333333333333", "tx": "0x1111111111111111111111111111111111111111111111111111111111111111", "provisional": true}},
-    {"type": "trade.retracted", "seq": 8, "ts": 1760300030000, "data": {"rfq_id": "0x2222222222222222222222222222222222222222222222222222222222222222", "trade_id": "0x3333333333333333333333333333333333333333333333333333333333333333", "reason": "reorg"}},
-    {"type": "trade.opened", "seq": 9, "ts": 1760300060000, "data": {"rfq_id": "0x2222222222222222222222222222222222222222222222222222222222222222", "trade_id": "0x3333333333333333333333333333333333333333333333333333333333333333", "tx": "0x1111111111111111111111111111111111111111111111111111111111111111"}}
-  ]
+ "_shape": "GET /rfqs/{id} as the RFQ's taker reads it once accepted. API17/API18 (kind c): trade_status, trade_tx, as_of_block, trade_provisional only when true; no trade_final. API19 (kinds a, b, d) adds trade_final, always present. /positions rows and the trade tape: final on API19 only.",
+ "views": [
+  {
+   "case": "provisional_api19",
+   "kind": "a",
+   "view": {
+    "status": "opened",
+    "trade_status": "open",
+    "trade_tx": "0x1111111111111111111111111111111111111111111111111111111111111111",
+    "as_of_block": 23561200,
+    "trade_provisional": true,
+    "trade_final": false
+   },
+   "word": "open",
+   "answered": true,
+   "final": false,
+   "provisional": true
+  },
+  {
+   "case": "exact_open_api19",
+   "kind": "b",
+   "view": {
+    "status": "opened",
+    "trade_status": "open",
+    "trade_tx": "0x1111111111111111111111111111111111111111111111111111111111111111",
+    "as_of_block": 23561204,
+    "trade_final": false
+   },
+   "word": "open",
+   "answered": true,
+   "final": false,
+   "provisional": false
+  },
+  {
+   "case": "provisional_false_api19",
+   "kind": "b",
+   "view": {
+    "status": "opened",
+    "trade_status": "open",
+    "trade_tx": "0x1111111111111111111111111111111111111111111111111111111111111111",
+    "as_of_block": 23561204,
+    "trade_provisional": false,
+    "trade_final": false
+   },
+   "word": "open",
+   "answered": true,
+   "final": false,
+   "provisional": false
+  },
+  {
+   "case": "sending",
+   "kind": "c",
+   "view": {
+    "status": "accepted",
+    "trade_status": "sending",
+    "trade_tx": null,
+    "as_of_block": 23561190
+   },
+   "word": "sending",
+   "answered": false,
+   "final": false,
+   "provisional": false
+  },
+  {
+   "case": "pending",
+   "kind": "c",
+   "view": {
+    "status": "opened",
+    "trade_status": "pending",
+    "trade_tx": "0x1111111111111111111111111111111111111111111111111111111111111111",
+    "as_of_block": 23561195
+   },
+   "word": "pending",
+   "answered": false,
+   "final": false,
+   "provisional": false
+  },
+  {
+   "case": "confirmed_open",
+   "kind": "c",
+   "view": {
+    "status": "opened",
+    "trade_status": "open",
+    "trade_tx": "0x1111111111111111111111111111111111111111111111111111111111111111",
+    "as_of_block": 23561300
+   },
+   "word": "open",
+   "answered": true,
+   "final": false,
+   "provisional": false
+  },
+  {
+   "case": "refused",
+   "kind": "c",
+   "view": {
+    "status": "opened",
+    "trade_status": "refused",
+    "trade_tx": "0x1111111111111111111111111111111111111111111111111111111111111111",
+    "as_of_block": 23561300
+   },
+   "word": "refused",
+   "answered": true,
+   "final": false,
+   "provisional": false
+  },
+  {
+   "case": "null_status_expired",
+   "kind": "c",
+   "view": {
+    "status": "expired",
+    "trade_status": null,
+    "trade_tx": null,
+    "as_of_block": 23561300
+   },
+   "word": "refused",
+   "answered": true,
+   "final": false,
+   "provisional": false
+  },
+  {
+   "case": "no_trade_status_open",
+   "kind": "c",
+   "view": {
+    "status": "open"
+   },
+   "word": "pending",
+   "answered": false,
+   "final": false,
+   "provisional": false
+  },
+  {
+   "case": "no_trade_status_settled",
+   "kind": "c",
+   "view": {
+    "status": "settled"
+   },
+   "word": "open",
+   "answered": true,
+   "final": false,
+   "provisional": false
+  },
+  {
+   "case": "no_trade_status_cancelled",
+   "kind": "c",
+   "view": {
+    "status": "cancelled"
+   },
+   "word": "refused",
+   "answered": true,
+   "final": false,
+   "provisional": false
+  },
+  {
+   "case": "provisional_on_pending",
+   "kind": "c",
+   "view": {
+    "status": "opened",
+    "trade_status": "pending",
+    "trade_tx": null,
+    "as_of_block": 23561195,
+    "trade_provisional": true
+   },
+   "word": "pending",
+   "answered": false,
+   "final": false,
+   "provisional": false
+  },
+  {
+   "case": "final_api19",
+   "kind": "d",
+   "view": {
+    "status": "opened",
+    "trade_status": "open",
+    "trade_tx": "0x1111111111111111111111111111111111111111111111111111111111111111",
+    "as_of_block": 23561210,
+    "trade_final": true
+   },
+   "word": "open",
+   "answered": true,
+   "final": true,
+   "provisional": false
+  },
+  {
+   "case": "provisional_api18",
+   "kind": "c",
+   "view": {
+    "status": "opened",
+    "trade_status": "open",
+    "trade_tx": "0x1111111111111111111111111111111111111111111111111111111111111111",
+    "as_of_block": 23561200,
+    "trade_provisional": true
+   },
+   "word": "open",
+   "answered": true,
+   "final": false,
+   "provisional": true
+  },
+  {
+   "case": "pending_api19",
+   "kind": "c",
+   "view": {
+    "status": "opened",
+    "trade_status": "pending",
+    "trade_tx": "0x1111111111111111111111111111111111111111111111111111111111111111",
+    "as_of_block": 23561195,
+    "trade_final": false
+   },
+   "word": "pending",
+   "answered": false,
+   "final": false,
+   "provisional": false
+  },
+  {
+   "case": "refused_api19",
+   "kind": "c",
+   "view": {
+    "status": "opened",
+    "trade_status": "refused",
+    "trade_tx": "0x1111111111111111111111111111111111111111111111111111111111111111",
+    "as_of_block": 23561300,
+    "trade_final": false
+   },
+   "word": "refused",
+   "answered": true,
+   "final": false,
+   "provisional": false
+  },
+  {
+   "case": "mark_on_pending",
+   "kind": "e",
+   "view": {
+    "status": "opened",
+    "trade_status": "pending",
+    "trade_tx": "0x1111111111111111111111111111111111111111111111111111111111111111",
+    "trade_final": true
+   },
+   "word": "pending",
+   "answered": false,
+   "final": false,
+   "provisional": false
+  },
+  {
+   "case": "mark_not_bool",
+   "kind": "e",
+   "view": {
+    "status": "opened",
+    "trade_status": "open",
+    "trade_tx": "0x1111111111111111111111111111111111111111111111111111111111111111",
+    "trade_final": "true"
+   },
+   "word": "open",
+   "answered": true,
+   "final": false,
+   "provisional": false
+  }
+ ],
+ "events": [
+  {
+   "type": "trade.opened",
+   "seq": 7,
+   "ts": 1760300000000,
+   "data": {
+    "rfq_id": "0x2222222222222222222222222222222222222222222222222222222222222222",
+    "trade_id": "0x3333333333333333333333333333333333333333333333333333333333333333",
+    "tx": "0x1111111111111111111111111111111111111111111111111111111111111111",
+    "provisional": true
+   }
+  },
+  {
+   "type": "trade.retracted",
+   "seq": 8,
+   "ts": 1760300030000,
+   "data": {
+    "rfq_id": "0x2222222222222222222222222222222222222222222222222222222222222222",
+    "trade_id": "0x3333333333333333333333333333333333333333333333333333333333333333",
+    "reason": "reorg"
+   }
+  },
+  {
+   "type": "trade.opened",
+   "seq": 9,
+   "ts": 1760300060000,
+   "data": {
+    "rfq_id": "0x2222222222222222222222222222222222222222222222222222222222222222",
+    "trade_id": "0x3333333333333333333333333333333333333333333333333333333333333333",
+    "tx": "0x1111111111111111111111111111111111111111111111111111111111111111"
+   }
+  }
+ ],
+ "events_api19": [
+  {
+   "type": "trade.opened",
+   "seq": 7,
+   "ts": 1760300000000,
+   "data": {
+    "rfq_id": "0x2222222222222222222222222222222222222222222222222222222222222222",
+    "trade_id": "0x3333333333333333333333333333333333333333333333333333333333333333",
+    "tx": "0x1111111111111111111111111111111111111111111111111111111111111111",
+    "leg_id": "0x4444444444444444444444444444444444444444444444444444444444444444",
+    "provisional": true,
+    "final": false
+   }
+  },
+  {
+   "type": "trade.retracted",
+   "seq": 8,
+   "ts": 1760300030000,
+   "data": {
+    "rfq_id": "0x2222222222222222222222222222222222222222222222222222222222222222",
+    "trade_id": "0x3333333333333333333333333333333333333333333333333333333333333333",
+    "reason": "reorg"
+   }
+  },
+  {
+   "type": "trade.opened",
+   "seq": 9,
+   "ts": 1760300060000,
+   "data": {
+    "rfq_id": "0x2222222222222222222222222222222222222222222222222222222222222222",
+    "trade_id": "0x3333333333333333333333333333333333333333333333333333333333333333",
+    "tx": "0x1111111111111111111111111111111111111111111111111111111111111111",
+    "leg_id": "0x4444444444444444444444444444444444444444444444444444444444444444",
+    "final": false
+   }
+  },
+  {
+   "type": "trade.final",
+   "seq": 10,
+   "ts": 1760300090000,
+   "data": {
+    "rfq_id": "0x2222222222222222222222222222222222222222222222222222222222222222",
+    "trade_id": "0x3333333333333333333333333333333333333333333333333333333333333333",
+    "leg_id": "0x4444444444444444444444444444444444444444444444444444444444444444",
+    "final": true
+   }
+  }
+ ],
+ "positions": [
+  {
+   "case": "open_api18",
+   "row": {
+    "trade_id": "0x3333333333333333333333333333333333333333333333333333333333333333",
+    "rfq_id": "0x2222222222222222222222222222222222222222222222222222222222222222",
+    "chain": "ethereum",
+    "pair": "USD/MXN",
+    "notional": "25000",
+    "rate": "18.7",
+    "side": 1,
+    "status": "open",
+    "as_of_block": 23561210
+   },
+   "final": false
+  },
+  {
+   "case": "open_api19",
+   "row": {
+    "trade_id": "0x3333333333333333333333333333333333333333333333333333333333333333",
+    "rfq_id": "0x2222222222222222222222222222222222222222222222222222222222222222",
+    "chain": "ethereum",
+    "pair": "USD/MXN",
+    "notional": "25000",
+    "rate": "18.7",
+    "side": 1,
+    "status": "open",
+    "as_of_block": 23561210,
+    "final": false
+   },
+   "final": false
+  },
+  {
+   "case": "final_api19",
+   "row": {
+    "trade_id": "0x3333333333333333333333333333333333333333333333333333333333333333",
+    "rfq_id": "0x2222222222222222222222222222222222222222222222222222222222222222",
+    "chain": "ethereum",
+    "pair": "USD/MXN",
+    "notional": "25000",
+    "rate": "18.7",
+    "side": 1,
+    "status": "open",
+    "as_of_block": 23561210,
+    "final": true
+   },
+   "final": true
+  },
+  {
+   "case": "pending_api19",
+   "row": {
+    "trade_id": "0x3333333333333333333333333333333333333333333333333333333333333333",
+    "rfq_id": "0x2222222222222222222222222222222222222222222222222222222222222222",
+    "chain": "ethereum",
+    "pair": "USD/MXN",
+    "notional": "25000",
+    "rate": "18.7",
+    "side": 1,
+    "status": "pending",
+    "as_of_block": 23561210,
+    "final": false
+   },
+   "final": false
+  },
+  {
+   "case": "mark_on_pending",
+   "row": {
+    "trade_id": "0x3333333333333333333333333333333333333333333333333333333333333333",
+    "rfq_id": "0x2222222222222222222222222222222222222222222222222222222222222222",
+    "chain": "ethereum",
+    "pair": "USD/MXN",
+    "notional": "25000",
+    "rate": "18.7",
+    "side": 1,
+    "status": "pending",
+    "as_of_block": 23561210,
+    "final": true
+   },
+   "final": false
+  }
+ ]
 }
