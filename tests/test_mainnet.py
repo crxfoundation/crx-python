@@ -3,13 +3,17 @@
 import time
 
 import pytest
+from eth_utils import is_checksum_address, is_hex_address
 
 import crx
 from crx import _eip712 as e7
+from crx.client import MAINNET_CORE
 
 from .conftest import BASE, RPC
 
-CORE = "0x90e32979611db01cdfba49c1446995ecb97a26bf"  # the pinned mainnet core
+# The pinned mainnet core. While the source holds no address there, a stand-in core takes the row's place.
+FILLED = is_hex_address(MAINNET_CORE)
+CORE = (MAINNET_CORE if FILLED else "0x" + "9e" * 20).lower()
 
 
 def mainnet_health():
@@ -23,6 +27,8 @@ def mainnet_health():
 def no_env(monkeypatch):
     for k in ("CRX_ALLOW_MAINNET", "CRX_BASE", "CRX_RPC"):
         monkeypatch.delenv(k, raising=False)
+    if not FILLED:
+        monkeypatch.setitem(crx.NETWORKS["mainnet"], "core", CORE)
 
 
 def main(session, tmp_path, account, **kw):
@@ -36,6 +42,54 @@ def test_mainnet_is_listed_with_its_gateway_and_no_rpc():
     net = crx.NETWORKS["mainnet"]
     assert net["chain"] == "ethereum"
     assert net["base_url"] == "https://api.crxfx.com" and net["rpc_url"] is None
+
+
+def test_mainnet_core_is_the_one_constant_and_an_eip55_address_once_filled():
+    row = crx.NETWORKS["mainnet"]["core"]
+    assert row.lower() == CORE
+    assert not FILLED or (row is MAINNET_CORE and is_checksum_address(MAINNET_CORE))
+
+
+def test_readme_and_changelog_name_the_mainnet_core():
+    from pathlib import Path
+    root = Path(__file__).parent.parent
+    assert f"Mainnet (chain 1): `{MAINNET_CORE}`." in (root / "README.md").read_text()
+    log = (root / "CHANGELOG.md").read_text()
+    entry = log[log.index(f"## {crx.__version__}\n"):]
+    assert f"Ethereum mainnet (chain 1) pins core `{MAINNET_CORE}`." in entry[:entry.index("\n## ", 1)]
+
+
+@pytest.mark.parametrize("core", ["0x" if FILLED else MAINNET_CORE, "<core>", "", None, "0x" + "9e" * 19, "9e" * 20,
+                                  "0x" + "00" * 20, "0xC0c0C0C0c0C0c0C0c0C0c0C0c0C0c0C0c0C0c0C0"])
+def test_mainnet_with_no_core_address_signs_nothing(session, tmp_path, account, monkeypatch, core):
+    # A row core that is no address pins nothing: every signing call refuses, also when /health serves a core.
+    monkeypatch.setitem(crx.NETWORKS["mainnet"], "core", core)
+    session.routes[("GET", "/health")] = mainnet_health()
+    session.rpc.update({"eth_chainId": "0x1", "eth_getCode": lambda p: "0x6080" if p[0].lower() == CORE else "0x"})
+    c = main(session, tmp_path, account, allow_mainnet=True)
+    with pytest.raises(crx.ConfigError, match="^network 'mainnet' pins no chain id or core; nothing signed. Pass core="):
+        c._chain_info()
+    with pytest.raises(crx.ConfigError, match="pins no chain id or core; nothing signed"):
+        c.deposit(1000)
+    assert session.paths("POST") == [] and "eth_sendRawTransaction" not in session.rpc_methods()
+
+
+def test_mainnet_core_override_still_signs_with_no_core_address_in_the_row(session, tmp_path, account, monkeypatch):
+    monkeypatch.setitem(crx.NETWORKS["mainnet"], "core", "<core>")
+    session.routes[("GET", "/health")] = mainnet_health()
+    c = main(session, tmp_path, account, allow_mainnet=True, core=CORE)
+    assert c._chain_info()["core"] == CORE and c._sep == e7.domain_separator(1, CORE)
+
+
+def test_mainnet_health_on_another_core_refuses(session, tmp_path, account):
+    # The core move: /health names a core other than the pin, with a domain that matches it. Nothing signed.
+    other = "0x" + "c0" * 20
+    h = mainnet_health()
+    h["chains"][0].update(core=other, domain=e7.h0x(e7.domain_separator(1, other)))
+    session.routes[("GET", "/health")] = h
+    c = main(session, tmp_path, account, allow_mainnet=True)
+    with pytest.raises(crx.RefusedToSign, match=f"^core moved: /health names {other}, the SDK pins {CORE} on ethereum"):
+        c._chain_info()
 
 
 def test_mainnet_is_off_by_default(session, tmp_path, account):

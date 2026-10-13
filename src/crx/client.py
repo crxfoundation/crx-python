@@ -42,7 +42,10 @@ log = logging.getLogger("crx")
 # check_minute: the minute past each hour of the hourly check.
 # chain_id and core (Ethereum rows): the chain and the CRX core contract the SDK signs for. The EIP-712 domain
 # is name "CRX", version "rulebook-1.0", this chain_id and this core. /health must name the same chain id, core
-# and domain separator, else every signing call refuses. Client(core=) replaces the row's core.
+# and domain separator, else every signing call refuses. Client(core=) replaces the row's core. A row core
+# that is no 0x address pins nothing: every signing call refuses.
+# MAINNET_CORE: the CRX core contract on Ethereum mainnet (chain 1), in full, EIP-55. The one place the SDK names it.
+MAINNET_CORE = "<NEW_CORE>"
 NETWORKS = {
     "testnet": {
         "chain": "avax-fuji",
@@ -61,7 +64,7 @@ NETWORKS = {
         "settle_wait": 90.0,
         "check_minute": 35,
         "chain_id": 1,
-        "core": "0x90e32979611dB01CDFbA49C1446995EcB97a26bf",
+        "core": MAINNET_CORE,
     },
     # Solana mainnet. Off unless the caller opts in (allow_mainnet); no default RPC. program_id is the one
     # place the SDK names the CRX program: base58, in full, from the birth record (birth-pins.py emit).
@@ -365,7 +368,10 @@ class Client:
             except ConfigError:
                 key = keypair = None
                 raise
-        self._pin_core = pin_core.lower() if isinstance(pin_core, str) else None
+        try:
+            self._pin_core = _address(pin_core, "core", ConfigError)
+        except ConfigError:
+            self._pin_core = None  # a row core that is no address pins nothing
         self._keypair = None
         seat = None
         if keypair is not None:
@@ -1646,4 +1652,4 @@ class Client:
         return tx
 
 
-__all__ = ["Client", "NETWORKS"]
+__all__ = ["Client", "MAINNET_CORE", "NETWORKS"]

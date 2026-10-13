@@ -1,7 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.2.9
 
+- Ethereum mainnet (chain 1) pins core `<NEW_CORE>`. The signing domain is built from this pin. 0.2.8 pins the former core: from the move, it refuses to sign on Ethereum mainnet (`RefusedToSign`, "core moved"). Update to 0.2.9.
+- `crx.client.MAINNET_CORE` names the Ethereum mainnet core. A network whose pinned core is not an address signs nothing (`ConfigError`).
 - `Trade.provisional` (`trade()`, maker `confirm()`): True while CRX marks the open provisional (`trade_provisional`). No key reads False.
 - `Trade.final` and `Position.final`: True once CRX marks the trade final (`trade_final` on the RFQ, `final` on a `/positions` row): no `trade.retracted` can follow. An `open` is not final. A gateway that sends no mark marks no trade final; a missing key or elapsed time never reads final.
 - A repeat `trade()` on an accept read `open` or `refused` reads its status again. A failed read keeps the answer. A read of `pending` (the open was taken back) holds other quotes again.

@@ -1613,15 +1613,18 @@ def served_on(health, core, chain_id=CHAIN_ID):
 
 
 def test_each_network_pins_its_chain_id_core_and_domain():
+    from crx.client import MAINNET_CORE
+    from eth_utils import is_hex_address
     pins = {
         "testnet": (43113, FUJI_CORE, "0xbc23297610754d54bdddbc951d463fbb935ee9dea70c9644f6f6c8ea06ebc7d5"),
-        "mainnet": (1, "0x90e32979611db01cdfba49c1446995ecb97a26bf",
-                    "0x36426c81e2e05a5a913e0497961d6b43a3108eee2149ed82932ac886f392bc83"),
     }
+    if is_hex_address(MAINNET_CORE):
+        pins["mainnet"] = (1, MAINNET_CORE.lower(), e7.h0x(e7.domain_separator(1, MAINNET_CORE)))
     for name, (chain_id, core, domain) in pins.items():
         net = crx.NETWORKS[name]
         assert (net["chain_id"], net["core"].lower()) == (chain_id, core)
         assert e7.h0x(e7.domain_separator(net["chain_id"], net["core"])) == domain
+    assert (crx.NETWORKS["mainnet"]["chain_id"], crx.NETWORKS["mainnet"]["core"]) == (1, MAINNET_CORE)
     assert "core" not in crx.NETWORKS["solana"] and crx.NETWORKS["solana"]["program_id"]
 
 

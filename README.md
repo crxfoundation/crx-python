@@ -5,7 +5,7 @@ Trade FX forwards on CRX from Python.
 ## Install
 
 ```bash
-pip install "git+https://github.com/crxfoundation/crx-python@v0.2.8"
+pip install "git+https://github.com/crxfoundation/crx-python@v0.2.9"
 ```
 
 Python 3.10 or newer.
@@ -158,10 +158,10 @@ A viewer reads `balance()`, `positions()` and `trades()` only. Other calls raise
 
 Sign up first at portal.crxfx.com/sign-up with the same wallet. The sign-up runs in a browser wallet: for a keypair file, import the key into a browser wallet first.
 
-Install version 0.2.8 with the extra:
+Install version 0.2.9 with the extra:
 
 ```bash
-pip install "crx-python[solana] @ git+https://github.com/crxfoundation/crx-python@v0.2.8"
+pip install "crx-python[solana] @ git+https://github.com/crxfoundation/crx-python@v0.2.9"
 ```
 
 ```python
@@ -261,7 +261,7 @@ Every error is a `crx.CrxError`. Branch on `.code`. Show `str(e)`: on a gateway 
 - The SDK rebuilds every digest and transaction before it signs. A mismatch raises `refused_to_sign`.
 - A trade carries a readable `summary` line. The SDK builds its own `Trade` from your request and the quote's rate, compares it with the gateway's member by member, checks the domain, the quote end in your leg id and the nonce, and signs its own.
 - Every signature leaves with low `s` and `v` 27 or 28. One that does not recover to the seat raises `refused_to_sign`.
-- Each Ethereum network pins its chain id and core contract. Testnet (Avalanche Fuji, chain 43113): `0xa2F94aA752D4a703028eCfAE8686264dC0928B9c`. Mainnet (chain 1): `0x90e32979611dB01CDFbA49C1446995EcB97a26bf`. The signing domain is built from the pin.
+- Each Ethereum network pins its chain id and core contract. Testnet (Avalanche Fuji, chain 43113): `0xa2F94aA752D4a703028eCfAE8686264dC0928B9c`. Mainnet (chain 1): `<NEW_CORE>`. The signing domain is built from the pin.
 - When `/health` names another chain id, core or domain, each signing call raises `refused_to_sign` or `config`. Nothing is signed.
 - `core=` replaces the pinned core. Pass only an address that CRX publishes.
 - Testnet by default. `network="mainnet"` (Ethereum, chain 1) is off until you pass `allow_mainnet=True` or set `CRX_ALLOW_MAINNET=1`. Its gateway is `https://api.crxfx.com`. It has no default RPC.
