@@ -54,7 +54,7 @@ NETWORKS = {
         "settle_wait": 30.0,
         "check_minute": 5,
         "chain_id": 43113,
-        "core": "0xa2F94aA752D4a703028eCfAE8686264dC0928B9c",
+        "core": "0x072000D0EB830F767DC5128ED28139bB731b1521",
     },
     # Ethereum mainnet. Off unless the caller opts in; no default RPC.
     "mainnet": {

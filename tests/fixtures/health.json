@@ -5,12 +5,12 @@
   {
    "base_token": "0xa52c60e6e14190dad2739f4b401aa3264ae68cb8",
    "chain_id": 43113,
-   "core": "0xa2f94aa752d4a703028ecfae8686264dc0928b9c",
-   "domain": "0xbc23297610754d54bdddbc951d463fbb935ee9dea70c9644f6f6c8ea06ebc7d5",
+   "core": "0x072000d0eb830f767dc5128ed28139bb731b1521",
+   "domain": "0xbecf297e99c7bf09c89e90162e71f253515219487294e50a4ab0e5e8b60741f2",
    "domain_verified": true,
    "enabled": true,
    "key": "avax-fuji",
-   "lens": "0xd707a9bf4e6e97dbada985c739828fecd7f5ded4"
+   "lens": "0x5e81b2b442cb441897f930d9ab038f9a540e3d30"
   },
   {
    "base_token": "0x8c4aaa8996251c9276a24c63e875c63e5e4f3acd",

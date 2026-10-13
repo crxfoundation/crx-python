@@ -1600,7 +1600,7 @@ def test_domain_moved_refuses_the_trade(make_client, venue, session, health, clo
 
 # ---------- the core pin: the SDK signs for its own chain id and core, never for the ones /health names ----------
 
-FUJI_CORE = "0xa2f94aa752d4a703028ecfae8686264dc0928b9c"
+FUJI_CORE = "0x072000d0eb830f767dc5128ed28139bb731b1521"
 OTHER_CORE = "0x" + "c0" * 20
 
 
@@ -1616,7 +1616,7 @@ def test_each_network_pins_its_chain_id_core_and_domain():
     from crx.client import MAINNET_CORE
     from eth_utils import is_hex_address
     pins = {
-        "testnet": (43113, FUJI_CORE, "0xbc23297610754d54bdddbc951d463fbb935ee9dea70c9644f6f6c8ea06ebc7d5"),
+        "testnet": (43113, FUJI_CORE, "0xbecf297e99c7bf09c89e90162e71f253515219487294e50a4ab0e5e8b60741f2"),
     }
     if is_hex_address(MAINNET_CORE):
         pins["mainnet"] = (1, MAINNET_CORE.lower(), e7.h0x(e7.domain_separator(1, MAINNET_CORE)))
