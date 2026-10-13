@@ -45,7 +45,7 @@ log = logging.getLogger("crx")
 # and domain separator, else every signing call refuses. Client(core=) replaces the row's core. A row core
 # that is no 0x address pins nothing: every signing call refuses.
 # MAINNET_CORE: the CRX core contract on Ethereum mainnet (chain 1), in full, EIP-55. The one place the SDK names it.
-MAINNET_CORE = "<NEW_CORE>"
+MAINNET_CORE = "0x0d716cA9Fc2BFD8c66D2AF2fB38b56D08809A8cc"
 NETWORKS = {
     "testnet": {
         "chain": "avax-fuji",
