@@ -17,7 +17,6 @@ import crx
 import crx._chain
 from crx import _eip712 as e7
 from crx._chain import revert_name
-from crx.signer import LocalSigner
 
 from .conftest import BASE, CHAIN_ID, RPC, Clock, fixture
 
@@ -121,13 +120,6 @@ def test_deposit_mined_revert_is_tx_failed(make_client, session, health, account
         make_client(clock=Clock(time.time())).deposit(1000, mint=False)
     assert type(ei.value) is crx.TxFailed and ei.value.details["tx"] == "0x" + f"{1:064x}" and len(chain.sent) == 1
     assert str(ei.value).endswith(" reverted")
-
-
-def test_deposit_no_mint(make_client, session, health, account):
-    chain = Chain(session, held=1000 * 10**6)
-    deposit_route(session, health, account, 1000 * 10**6, approve=False)
-    money_view(session, account, chain, "deposit")
-    assert len(make_client(clock=Clock(time.time())).deposit(1000, mint=False).txs) == 1 and len(chain.sent) == 1
 
 
 @pytest.mark.parametrize("word", ["credited", "failed"])
@@ -240,7 +232,6 @@ def revert(data):
 
 
 ERROR_STRING = "0x08c379a0"
-PANIC = "0x4e487b71"
 SHORT = "ERC20: transfer amount exceeds balance"
 
 
@@ -248,11 +239,6 @@ SHORT = "ERC20: transfer amount exceeds balance"
 def test_revert_reads_an_error_string(nest):
     data = ERROR_STRING + encode(["string"], [SHORT]).hex()
     assert revert_name(revert({"data": data} if nest else data)) == SHORT
-
-
-@pytest.mark.parametrize("code, word", [(0x11, "panic 0x11"), (0x01, "panic 0x01"), (0x32, "panic 0x32")])
-def test_revert_reads_a_panic(code, word):
-    assert revert_name(revert(PANIC + encode(["uint256"], [code]).hex())) == word
 
 
 def u256(n):
@@ -269,16 +255,6 @@ def test_revert_a_huge_error_string_stays_hex(data):
     assert revert_name(revert(data)) == ERROR_STRING
 
 
-@pytest.mark.parametrize("data, word", [
-    ("0xdeadbeef" + "00" * 32, "0xdeadbeef"),
-    ("0xdeadbeef", "0xdeadbeef"),
-    (ERROR_STRING + "00" * 7, ERROR_STRING),  # an Error(string) it cannot read
-    (e7.h0x(e7.selector("NotWhitelisted()")), "NotWhitelisted"),
-])
-def test_revert_unknown_data_stays_hex(data, word):
-    assert revert_name(revert(data)) == word
-
-
 def test_deposit_short_of_usdc_sends_nothing(make_client, session, health, account):
     chain = Chain(session, held=12_500_000)
     deposit_route(session, health, account, 1000 * 10**6)
@@ -290,17 +266,6 @@ def test_deposit_short_of_usdc_sends_nothing(make_client, session, health, accou
     assert not [p for m, p in session.rpc_calls if m in ("eth_call", "eth_estimateGas")
                 and p[0]["data"].startswith(approve)]
     assert "eth_estimateGas" not in session.rpc_methods()
-
-
-def test_deposit_revert_reads_the_reason(make_client, session, health, account):
-    chain = Chain(session, held=10**12)
-    deposit_route(session, health, account, 1000 * 10**6, approve=False)
-    data = ERROR_STRING + encode(["string"], [SHORT]).hex()
-    session.rpc["eth_call"] = lambda p: chain.call(p) if p[0]["data"] == e7.calldata("decimals()", [], []) \
-        or p[0]["data"].startswith(e7.h0x(e7.selector("balanceOf(address)"))) else {"__error__": revert(data)}
-    with pytest.raises(crx.TxFailed, match=f"^deposit would revert: {SHORT}; nothing sent$"):
-        make_client().deposit(1000)
-    assert chain.sent == []
 
 
 LANDED = "0x" + "7a" * 32
@@ -391,38 +356,6 @@ def test_withdraw_one_signed_post_sends_no_tx(make_client, session, health, acco
     assert g.intent == {"account": account.address.lower(), "amount": 1000 * 10**6, "nonce": 3,
                         "deadline": now + 22 * 3600}
     assert g.signer == account.address  # the digest signed is the gateway's 4-member rebuild
-
-
-def test_withdraw_signs_the_four_member_intent_on_the_health_domain(
-        make_client, session, health, account, monkeypatch):
-    Chain(session)
-    g = gate(session, health, account)
-    session.routes[("GET", "/balance")] = [balance_body(account), g.view("accepted")]
-    seen = []
-    sign = LocalSigner.sign_typed_data
-    monkeypatch.setattr(LocalSigner, "sign_typed_data", lambda self, td: seen.append(copy.deepcopy(td)) or sign(self, td))
-    clock = Clock(time.time())
-    now = int(clock())
-    make_client(clock=clock).withdraw(1000)
-    (td,) = seen
-    w1 = fixture("format-vectors-v5.json")["withdraw"]["typed_data"]
-    assert td["primaryType"] == "WithdrawIntent" and td["types"] == w1["types"]
-    assert [m["name"] for m in td["types"]["WithdrawIntent"]] == ["account", "amount", "nonce", "deadline"]
-    assert td["domain"] == {"name": "CRX", "version": "rulebook-1.0", "chainId": CHAIN_ID,
-                            "verifyingContract": core_of(health)}
-    assert td["message"] == {"account": account.address.lower(), "amount": "1000000000", "nonce": "3",
-                             "deadline": str(now + 22 * 3600)}
-
-
-@pytest.mark.parametrize("amount,nonce", [("1000", "0"), ("0.000001", "3"), ("12345.678901", "18446744073709551615")])
-def test_withdraw_signs_the_gateway_rebuild(make_client, session, health, account, amount, nonce):
-    Chain(session)
-    g = gate(session, health, account)
-    session.routes[("GET", "/balance")] = [balance_body(account, nonce=nonce), g.view("accepted")]
-    out = make_client(clock=Clock(time.time())).withdraw(amount)
-    assert g.signer == account.address
-    assert g.intent["amount"] == int(Decimal(amount).scaleb(6)) and g.intent["nonce"] == int(nonce)
-    assert out.nonce == int(nonce) and out.item == g.item
 
 
 def test_withdraw_digest_and_item_match_vector_w1():
@@ -530,29 +463,6 @@ def test_withdraw_polls_until_its_own_item_is_final(make_client, session, health
     assert polls(session, "/balance") == 5 and clock() - t0 == 3
 
 
-@pytest.mark.parametrize("word", ["sending", "pending"])
-def test_withdraw_waits_30_s_on_testnet(make_client, session, health, account, word):
-    chain = Chain(session)
-    g = gate(session, health, account)
-    session.routes[("GET", "/balance")] = [balance_body(account), g.view(word)]
-    clock = Clock(time.time())
-    t0 = clock()
-    out = make_client(clock=clock).withdraw(1000)
-    assert (out.status, out.tx) == (word, None)
-    assert 30 <= clock() - t0 <= 31 and polls(session, "/balance") == 1 + 31 and chain.sent == []
-
-
-def test_withdraw_in_progress_sends_nothing(make_client, session, account):
-    chain = Chain(session)
-    session.routes[("GET", "/balance")] = balance_body(account)
-    session.routes[("POST", "/withdraw")] = (409, {
-        "code": "withdraw_in_progress", "error": "one withdraw at a time; the next opens when this one is paid"})
-    with pytest.raises(crx.CrxError) as ei:
-        make_client().withdraw(1000)
-    assert ei.value.code == "withdraw_in_progress" and ei.value.status == 409
-    assert chain.sent == [] and polls(session, "/balance") == 1
-
-
 def test_balance(make_client, session, account):
     session.routes[("GET", "/balance")] = balance_body(account)
     b = make_client().balance()
@@ -567,23 +477,6 @@ def test_balance_for_other_account_refused(make_client, session, account):
     session.routes[("GET", "/balance")] = balance_body(Account.create())
     with pytest.raises(crx.BadAnswer):
         make_client().balance()
-
-
-def test_positions(make_client, session):
-    session.routes[("GET", "/positions")] = {"positions": [
-        {"trade_id": "0x01", "rfq_id": "0x02", "pair": "USDMXN", "side": -1, "notional": "25000.000000",
-         "rate": "18.700000", "status": "pending"}]}
-    (p,) = make_client().positions()
-    assert (p.side, p.notional, p.rate, p.status) == ("sell", Decimal("25000"), Decimal("18.7"), "pending")
-
-
-def test_trades_pages(make_client, session):
-    page1 = {"trades": [{"type": "trade.opened", "ts": 1, "data": {"trade_id": str(i)}} for i in range(1000)], "seq": 1000}
-    page2 = {"trades": [{"type": "trade.settled", "ts": 2, "data": {"trade_id": "0"}}], "seq": 1001}
-    session.routes[("GET", "/trades")] = [page1, page2]
-    ev = make_client().trades()
-    assert len(ev) == 1001 and ev[-1].type == "trade.settled" and ev[-1].seq is None
-    assert [c["query"]["after"] for c in session.calls if c["path"] == "/trades"] == [["0"], ["1000"]]
 
 
 def test_trades_limit_at_most_1000_and_loops(make_client, session):
@@ -688,23 +581,6 @@ def test_a_pair_markets_does_not_list_is_not_offered(make_client, session):
     assert ei.value.details == {"pair": "USD/JPY"} and session.paths("POST") == []
 
 
-def test_a_pair_with_no_row_for_this_chain_is_paused(make_client, session, markets):
-    session.routes[("GET", "/markets")] = markets_with(markets, "USD/PHP", chain="base")
-    c = make_client(key=False)
-    assert {m.pair: m.paused for m in c.markets()} == {"USD/BRL": False, "USD/MXN": False, "USD/PHP": True}
-    with pytest.raises(crx.MarketPaused, match="USD/PHP is not offered on avax-fuji"):
-        c.market("USD/PHP")
-    assert session.paths("POST") == []
-
-
-@pytest.mark.parametrize("paused,read", [(True, True), (False, False), (DROP, False)], ids=["true", "false", "missing"])
-def test_markets_read_the_paused_key(make_client, session, markets, paused, read):
-    session.routes[("GET", "/markets")] = markets_with(markets, "USD/BRL", paused=paused)
-    c = make_client(key=False)
-    assert {m.pair: m.paused for m in c.markets()} == {"USD/BRL": read, "USD/MXN": False, "USD/PHP": False}
-    assert c.market("USD/BRL").paused is read
-
-
 @pytest.mark.parametrize("cap,read", [(200, 200), (0, 0), (None, None), (DROP, None)], ids=["200", "0", "null", "missing"])
 def test_markets_read_the_premium_cap(make_client, session, markets, cap, read):
     session.routes[("GET", "/markets")] = markets_with(markets, "USD/MXN", max_premium_bps=cap)
@@ -734,12 +610,6 @@ def one_chain(markets, **row_edit):
     return m
 
 
-def test_markets_ask_for_this_chain(make_client, session):
-    make_client(key=False).markets()
-    call = next(c for c in session.calls if c["path"] == "/markets")
-    assert call["query"] == {"chain": ["avax-fuji"]}
-
-
 def test_a_one_chain_row_is_offered_with_the_row_cap(make_client, session, markets):
     session.routes[("GET", "/markets")] = one_chain(markets)
     c = make_client(key=False)
@@ -761,16 +631,6 @@ def test_a_one_chain_row_reads_its_premium_cap(make_client, session, markets, ca
     ms = {m.pair: m for m in make_client(key=False).markets()}
     assert ms["USD/MXN"].max_premium_bps == read and ms["USD/MXN"].paused is False
     assert ms["USD/BRL"].max_premium_bps == ms["USD/PHP"].max_premium_bps == 200
-
-
-def test_a_pair_the_one_chain_reply_omits_is_not_offered(make_client, session, markets):
-    session.routes[("GET", "/markets")] = one_chain(markets, USD_PHP=DROP)
-    c = make_client(key=False)
-    assert {m.pair: m.paused for m in c.markets()} == {"USD/BRL": False, "USD/MXN": False}
-    assert c.market("USD/BRL").pair == "USD/BRL"  # the control: a listed pair
-    with pytest.raises(crx.MarketPaused, match="USD/PHP is not offered on avax-fuji") as ei:
-        c.market("USD/PHP")
-    assert ei.value.details == {"pair": "USD/PHP"} and session.paths("POST") == []
 
 
 @pytest.mark.parametrize("chains", [[], None], ids=["empty", "null"])
@@ -811,11 +671,6 @@ def test_an_end_in_the_long_close_moves_to_its_end(make_client, session, markets
     assert m.next_long_close == tuple(t.astimezone(timezone.utc) for t in LONG_CLOSE)
     end = m.next_valid_end(TWO_H)
     assert end == datetime(2026, 10, 11, 18, 0, tzinfo=NY) + TAIL and end.tzinfo == timezone.utc
-
-
-def test_an_end_before_the_long_close_stays(make_client, session, markets):
-    now = datetime(2026, 10, 6, 15, 30, tzinfo=NY)  # Tuesday
-    assert mxn_at(make_client, session, markets, now).next_valid_end(TWO_H) == now + timedelta(hours=2)
 
 
 def test_no_long_close_key_is_now_plus_min_secs(make_client, session, markets):

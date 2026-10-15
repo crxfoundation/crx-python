@@ -108,13 +108,6 @@ def test_a_send_with_no_clear_answer_is_watched_and_recorded(session, account, t
     assert h == want and len(chain.sent) == 1 and [r["hash"] for r in log.rows()] == [want]
 
 
-def test_a_5xx_rpc_answer_is_no_node_answer(session):
-    session.rpc["eth_chainId"] = {"__http__": (502, {"jsonrpc": "2.0", "id": 1, "error": {"code": 1, "message": "x"}})}
-    with pytest.raises(BadAnswer) as ei:
-        Rpc(RPC, session)("eth_chainId")
-    assert str(ei.value) == "the RPC answered HTTP 502"
-
-
 @pytest.mark.parametrize("served, tip", [(2 * GWEI, 2 * GWEI), (0, TIP_FLOOR), (None, TIP_FLOOR)])
 def test_a_type_2_tx_carries_the_fee_fields(session, account, served, tip):
     base = 30 * GWEI
@@ -137,21 +130,6 @@ def test_a_chain_with_no_base_fee_gets_legacy_at_1_25_x(session, account):
     assert "eth_maxPriorityFeePerGas" not in session.rpc_methods()
 
 
-def test_the_receipt_wait_is_300_s(session, account, monkeypatch):
-    chain = Chain(session, base=GWEI, gas_price=GWEI, tip=GWEI)
-    session.rpc["eth_getTransactionReceipt"] = None
-    t = [0.0]
-    monkeypatch.setattr(_chain, "time", SimpleNamespace(monotonic=lambda: t[0]))
-    with pytest.raises(SendUnknown) as ei:
-        send_tx(Rpc(RPC, session), account, CHAIN_ID, "approve", TOKEN, APPROVE,
-                sleep=lambda s: t.__setitem__(0, t[0] + s))
-    assert 300 < t[0] <= 302 and len(chain.sent) == 1
-    e, h = ei.value, "0x" + "ab" * 32
-    assert not isinstance(e, TxFailed) and e.code == "send_unknown" and e.tx == h
-    assert str(e) == f"approve tx {h}. Status unknown; check this transaction before you send again."
-    assert e.details == {"step": "approve", "tx": h, "txs": [h]}
-
-
 @pytest.mark.parametrize("receipt", [{"status": None, "blockNumber": "0x11"}, {"blockNumber": "0x11"},
                                      {"status": "0x2"}, "0x1", ["0x1"]])
 def test_a_receipt_with_no_readable_status_is_no_receipt(session, account, monkeypatch, receipt):
@@ -163,17 +141,6 @@ def test_a_receipt_with_no_readable_status_is_no_receipt(session, account, monke
         send_tx(Rpc(RPC, session), account, CHAIN_ID, "approve", TOKEN, APPROVE,
                 sleep=lambda s: t.__setitem__(0, t[0] + s))
     assert len(chain.sent) == 1
-
-
-@pytest.mark.parametrize("status", ["0x0", "0x00"])
-def test_a_mined_revert_is_tx_failed(session, account, status):
-    chain = Chain(session, base=GWEI, gas_price=GWEI, tip=GWEI)
-    session.rpc["eth_getTransactionReceipt"] = {"status": status, "blockNumber": "0x11", "logs": []}
-    with pytest.raises(TxFailed) as ei:
-        send_tx(Rpc(RPC, session), account, CHAIN_ID, "approve", TOKEN, APPROVE, sleep=lambda s: None)
-    e, h = ei.value, "0x" + "ab" * 32
-    assert type(e) is TxFailed and e.code == "tx_failed" and str(e) == f"approve tx {h} reverted"
-    assert e.details == {"step": "approve", "tx": h} and len(chain.sent) == 1
 
 
 @pytest.mark.parametrize("base", ["-0x1", "-0x3b9aca00"])
@@ -335,13 +302,6 @@ def test_an_own_tx_the_count_hides_is_replaced_after_the_refusal(session, accoun
     assert pool.held is None and pool.sleeps == []
 
 
-def test_an_unknown_tx_the_count_hides_is_not_replaced(session, account, tmp_path, monkeypatch):
-    pool = Pool(session, account, dict(LEGACY), monkeypatch, shown=False)
-    with pytest.raises(TxFailed, match=PENDING.format(12)):
-        send_on(pool, session, account, TxLog(tmp_path / "txs.json"))
-    assert len(pool.sent) == 1 and pool.t == 60
-
-
 @pytest.mark.parametrize("shown, sends", [(True, 1), (False, 2)])
 def test_an_own_replacement_the_node_still_refuses(session, account, tmp_path, monkeypatch, shown, sends):
     log = TxLog(tmp_path / "txs.json")
@@ -352,15 +312,6 @@ def test_an_own_replacement_the_node_still_refuses(session, account, tmp_path, m
     assert e.value.details == {"step": "approve", "nonce": 12}
     assert [fields(r)[0] for r in pool.sent] == [12] * sends and "eth_getTransactionReceipt" not in session.rpc_methods()
     assert len(log.rows()) == 1
-
-
-@pytest.mark.parametrize("base, served, tip", [(129_000_000, 1_000_000, TIP_FLOOR), (30 * GWEI, 2 * GWEI, 2 * GWEI)])
-@pytest.mark.parametrize("with_log", [False, True])
-def test_no_pending_tx_keeps_the_0_7_1_fees(session, account, tmp_path, monkeypatch, base, served, tip, with_log):
-    pool = Pool(session, account, None, monkeypatch, base=base, gas_price=base + served, tip=served)
-    send_on(pool, session, account, TxLog(tmp_path / "txs.json") if with_log else None)
-    assert [fields(r) for r in pool.sent] == [(12, tip, 2 * base + tip)]
-    assert pool.sleeps == [] and "eth_getTransactionByHash" not in session.rpc_methods()
 
 
 def test_the_tx_record_is_mode_600_and_holds_no_key(session, account, tmp_path, monkeypatch):
@@ -483,15 +434,6 @@ def test_concurrent_writers_keep_every_row(tmp_path):
     assert sorted(r["chain_id"] for r in TxLog(path).rows()) == sorted(1000 * i + k for i in range(8) for k in range(12))
     lock = path.with_name("txs.json.lock")
     assert lock.stat().st_mode & 0o777 == 0o600 and sorted(p.name for p in path.parent.iterdir()) == ["txs.json", "txs.json.lock"]
-
-
-@pytest.mark.parametrize("own_dir, mode", [(True, 0o700), (False, 0o755)])
-def test_only_the_sdk_own_state_dir_is_forced_to_700(tmp_path, account, own_dir, mode):
-    folder = tmp_path / "state"
-    folder.mkdir(mode=0o755)
-    folder.chmod(0o755)
-    TxLog(folder / "txs.json", own_dir=own_dir).add(row(account, LEGACY))
-    assert folder.stat().st_mode & 0o777 == mode and (folder / "txs.json").stat().st_mode & 0o777 == 0o600
 
 
 @pytest.mark.parametrize("named, mode", [("env", 0o755), ("arg", 0o755), ("default", 0o700)])

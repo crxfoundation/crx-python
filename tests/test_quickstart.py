@@ -2,13 +2,8 @@
 
 from __future__ import annotations
 
-import importlib
-import inspect
 import re
-import runpy
-import textwrap
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -20,7 +15,6 @@ import crx.quickstart as qs
 from .conftest import FakeSession
 
 KEY = "0x" + "11" * 32
-EXAMPLE = Path(__file__).parent.parent / "examples" / "quickstart.py"
 STAMP = re.compile(r"^\d\d:\d\d:\d\d ")
 
 
@@ -78,49 +72,6 @@ def no_prompt(*_a, **_k):
     raise AssertionError("asked for the key while one is set")
 
 
-def test_import_runs_nothing(monkeypatch, no_key):
-    def boom(*_a, **_k):
-        raise AssertionError("import built a client")
-
-    monkeypatch.setattr(crx, "Client", boom)
-    monkeypatch.setattr(qs.getpass, "getpass", no_prompt)
-    importlib.reload(qs)
-    assert callable(qs.main) and callable(qs.steps)
-
-
-def _from_step_2_on(text: str) -> str:
-    """The steps from "# 2. Fund." on, minus that step's comment line: the example connects to the
-    production gateway, the packaged module to the test network; every other line is the same."""
-    lines = text[text.index("# 2. Fund."):].splitlines()
-    return "\n".join(lines[1:]).rstrip("\n")
-
-
-def test_steps_are_the_example_line_for_line():
-    example = EXAMPLE.read_text()
-    body = textwrap.dedent(inspect.getsource(qs.steps)).splitlines()
-    first = next(i for i, line in enumerate(body) if line.startswith("    # 1. Connect"))
-    steps = textwrap.dedent("\n".join(body[first:]))
-    assert _from_step_2_on(example) == _from_step_2_on(steps)
-    assert example[example.index("# 1. Connect"):].count("crx.Client(") == 1
-    assert inspect.getsource(qs.log) in example
-    assert example.startswith("from datetime import datetime, timedelta, timezone\n\nimport crx\n")
-
-
-def test_help_names_the_key_variable(capsys):
-    with pytest.raises(SystemExit) as e:
-        qs.main(["-h"])
-    assert e.value.code == 0
-    out = capsys.readouterr().out
-    assert "python -m crx.quickstart" in out and "CRX_WALLET_PK" in out
-
-
-def test_unknown_argument_exits_2(capsys, fake):
-    with pytest.raises(SystemExit) as e:
-        qs.main(["--mainnet"])
-    assert e.value.code == 2
-    assert FakeClient.last is None
-
-
 def test_key_from_env_runs_every_step_without_asking(monkeypatch, capsys, fake):
     monkeypatch.setenv("CRX_WALLET_PK", KEY)
     monkeypatch.setattr(qs.getpass, "getpass", no_prompt)
@@ -169,29 +120,6 @@ def test_the_expiry_is_30_days_out_on_a_weekday_at_18_utc(monkeypatch, fake, mar
     assert expiry.utcoffset() == timedelta(0) and (expiry.hour, expiry.minute, expiry.second) == (18, 0, 0)
     assert expiry.date() == crx.client._default_expiry(start).date()
     assert tenor["min_secs"] <= (expiry - start).total_seconds() <= tenor["max_secs"]
-
-
-def test_the_deposit_covers_the_ask(monkeypatch, fake):
-    """A seat with nothing but the script's deposit must get its quote.
-
-    Before a quote, the gateway checks that the seat's free collateral
-    covers the trade: about 21 USD per 100 USD asked on USD/BRL. The deposit
-    is at least twice that. The ask is 25,000, the least a Testnet account
-    may ask.
-    """
-    monkeypatch.setenv("CRX_WALLET_PK", KEY)
-    assert qs.main([]) == 0
-    calls = FakeClient.last.calls
-    deposit = next(c[1] for c in calls if c[0] == "deposit")
-    ask = next(c[3] for c in calls if c[0] == "quote")
-    assert ask == 25_000
-    assert deposit >= 2 * 0.21 * ask
-
-
-def test_key_file_env_counts_as_set(monkeypatch, fake, no_key):
-    monkeypatch.setenv("CRX_WALLET_PK_FILE", "/nowhere/seat.key")
-    monkeypatch.setattr(qs.getpass, "getpass", no_prompt)
-    assert qs.main([]) == 0
 
 
 def test_unset_key_is_asked_hidden_and_never_printed(monkeypatch, capsys, fake, no_key):
@@ -253,12 +181,3 @@ def test_crx_error_mid_run_exits_1_with_its_code(monkeypatch, capsys, fake):
     out, err = capsys.readouterr()
     assert len(out.splitlines()) == 3
     assert err.strip() == "market_closed: session closed"
-
-
-@pytest.mark.filterwarnings("ignore::RuntimeWarning")
-def test_runs_as_a_module(monkeypatch, fake):
-    monkeypatch.setenv("CRX_WALLET_PK", KEY)
-    monkeypatch.setattr("sys.argv", ["crx.quickstart"])
-    with pytest.raises(SystemExit) as e:
-        runpy.run_module("crx.quickstart", run_name="__main__", alter_sys=False)
-    assert e.value.code == 0

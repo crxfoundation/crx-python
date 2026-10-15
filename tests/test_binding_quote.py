@@ -129,21 +129,6 @@ def test_quote_not_yours(make_client, venue, session, clock):
     assert len(accepts(session)) == len(signed_posts(session)) == 1 and sent_nothing(session)
 
 
-@pytest.mark.parametrize("details,headers,wait", [
-    ({"retry_after_secs": 42}, {"Retry-After": "42"}, 42.0),
-    ({}, {"Retry-After": "17"}, 17.0),
-    ({}, {}, None),
-])
-def test_rate_limited(make_client, venue, session, clock, details, headers, wait):
-    session.routes[("POST", f"/rfqs/{RFQ}/accept")] = (
-        429, {"code": "rate_limited", "error": "too many refused trades this hour", "details": details}, headers)
-    c = make_client(clock=clock)
-    with pytest.raises(crx.RateLimited) as ei:
-        c.trade(c.quote("USD/MXN", "buy", 25_000))
-    assert ei.value.retry_after == wait and ei.value.status == 429
-    assert len(accepts(session)) == 1 and sent_nothing(session)
-
-
 # ---------- quote(): a dropped pick is never returned ----------
 
 

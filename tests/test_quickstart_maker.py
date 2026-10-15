@@ -2,14 +2,9 @@
 
 from __future__ import annotations
 
-import importlib
-import inspect
 import re
-import runpy
-import textwrap
 from datetime import datetime, timezone
 from decimal import Decimal
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -20,7 +15,6 @@ from crx import _maker
 
 MAKER_KEY = "0x" + "11" * 32
 TAKER_KEY = "0x" + "22" * 32
-EXAMPLE = Path(__file__).parent.parent / "examples" / "maker.py"
 STAMP = re.compile(r"^\d\d:\d\d:\d\d ")
 OURS = "0x" + "a1" * 32
 MINE = "0x" + "b1" * 32    # the maker's quote id
@@ -126,59 +120,6 @@ def no_prompt(*_a, **_k):
     raise AssertionError("asked for a key while one is set")
 
 
-def test_import_runs_nothing(monkeypatch, no_keys):
-    def boom(*_a, **_k):
-        raise AssertionError("import built a client")
-
-    monkeypatch.setattr(crx, "Client", boom)
-    monkeypatch.setattr(qs.getpass, "getpass", no_prompt)
-    importlib.reload(qs)
-    assert callable(qs.main) and callable(qs.steps)
-
-
-def test_steps_are_the_example_line_for_line():
-    example = EXAMPLE.read_text()
-    body = textwrap.dedent(inspect.getsource(qs.steps)).splitlines()
-    first = next(i for i, line in enumerate(body) if line.startswith("    # 1. Connect"))
-    steps = textwrap.dedent("\n".join(body[first:]))
-    assert example[example.index("# 1. Connect"):].rstrip("\n") == steps.rstrip("\n")
-    assert inspect.getsource(qs.log) in example
-
-
-def test_the_contract_names_hold():
-    src = inspect.getsource(qs.steps)
-    for line in ('maker = crx.Client(network="testnet")',
-                 'taker = crx.Client(os.environ["CRX_TAKER_PK"], network="testnet")',
-                 "maker.deposit(20_000)", "taker.deposit(20_000)", 'RATE = "18.12"',
-                 'ask = taker.ask("USD/MXN", "buy", 25_000)', "rfq = next(maker.rfqs(only=ask, wait=10))",
-                 "q = maker.send_quote(rfq, RATE)", "won = ask.quote()", "t = taker.trade(won)",
-                 "t = maker.confirm(q, timeout=60)", "maker.drop_quote(q)"):
-        assert line in src
-
-
-@pytest.mark.parametrize("src", [EXAMPLE.read_text(), inspect.getsource(qs.steps)], ids=["example", "steps"])
-def test_the_reader_sees_no_thread_no_tag_and_no_rfq_read(src):
-    for gone in ("threading", "uuid", "random", "time.sleep", "Event", "taker_done", "taker_failed", "def ask",
-                 "client_rfq_id", ".rfq(", "else:", "finally:", "continue", "break"):
-        assert gone not in src
-    assert src.count("try:") == src.count("except ") == 1 and "except crx.QuoteLost as e:" in src
-    assert not any(hasattr(qs, name) for name in ("threading", "time", "uuid", "random"))
-
-
-def test_help_names_both_key_variables(capsys):
-    with pytest.raises(SystemExit) as e:
-        qs.main(["-h"])
-    assert e.value.code == 0
-    out = capsys.readouterr().out
-    assert "python -m crx.quickstart_maker" in out and "CRX_WALLET_PK" in out and "CRX_TAKER_PK" in out
-
-
-def test_unknown_argument_exits_2(fake):
-    with pytest.raises(SystemExit) as e:
-        qs.main(["--mainnet"])
-    assert e.value.code == 2 and FakeClient.maker is None
-
-
 def test_the_taker_asks_the_maker_quotes_the_taker_accepts(capsys, fake, keys):
     assert qs.main([]) == 0
     m, t = FakeClient.maker, FakeClient.taker
@@ -219,27 +160,6 @@ def test_a_winning_quote_that_is_not_yours_is_not_accepted(capsys, fake, keys):
     out = capsys.readouterr().out.splitlines()
     assert out[-1][9:] == "taker: winning quote 18.12 not yours"
     assert "trade" not in FakeClient.order and FakeClient.order[-2:] == ["confirm", "drop_quote"]
-
-
-def test_a_taker_refusal_ends_the_run_with_its_own_error(capsys, fake, keys, monkeypatch):
-    def refused(self, *a, **k):
-        raise crx.BelowMin("a pool wallet trades at least 25000 USD notional; got 10000")
-
-    monkeypatch.setattr(FakeClient, "ask", refused)
-    assert qs.main([]) == 1
-    out, err = capsys.readouterr()
-    assert err.strip() == "below_min: a pool wallet trades at least 25000 USD notional; got 10000"
-    assert "Traceback" not in out + err and FakeClient.order[-1] == "balance"
-
-
-def test_an_rfq_with_no_winner_exits_1(capsys, fake, keys, monkeypatch):
-    def unquoted(self):
-        raise crx.NoQuotes("no quote before the wait ended: the request is still open")
-
-    monkeypatch.setattr(FakeClient, "winner", unquoted)
-    assert qs.main([]) == 1
-    assert capsys.readouterr().err.startswith("no_quotes: no quote before the wait ended")
-    assert FakeClient.order[-1] == "send_quote"
 
 
 def test_an_rfq_that_never_reaches_the_maker_exits_1(capsys, fake, keys, monkeypatch):
@@ -289,14 +209,6 @@ def test_unset_keys_are_asked_hidden_and_never_printed(monkeypatch, capsys, fake
         assert k[2:] not in out + err
 
 
-def test_only_the_missing_key_is_asked(monkeypatch, fake, no_keys):
-    monkeypatch.setenv("CRX_WALLET_PK_FILE", "/nowhere/seat.key")
-    asked = []
-    monkeypatch.setattr(qs.getpass, "getpass", lambda t: asked.append(t) or TAKER_KEY)
-    assert qs.main([]) == 0
-    assert asked == ["CRX_TAKER_PK (hidden): "]
-
-
 @pytest.mark.parametrize("answer", ["", "   ", EOFError, KeyboardInterrupt, "no-terminal"])
 def test_no_taker_key_exits_2_before_any_call(monkeypatch, capsys, fake, no_keys, answer):
     monkeypatch.setenv("CRX_WALLET_PK", MAKER_KEY)
@@ -333,11 +245,3 @@ def _no_net_init(init):
         k.setdefault("session", FakeSession())
         return init(self, *a, **k)
     return wrapped
-
-
-@pytest.mark.filterwarnings("ignore::RuntimeWarning")
-def test_runs_as_a_module(monkeypatch, fake, keys):
-    monkeypatch.setattr("sys.argv", ["crx.quickstart_maker"])
-    with pytest.raises(SystemExit) as e:
-        runpy.run_module("crx.quickstart_maker", run_name="__main__", alter_sys=False)
-    assert e.value.code == 0

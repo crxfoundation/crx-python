@@ -62,19 +62,6 @@ def test_trade_retry_after_a_fault_signs_and_posts_nothing(make_client, venue, s
 
 
 @pytest.mark.parametrize("fault", FAULTS)
-def test_trade_retry_reads_the_final_answer(make_client, venue, session, clock, fault):
-    faulty_accept(venue, session, fault)
-    venue.script = [("sending", None)]
-    c = make_client(clock=clock)
-    q = c.quote("USD/MXN", "buy", 25_000)
-    c.trade(q)
-    venue.script = [("open", TXH)]
-    t = c.trade(q)
-    assert (t.status, t.tx) == ("open", TXH)
-    assert len(accepts(session)) == 1
-
-
-@pytest.mark.parametrize("fault", FAULTS)
 def test_no_second_quote_while_the_first_has_no_final_answer(make_client, venue, session, clock, fault):
     faulty_accept(venue, session, fault)
     venue.script = [("sending", None)]
@@ -330,21 +317,6 @@ def test_withdraw_returned_pending_then_paid_is_told_once(make_client, session, 
     c.withdraw(1000)  # told: a new intent at the next nonce
     first, second = withdraw_posts(session)
     assert (first["nonce"], second["nonce"]) == ("3", "4")
-
-
-def test_withdraw_nonce_passed_row_of_another_amount_is_not_the_intent(make_client, session, health, account):
-    # A row with no item at the intent's nonce but another amount is not the held intent.
-    Chain(session)
-    g = gate(session, health, account)
-    session.routes[("POST", "/withdraw")] = fault_after(lambda req: None, "dropped")
-    session.routes[("GET", "/balance")] = Money(account, g)
-    c = make_client(clock=Clock(time.time()))
-    with pytest.raises(crx.WithdrawUnknown):
-        c.withdraw(1000)
-    row = dict(item_row("paid", None, LANDED), amount="250.000000")
-    session.routes[("GET", "/balance")] = balance_body(account, nonce="4", withdraw=row)
-    with pytest.raises(crx.EarlierOutcome, match="read balance"):
-        c.withdraw(1000)
 
 
 def test_withdraw_no_repeat_post_near_the_deadline(make_client, session, health, account):

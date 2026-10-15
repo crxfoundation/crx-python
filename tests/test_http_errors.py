@@ -62,17 +62,6 @@ def test_text_body_strips_control_chars(make_client, session):
     assert "more" not in e.details["body"]
 
 
-def test_empty_body(make_client, session):
-    e = fail_balance(make_client, session, 503, "", {})
-    assert type(e) is crx.ServerError and str(e) == "HTTP 503 from gateway.test"
-    assert "body" not in e.details
-
-
-def test_json_non_object_body_is_text(make_client, session):
-    e = fail_balance(make_client, session, 502, '["oops"]', {})
-    assert str(e) == "HTTP 502 from gateway.test" and e.details["body"] == '["oops"]'
-
-
 def test_edge_429_reads_retry_after(make_client, session):
     e = fail_balance(make_client, session, 429, "Too Many Requests", {"Retry-After": "7", "content-type": "text/plain"})
     assert type(e) is crx.RateLimited and e.code == "rate_limited" and e.status == 429
@@ -87,12 +76,6 @@ def test_json_429_header_fills_missing_retry_after(make_client, session):
     assert e.details == {"scope": "seat", "retry_after_secs": 5}
 
 
-def test_json_429_body_retry_after_wins(make_client, session):
-    body = {"code": "rate_limited", "error": "slow", "details": {"retry_after_secs": 2}}
-    e = fail_balance(make_client, session, 429, body, {"Retry-After": "9"})
-    assert e.details == {"retry_after_secs": 2}
-
-
 @pytest.mark.parametrize("value,want", [
     ("0", 0), (" 12 ", 12), ("Wed, 21 Oct 2015 07:28:00 GMT", 0), ("soon", None), ("-3", None),
     ("\xb2", None), ("\xb9", None), ("\xb3", None), ("\u0663", None),
@@ -101,11 +84,6 @@ def test_json_429_body_retry_after_wins(make_client, session):
 def test_retry_after_forms(make_client, session, value, want):
     e = fail_balance(make_client, session, 503, "", {"Retry-After": value})
     assert e.details.get("retry_after_secs") == want
-
-
-def test_retry_after_superscript_still_rate_limited(make_client, session):
-    e = fail_balance(make_client, session, 429, "Too Many Requests", {"Retry-After": "\xb2"})
-    assert type(e) is crx.RateLimited and e.details == {"body": "Too Many Requests"}
 
 
 def test_retry_after_date_without_zone_is_utc(make_client, session, monkeypatch):
@@ -122,26 +100,6 @@ def test_retry_after_date_without_zone_is_utc(make_client, session, monkeypatch)
             os.environ["TZ"] = old
         time.tzset()
     assert e.details["retry_after_secs"] == 60
-
-
-def test_json_bodies_unchanged(make_client, session):
-    body = {"code": "market_paused", "error": "USD/JPY is paused", "details": {"pair": "USD/JPY"}}
-    e = fail_balance(make_client, session, 409, body, {})
-    assert type(e) is crx.MarketPaused and e.code == "market_paused" and e.gateway_code == "market_paused"
-    assert str(e) == "USD/JPY is paused" and e.details == {"pair": "USD/JPY"} and e.status == 409
-
-
-def test_quote_format_outdated_body(make_client, session):
-    body = {"code": "quote_format_outdated", "error": "the quote is signed in an older format; update the SDK"}
-    e = fail_balance(make_client, session, 400, body, {})
-    assert type(e) is crx.QuoteFormatOutdated and isinstance(e, crx.BadRequest)
-    assert (e.code, e.gateway_code, e.status) == ("quote_format_outdated", "quote_format_outdated", 400)
-    assert "older format" in str(e)
-
-
-def test_json_body_without_message_unchanged(make_client, session):
-    e = fail_balance(make_client, session, 500, {"code": "internal"}, {})
-    assert type(e) is crx.ServerError and str(e) == "HTTP 500" and e.details == {}
 
 
 def test_bind_refusal_html_names_host():

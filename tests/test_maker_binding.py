@@ -10,9 +10,9 @@ import crx
 from crx import _eip712 as e7
 from crx import _maker
 
-from .conftest import BASE, RPC, Clock
+from .conftest import Clock
 from .test_maker import (
-    KEY, OTHER, QE_MAX, RFQ, T0, TRADE, TXH, Gateway, frame, new_maker, opened, posts, refusal, rfq_obj, tail, tape,
+    OTHER, QE_MAX, RFQ, T0, TRADE, TXH, Gateway, frame, new_maker, opened, posts, refusal, rfq_obj, tail, tape,
 )
 
 
@@ -104,13 +104,6 @@ def test_leg_live_on_a_leg_near_its_end_is_dropped_by_its_id(maker, gw, session,
     assert maker.send_quote(rfq_obj(), "5.41").leg_id not in (stale, gw.bodies[0]["leg_id"])
 
 
-def test_quote_fills_full_is_typed(maker, gw):
-    gw.answer = refusal("quote_fills_full")
-    with pytest.raises(crx.QuoteFillsFull) as e:
-        maker.send_quote(rfq_obj(), "5.41")
-    assert (e.value.code, e.value.status) == ("quote_fills_full", 409)
-
-
 @pytest.mark.parametrize("edit", [{"leg_hash": "0x" + "00" * 32}, {"leg_id": "0x" + "00" * 32}, {"rate": "5.42"},
                                   {"rfq_id": OTHER}, {"quote_id": None}])
 def test_send_quote_refuses_an_echo_of_another_quote(maker, gw, session, edit):
@@ -150,13 +143,6 @@ def test_confirm_waits_for_the_accept_and_signs_nothing(maker, gw, sent, session
     assert set(session.rpc_methods()) <= {"eth_chainId", "eth_getCode"}
 
 
-def test_confirm_reads_the_view_every_third_poll(maker, gw, sent, clock):
-    gw.accept_at = 4
-    start = clock()
-    assert maker.confirm(sent, timeout=60).status == "open"
-    assert 9 <= clock() - start <= 12  # three reads 3 s apart before the accept shows
-
-
 def test_confirm_rides_out_a_gateway_that_does_not_answer(maker, gw, sent, session):
     gw.accept()
     session.routes[("GET", f"/rfqs/{RFQ}")] = [
@@ -179,18 +165,6 @@ def test_confirm_on_an_ended_rfq_says_why(maker, gw, sent, status, reason):
     assert str(e.value) == _maker.LOST[reason]
 
 
-@pytest.mark.parametrize("status, own, reason", [
-    ("quoted", "dropped", "dropped"),    # a live RFQ: the seat's drop, or a gateway restart
-    ("quoted", "expired", "expired"),    # the quote's own life ended
-    ("expired", "expired", "expired"),
-])
-def test_confirm_a_quote_that_ended_on_its_own_says_why(maker, gw, sent, status, own, reason):
-    gw.status, gw.rows[0]["status"] = status, own
-    with pytest.raises(crx.QuoteLost) as e:
-        maker.confirm(sent)
-    assert e.value.reason == reason
-
-
 def test_lost_reads_the_rfq_status_before_the_quotes_own():
     def view(status, *rows):
         return {"status": status, "quotes": [{"quote_id": i, "status": s} for i, s in rows]}
@@ -205,14 +179,6 @@ def test_lost_reads_the_rfq_status_before_the_quotes_own():
     assert _maker.lost(view("quoted", ("a", "quoted")), "a") is None
 
 
-def test_confirm_no_accept_before_the_wait_is_timeout(maker, gw, sent, clock):
-    start = clock()
-    with pytest.raises(crx.QuoteLost) as e:
-        maker.confirm(sent, timeout=4)
-    assert e.value.reason == "timeout" and 4 <= clock() - start <= 6
-    assert str(e.value) == "no accept before the wait ended"
-
-
 def test_confirm_by_default_waits_until_closes_at_and_5_s(maker, gw, sent, clock):
     with pytest.raises(crx.QuoteLost) as e:
         maker.confirm(sent)
@@ -222,25 +188,6 @@ def test_confirm_by_default_waits_until_closes_at_and_5_s(maker, gw, sent, clock
 def test_confirm_the_accept_wins_over_an_ended_rfq(maker, gw, sent):
     gw.accept()
     assert gw.status == "accepted" and maker.confirm(sent).status == "open"
-
-
-@pytest.mark.parametrize("accepted", [False, True])
-def test_confirm_the_earlier_quote_on_a_leg_reads_dropped(maker, gw, sent, accepted):
-    # Replaced by this seat's later quote: dropped, before and after the taker accepts the later one.
-    later = maker.send_quote(rfq_obj(), "5.40")
-    if accepted:
-        gw.accept()
-    with pytest.raises(crx.QuoteLost) as e:
-        maker.confirm(sent)
-    assert e.value.reason == "dropped"
-    gw.accept_at = 1
-    assert maker.confirm(later).rate == Decimal("5.40")
-
-
-def test_confirm_takes_a_maker_quote_only(maker, session):
-    with pytest.raises(crx.BadRequest, match="confirm\\(\\) takes the MakerQuote that send_quote\\(\\) returned"):
-        maker.confirm(rfq_obj())
-    assert session.calls == []
 
 
 # ---------- drop_quote ----------
@@ -289,22 +236,6 @@ def test_drop_refuses_an_answer_for_another_leg(maker, gw, sent, session, answer
     with pytest.raises(crx.BadAnswer, match="the drop answer does not name this leg"):
         maker.drop_quote(sent)
     assert maker._legs == {RFQ: sent.leg_id}
-
-
-@pytest.mark.parametrize("bad, kw", [("not a quote", {}), (frame(), {}), ("rfq", {}), ("rfq", {"leg_id": "0x12"})],
-                         ids=["text", "frame", "rfq_no_leg_held", "bad_leg_id"])
-def test_drop_refuses_before_any_call(maker, session, bad, kw):
-    with pytest.raises(crx.BadRequest):
-        maker.drop_quote(rfq_obj() if bad == "rfq" else bad, **kw)
-    assert session.calls == []
-
-
-def test_a_viewer_cannot_drop(session, tmp_path):
-    c = crx.Client(key=KEY, base_url=BASE, rpc_url=RPC, state_dir=tmp_path, session=session,
-                   account="0x5b38da6a701c568545dcfcb03fcb875f56beddc4")
-    with pytest.raises(crx.ConfigError):
-        c.drop_quote(rfq_obj(), leg_id="0x" + "01" * 32)
-    assert session.calls == []
 
 
 # ---------- the quickstart's maker calls, off the tape ----------

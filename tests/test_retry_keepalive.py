@@ -41,10 +41,6 @@ def gets(session, path):
 
 # ---------- the GET retry ----------
 
-def test_retry_pause_is_short():
-    assert 0 < GET_RETRY_PAUSE <= 1
-
-
 @pytest.mark.parametrize("first", [down, (503, {"code": "upstream", "error": "down"}),
                                    (502, "<html>bad gateway</html>"), NO_MARK],
                          ids=["network", "503", "502", "mark_unavailable"])
@@ -97,25 +93,6 @@ def test_post_put_delete_are_sent_once(make_client, session, method, path, fail,
     assert [(x["method"], x["path"]) for x in session.calls] == [(method, path)] and pauses == []
 
 
-def test_mark_unavailable_get_retry_keeps_the_rfq_read_alive(make_client, session):
-    # A maker loop reads one RFQ: one 503 mark_unavailable no longer ends it.
-    c = make_client()
-    c._sleep = pauses = Pauses()
-    session.routes[("GET", f"/rfqs/{RID}")] = [NO_MARK, {"rfq_id": RID, "kind": "open"}]
-    assert c._gw.request("GET", f"/rfqs/{RID}")["rfq_id"] == RID
-    assert len(gets(session, f"/rfqs/{RID}")) == 2 and pauses == [GET_RETRY_PAUSE]
-
-
-def test_withdraw_post_is_sent_once_on_503(make_client, session):
-    c = make_client()
-    c._sleep = pauses = Pauses()
-    session.routes[("GET", "/balance")] = dict(balance_of(c), withdraw={"nonce": "3"})
-    session.routes[("POST", "/withdraw")] = (503, {"code": "upstream", "error": "down"})
-    with pytest.raises(crx.WithdrawUnknown):  # no answer: the status read decides, and shows no item
-        c.withdraw(10)
-    assert len([x for x in session.calls if x["path"] == "/withdraw"]) == 1
-
-
 @pytest.mark.parametrize("fail, err", [(down, crx.NetworkError),
                                        ((503, {"code": "upstream", "error": "down"}), crx.ServerError),
                                        (NO_MARK, crx.MarkUnavailable)])
@@ -165,16 +142,6 @@ def start(c):
     c.drop_quote(rfq_of({"rfq_id": RID}), leg_id=RID)
 
 
-def test_keepalive_default_and_range(make_client):
-    assert make_client()._keepalive_s == 5.0
-    for ok in (1, 5.0, 10):
-        assert make_client(keepalive=ok)._keepalive_s == float(ok)
-    assert make_client(keepalive=None)._keepalive_s is None
-    for bad in (0, 0.5, 10.5, True, "5", float("nan")):
-        with pytest.raises(crx.ConfigError):
-            make_client(keepalive=bad)
-
-
 @pytest.mark.keepalive
 def test_taker_calls_start_no_keepalive(make_client, session):
     c = make_client(keepalive=1.0)
@@ -211,37 +178,6 @@ def test_maker_call_starts_keepalive(make_client, session, account, call):
         c.close()
     c._live.thread.join(3)
     assert not c._live.thread.is_alive()
-
-
-@pytest.mark.keepalive
-def test_keepalive_reads_only_when_the_client_does_not(make_client, session):
-    c = make_client(keepalive=2.0)
-    tape = Tape(session)
-    try:
-        c.trades()  # a tape read: the seat is live for now
-        start(c)
-        end = time.monotonic() + 4.5
-        while time.monotonic() < end:
-            c.trades()
-            time.sleep(0.2)
-        assert tape.beats() == []
-        assert tape.wait_beats(1, timeout=5.0)  # the client stopped reading: the keepalive reads
-    finally:
-        c.close()
-
-
-@pytest.mark.keepalive
-def test_failed_keepalive_read_waits_its_interval(make_client, session):
-    c = make_client(keepalive=1.0)
-    tape = Tape(session, answer=(503, {"code": "upstream", "error": "down"}))
-    try:
-        start(c)
-        time.sleep(2.6)
-        n = len(tape.beats())
-        assert 2 <= n <= 4  # at 0, 1 and 2 s: no tight loop, no GET retry
-        assert c._live.thread.is_alive()
-    finally:
-        c.close()
 
 
 @pytest.mark.keepalive

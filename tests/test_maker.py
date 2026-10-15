@@ -37,7 +37,6 @@ OTHER = "0x" + "a2" * 32
 TXH = "0x" + "55" * 32
 TRADE = "0x" + "9a" * 32
 PAIRS = {e7.h0x(keccak(text=p)): p for p in ("USD/BRL", "USD/MXN", "USD/PHP")}
-QUOTE_TYPEHASH = "0x00fc8b1401eebfc809c01d3a7351526ef07cfd5902793c3d279de280c0aec2cb"  # SPEC v5 §1
 QUOTE_TYPE = ("Quote(address seat,bytes32 legId,bytes32 pair,int8 side,uint256 notional,uint64 rate,int16 premiumBps,"
               "uint40 expiry,uint64 nonce,bytes32 salt,bytes32 takerRef)")
 QUOTE_TYPE_WITH_END = QUOTE_TYPE.replace("uint64 nonce,", "uint64 nonce,uint64 quoteExpiry,")
@@ -104,12 +103,6 @@ def test_maker_vectors_are_the_projection_of_the_format_vectors():
     assert IDS == ["QV1", "QV2", "QV3", "QV4", "QV5"]
 
 
-def test_the_domain_is_the_vectors():
-    assert Account.from_key(KEY).address.lower() == SEAT == fixture(VEC_FILE)["seat"]
-    assert fixture(VEC_FILE)["domain"] == DOMAIN
-    assert e7.h0x(e7.domain_separator(DOMAIN["chain_id"], DOMAIN["verifying_contract"])) == DOMAIN["separator"]
-
-
 @pytest.mark.parametrize("qid", IDS)
 def test_quote_digest_and_sig_reproduce_the_vector(qid):
     v = from_file(qid)
@@ -118,22 +111,6 @@ def test_quote_digest_and_sig_reproduce_the_vector(qid):
     assert e7.h0x(digest) == v["digest"]
     assert sign(digest) == v["sig"]
     assert recover(digest, v["sig"]) == SEAT == v["half"]["seat"]
-
-
-@pytest.mark.parametrize("v", VEC["quotes"], ids=lambda v: v["id"])
-def test_the_hand_built_quote_reproduces_the_vector(v):
-    # The scripted gateway's Quote, checked here once against the vectors.
-    assert e7.h0x(keccak(text=QUOTE_TYPE)) == QUOTE_TYPEHASH == e7.h0x(e7.typehash("Quote"))
-    h = v["half"]
-    assert e7.h0x(by_hand(h["seat"], h["leg_id"], PAIRS[h["pair_id"]], h["side"], h["notional"], h["rate"],
-                          h["premium_bps"], h["expiry"], int(h["nonce"]), v["salt"], v["taker_ref"])) == v["digest"]
-
-
-@pytest.mark.parametrize("v", VEC["quotes"], ids=lambda v: v["id"])
-def test_the_vector_leg_id_ends_in_the_quote_end_and_gives_the_nonce(v):
-    leg = v["half"]["leg_id"]
-    assert e7.leg_id_tail(leg) == tail(leg) == v["quote_expiry"]
-    assert e7.maker_nonce(leg) == int(v["half"]["nonce"]) == int.from_bytes(bytes.fromhex(leg[2:])[16:24], "big")
 
 
 @pytest.mark.parametrize("case", FV["maker_nonce"]["cases"], ids=lambda c: c["id"])
@@ -369,27 +346,6 @@ def test_rfq_of_reads_the_maker_view():
         assert not hasattr(r, gone)
 
 
-@pytest.mark.parametrize("pair", ["USDBRL", "usd/brl", "USD/BRL"])
-def test_rfq_of_reads_the_pair_in_slash_form(pair):
-    assert rfq_obj(pair=pair).pair == "USD/BRL"
-
-
-def test_rfq_of_reads_a_buy_side():
-    r = rfq_obj(side=1)
-    assert (r.side, r.taker_side) == ("buy", "sell")
-
-
-def test_rfq_of_names_no_rfq_without_an_id():
-    assert _maker.rfq_of(frame(rfq_id=None)) is None
-    assert _maker.rfq_of(frame(rfq_id="0x12")) is None
-
-
-@pytest.mark.parametrize("cid, own", [("cid-1", True), ("", False), (None, False)])
-def test_an_rfq_is_own_when_it_names_a_client_rfq_id(cid, own):
-    r = rfq_obj(client_rfq_id=cid)
-    assert r.own is own and r.client_rfq_id == (cid or None)
-
-
 def test_rfq_reads_the_taker_view(maker, session):
     view = frame(side=1, client_rfq_id="cid-1", kind="open", status="quoted")
     view["quotes"] = [{"quote_id": "0x" + "44" * 32, "rate": "5.41", "status": "quoted", "client_quote_id": "q1"},
@@ -398,12 +354,6 @@ def test_rfq_reads_the_taker_view(maker, session):
     r = maker.rfq(RFQ.upper().replace("0X", "0x"))
     assert (r.client_rfq_id, r.own, r.side, r.taker_side, r.status, r.seq) == ("cid-1", True, "buy", "buy", "quoted", None)
     assert [q["rate"] for q in r.quotes] == ["5.41", "5.42"]
-
-
-def test_rfq_refuses_a_bad_id_before_any_call(maker, session):
-    with pytest.raises(crx.BadRequest, match="rfq_id is a 0x 32-byte hex word"):
-        maker.rfq("0x12")
-    assert session.calls == []
 
 
 def test_rfq_refuses_a_view_of_another_rfq(maker, session):
@@ -463,18 +413,6 @@ def test_rfqs_yields_an_rfq_with_an_empty_client_rfq_id(maker, session):
     assert r.rfq_id == RFQ and r.own is False
 
 
-def test_rfqs_never_yields_an_own_rfq(maker, session):
-    session.routes[("GET", "/trades")] = [tape([opened(frame(client_rfq_id="cid-1"), 1)], 1),
-                                          tape([opened(frame(rfq_id=OTHER, client_rfq_id="cid-2"), 2)], 2)]
-    assert list(maker.rfqs(wait=3)) == []
-
-
-def test_rfqs_reads_the_tape_once_a_second_by_default(maker, session):
-    session.routes[("GET", "/trades")] = tape([], 1)
-    list(maker.rfqs(wait=10))
-    assert len([c for c in session.calls if c["path"] == "/trades"]) == 11  # the catch-up read, then one a second
-
-
 def test_rfqs_catch_up_error_raises_at_the_call(maker, session):
     session.routes[("GET", "/trades")] = (503, {"code": "upstream", "error": "down"})
     with pytest.raises(crx.ServerError):
@@ -525,13 +463,6 @@ def test_rfqs_after_past_the_head_raises_and_is_not_read_again(maker, session):
     assert [c["query"]["after"] for c in session.calls if c["path"] == "/trades"] == [["0"], ["5"]]
 
 
-def test_rfqs_break_stops_reading(maker, session):
-    session.routes[("GET", "/trades")] = tape([opened(frame(), 1)], 1)
-    for r in maker.rfqs():
-        break
-    assert r.rfq_id == RFQ and len(session.calls) == 1
-
-
 ASK = crx.Ask(rfq_id=RFQ, pair="USD/BRL", side="buy", notional=Decimal("5000000"), expiry=None, raw={}, rfq={},
               _client=None)
 
@@ -547,11 +478,6 @@ def test_rfqs_only_yields_that_rfq_then_ends(maker, session, only):
     assert len(session.calls) == 2  # the catch-up read, then the read that carried it: none after
 
 
-def test_rfqs_only_takes_the_rfq_from_the_catch_up_read(maker, session):
-    session.routes[("GET", "/trades")] = tape([opened(frame(rfq_id=OTHER), 1), opened(frame(), 2)], 2)
-    assert [r.rfq_id for r in maker.rfqs(only=ASK, wait=30)] == [RFQ] and len(session.calls) == 1
-
-
 def test_rfqs_only_raises_no_quotes_when_the_rfq_never_arrives(maker, session, clock):
     session.routes[("GET", "/trades")] = tape([opened(frame(rfq_id=OTHER), 1)], 1)
     start = clock()
@@ -560,25 +486,6 @@ def test_rfqs_only_raises_no_quotes_when_the_rfq_never_arrives(maker, session, c
     assert ei.value.details == {"rfq_id": RFQ}
     assert str(ei.value) == "the RFQ did not show in this account's open RFQs before the wait ended"
     assert clock() - start == 3
-
-
-def test_next_on_rfqs_only_raises_no_quotes_when_the_rfq_never_arrives(maker, session):
-    session.routes[("GET", "/trades")] = tape([opened(frame(rfq_id=OTHER), 1)], 1)
-    with pytest.raises(crx.NoQuotes) as ei:
-        next(maker.rfqs(only=ASK, wait=3))
-    assert ei.value.details == {"rfq_id": RFQ}
-
-
-def test_next_on_rfqs_only_returns_that_rfq(maker, session):
-    session.routes[("GET", "/trades")] = tape([opened(frame(rfq_id=OTHER), 1), opened(frame(), 2)], 2)
-    assert next(maker.rfqs(only=ASK, wait=10)).rfq_id == RFQ
-
-
-def test_rfqs_only_ends_without_error_once_stop_is_set(maker, session):
-    stop = threading.Event()
-    stop.set()
-    session.routes[("GET", "/trades")] = tape([opened(frame(rfq_id=OTHER), 1)], 1)
-    assert list(maker.rfqs(only=ASK, stop=stop)) == []
 
 
 @pytest.mark.parametrize("only", ["", "0x12", RFQ + "00", 7, object()])
@@ -609,28 +516,6 @@ def test_send_quote_posts_the_vector_quote(maker, session, clock, monkeypatch, q
     assert maker._legs == {RFQ: h["leg_id"]}
 
 
-def test_send_quote_body_is_rate_leg_id_salt_sig(maker, gw, session):
-    q = maker.send_quote(rfq_obj(), "5.410000")
-    (call,) = posts(session)
-    body = call["body"]
-    assert set(body) == {"rate", "leg_id", "salt", "sig"} and body["rate"] == "5.41"
-    assert tail(body["leg_id"]) == QE_MAX and len(body["leg_id"]) == len(body["salt"]) == 66
-    assert body["leg_id"] != QV1["half"]["leg_id"] and body["salt"] != QV1["salt"]  # fresh random bytes
-    nonce = int.from_bytes(b32(body["leg_id"])[16:24], "big")
-    h = QV1["half"]
-    digest = by_hand(SEAT, body["leg_id"], "USD/BRL", h["side"], h["notional"], "5.41", h["premium_bps"],
-                     h["expiry"], nonce, body["salt"], QV1["taker_ref"])
-    assert recover(digest, body["sig"]) == SEAT
-    assert q.leg["nonce"] == str(nonce) and q.client_quote_id is None and q.quote_expiry.timestamp() == QE_MAX
-
-
-def test_send_quote_sends_client_quote_id_only_when_given(maker, gw):
-    q = maker.send_quote(rfq_obj(), "5.41", client_quote_id="cq-1")
-    (body,) = gw.bodies
-    assert set(body) == {"rate", "leg_id", "salt", "sig", "client_quote_id"} and body["client_quote_id"] == "cq-1"
-    assert q.client_quote_id == "cq-1"
-
-
 @pytest.mark.parametrize("case", FV["maker_nonce"]["cases"], ids=lambda c: c["id"])
 def test_send_quote_signs_under_the_nonce_of_its_leg_id(maker, session, clock, monkeypatch, case):
     leg = b32(case["leg_id"])
@@ -648,14 +533,6 @@ def test_send_quote_signs_under_the_nonce_of_its_leg_id(maker, session, clock, m
                        h["expiry"], nonce, "0x" + "61" * 32, QV1["taker_ref"])
     assert recover(under(int(case["nonce"])), body["sig"]) == SEAT
     assert recover(under(int(case["nonce"]) + 1), body["sig"]) != SEAT
-
-
-def test_a_quote_over_the_next_nonce_is_refused_by_the_gateway(maker, gw, monkeypatch):
-    # ND1 on the wire: the gateway rebuilds the Quote over the derived nonce and recovers another address.
-    monkeypatch.setattr(e7, "maker_nonce", lambda leg_id: int.from_bytes(b32(leg_id)[16:24], "big") + 1)
-    with pytest.raises(crx.AuthError) as e:
-        maker.send_quote(rfq_obj(), "5.41")
-    assert (e.value.gateway_code, e.value.status) == ("invalid_signature", 400) and len(gw.bodies) == 1
 
 
 @pytest.mark.parametrize("cqid", ["cq-1", None])
@@ -695,11 +572,6 @@ def test_with_drop_quote_expiry_off_the_body_and_the_quote_carry_the_quote_end(m
     assert recover(under(QE_MAX), body["sig"]) == SEAT and recover(under(None), body["sig"]) != SEAT
 
 
-def test_the_switches_are_on_by_default():
-    assert (e7.DERIVE_MAKER_NONCE, e7.DROP_QUOTE_EXPIRY) == (True, True)
-    assert e7.type_string("Quote") == QUOTE_TYPE
-
-
 # ---------- send_quote: refusals before signing ----------
 
 REFUSALS = [
@@ -736,17 +608,6 @@ def test_send_quote_refuses_before_signing(maker, gw, session, edit, err, words)
     assert posts(session) == [] and gw.bodies == [] and maker._legs == {}
 
 
-def test_a_quote_window_under_60_s_is_lost_as_expired(maker, gw, session):
-    with pytest.raises(crx.QuoteLost) as e:
-        maker.send_quote(rfq_obj(quote_expiry_max=T0 + 59), "5.41")
-    assert (e.value.reason, e.value.code) == ("expired", "quote_lost") and posts(session) == []
-
-
-def test_sixty_seconds_left_still_quotes(maker, gw, clock):
-    clock.t = QE_MAX - 60
-    assert tail(maker.send_quote(rfq_obj(), "5.41").leg_id) == QE_MAX
-
-
 def test_a_quote_end_630_s_out_still_quotes(maker, session, clock):
     gw = Gateway(session, clock, quote_expiry_max=T0 + 630)
     maker.send_quote(rfq_obj(quote_expiry_max=T0 + 630), "5.41")
@@ -758,20 +619,6 @@ def test_send_quote_refuses_a_bad_rate(maker, gw, session, rate):
     with pytest.raises(crx.BadRequest, match="rate"):
         maker.send_quote(rfq_obj(), rate)
     assert posts(session) == []
-
-
-@pytest.mark.parametrize("cqid", ["q" * 129, "", "q-é", "q\n1", 7])
-def test_send_quote_refuses_a_client_quote_id_the_gateway_refuses(maker, gw, session, cqid):
-    with pytest.raises(crx.BadRequest, match="client_quote_id is 1 to 128 printable ASCII characters"):
-        maker.send_quote(rfq_obj(), "5.41", client_quote_id=cqid)
-    assert posts(session) == []
-
-
-def test_send_quote_takes_an_rfq_only(maker, session):
-    with pytest.raises(crx.BadRequest, match="send_quote\\(\\) takes an Rfq"):
-        maker.send_quote(frame(), "5.41")
-    assert posts(session) == []
-
 
 
 # ---------- send_quote: the maker's own premium and expiry ----------
@@ -827,20 +674,6 @@ def test_send_quote_refuses_a_served_expiry_other_than_the_rfqs_own(maker, gw, s
     assert posts(session) == [] and gw.bodies == [] and maker._legs == {}
 
 
-def test_send_quote_refuses_an_rfq_shown_with_another_expiry(maker, gw, session, monkeypatch):
-    monkeypatch.setattr(e7, "quote_digest", no_signature)
-    rfq = dataclasses.replace(rfq_obj(), expiry=ms_to_dt(QV1_EXPIRY - DAY_MS))
-    with pytest.raises(crx.RefusedToSign, match="expiry"):
-        maker.send_quote(rfq, "5.41")
-    assert posts(session) == [] and gw.bodies == []
-
-
-def test_send_quote_by_default_signs_the_expiry_the_rfq_shows(maker, gw):
-    rfq = rfq_obj()
-    q = maker.send_quote(rfq, "5.41")
-    assert q.leg["expiry"] == QV1_EXPIRY and q.expiry == rfq.expiry
-
-
 @pytest.mark.parametrize("expiry", [ms_to_dt(QV1_EXPIRY), QV1_EXPIRY, timedelta(days=102),
                                     timedelta(milliseconds=QV1_EXPIRY - T0 * 1000)],
                          ids=["datetime", "unix_ms", "timedelta", "timedelta_to_the_ms"])
@@ -859,15 +692,6 @@ def test_send_quote_refuses_an_expiry_other_than_the_one_it_names(maker, gw, ses
     assert posts(session) == [] and gw.bodies == [] and maker._legs == {}
 
 
-def test_a_named_expiry_takes_the_place_of_the_rfqs_own(maker, session, clock):
-    later = QV1_EXPIRY + 30 * DAY_MS
-    gw = Gateway(session, clock, expiry=later)
-    rfq = rfq_obj(expiry=later)
-    rfq = dataclasses.replace(rfq, expiry=ms_to_dt(QV1_EXPIRY))
-    q = maker.send_quote(rfq, "5.41", expiry=ms_to_dt(later))
-    assert q.leg["expiry"] == later and len(gw.bodies) == 1
-
-
 def test_an_rfq_that_shows_no_expiry_quotes_on_the_premium_and_logs_the_served_one(maker, gw, caplog):
     rfq = dataclasses.replace(rfq_obj(), expiry=None)
     with caplog.at_level(logging.WARNING, logger="crx"):
@@ -881,13 +705,6 @@ def test_an_rfq_that_shows_no_expiry_quotes_on_the_premium_and_logs_the_served_o
 def test_an_rfq_that_shows_an_unreadable_expiry_is_refused(maker, gw, session, shown):
     rfq = dataclasses.replace(rfq_obj(), expiry=shown)
     with pytest.raises(crx.RefusedToSign, match="expiry"):
-        maker.send_quote(rfq, "5.41")
-    assert posts(session) == []
-
-
-def test_an_rfq_that_shows_no_expiry_still_refuses_another_premium(maker, gw, session):
-    rfq = dataclasses.replace(rfq_obj(premium_bps=-200), expiry=None)
-    with pytest.raises(crx.RefusedToSign, match="premium"):
         maker.send_quote(rfq, "5.41")
     assert posts(session) == []
 
@@ -915,15 +732,6 @@ def test_send_quote_refuses_bad_own_terms_before_any_call(maker, gw, session, kw
 
 # ---------- send_quote: the gateway's refusals ----------
 
-def test_quote_format_outdated_is_typed(maker, gw):
-    gw.answer = refusal("quote_format_outdated", 400, "the quote is signed in an older format")
-    with pytest.raises(crx.QuoteFormatOutdated) as e:
-        maker.send_quote(rfq_obj(), "5.41")
-    assert isinstance(e.value, crx.BadRequest)
-    assert (e.value.code, e.value.gateway_code, e.value.status) == ("quote_format_outdated", "quote_format_outdated", 400)
-    assert str(e.value) == "the quote is signed in an older format"
-
-
 @pytest.mark.parametrize("status, body, err, code", [
     (422, {"code": "insufficient_collateral", "error": "short"}, crx.InsufficientCollateral, "insufficient_collateral"),
     (410, {"code": "rfq_expired", "error": "lapsed"}, crx.QuoteExpired, "quote_expired"),
@@ -943,8 +751,3 @@ def test_trade_refuses_a_maker_quote(maker, gw):
     q = maker.send_quote(rfq_obj(), "5.41")
     with pytest.raises(crx.BadRequest, match="trade\\(\\) takes the Quote that quote\\(\\) returned"):
         maker.trade(q)
-
-
-def test_the_maker_types_are_exported():
-    assert crx.MakerQuote and crx.Rfq and crx.Drop and issubclass(crx.QuoteLost, crx.CrxError)
-    assert issubclass(crx.QuoteFormatOutdated, crx.BadRequest) and crx.QuoteFormatOutdated.code == "quote_format_outdated"

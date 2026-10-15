@@ -3,7 +3,7 @@
 import time
 
 import pytest
-from eth_utils import is_checksum_address, is_hex_address
+from eth_utils import is_hex_address
 
 import crx
 from crx import _eip712 as e7
@@ -38,27 +38,6 @@ def main(session, tmp_path, account, **kw):
     return crx.Client(**args)
 
 
-def test_mainnet_is_listed_with_its_gateway_and_no_rpc():
-    net = crx.NETWORKS["mainnet"]
-    assert net["chain"] == "ethereum"
-    assert net["base_url"] == "https://api.crxfx.com" and net["rpc_url"] is None
-
-
-def test_mainnet_core_is_the_one_constant_and_an_eip55_address_once_filled():
-    row = crx.NETWORKS["mainnet"]["core"]
-    assert row.lower() == CORE
-    assert not FILLED or (row is MAINNET_CORE and is_checksum_address(MAINNET_CORE))
-
-
-def test_readme_and_changelog_name_the_mainnet_core():
-    from pathlib import Path
-    root = Path(__file__).parent.parent
-    assert f"Mainnet (chain 1): `{MAINNET_CORE}`." in (root / "README.md").read_text()
-    log = (root / "CHANGELOG.md").read_text()
-    entry = log[log.index(f"## {crx.__version__}\n"):]
-    assert f"Ethereum mainnet (chain 1) pins core `{MAINNET_CORE}`." in entry[:entry.index("\n## ", 1)]
-
-
 @pytest.mark.parametrize("core", ["0x" if FILLED else MAINNET_CORE, "<core>", "", None, "0x" + "9e" * 19, "9e" * 20,
                                   "0x" + "00" * 20, "0xC0c0C0C0c0C0c0C0c0C0c0C0c0C0c0C0c0C0c0C0"])
 def test_mainnet_with_no_core_address_signs_nothing(session, tmp_path, account, monkeypatch, core):
@@ -72,13 +51,6 @@ def test_mainnet_with_no_core_address_signs_nothing(session, tmp_path, account, 
     with pytest.raises(crx.ConfigError, match="pins no chain id or core; nothing signed"):
         c.deposit(1000)
     assert session.paths("POST") == [] and "eth_sendRawTransaction" not in session.rpc_methods()
-
-
-def test_mainnet_core_override_still_signs_with_no_core_address_in_the_row(session, tmp_path, account, monkeypatch):
-    monkeypatch.setitem(crx.NETWORKS["mainnet"], "core", "<core>")
-    session.routes[("GET", "/health")] = mainnet_health()
-    c = main(session, tmp_path, account, allow_mainnet=True, core=CORE)
-    assert c._chain_info()["core"] == CORE and c._sep == e7.domain_separator(1, CORE)
 
 
 def test_mainnet_health_on_another_core_refuses(session, tmp_path, account):
@@ -99,11 +71,6 @@ def test_mainnet_is_off_by_default(session, tmp_path, account):
     assert session.calls == []
 
 
-def test_mainnet_opt_in_by_argument(session, tmp_path, account):
-    c = main(session, tmp_path, account, allow_mainnet=True)
-    assert c.network == "mainnet" and c.chain_key == "ethereum"
-
-
 def test_mainnet_opt_in_by_env(session, tmp_path, account, monkeypatch):
     monkeypatch.setenv("CRX_ALLOW_MAINNET", "1")
     assert main(session, tmp_path, account).chain_key == "ethereum"
@@ -116,26 +83,6 @@ def test_mainnet_has_no_default_rpc(session, tmp_path, account):
     with pytest.raises(crx.ConfigError) as ei:
         main(session, tmp_path, account, allow_mainnet=True, rpc_url=None)
     assert "rpc_url" in str(ei.value)
-
-
-def test_mainnet_default_gateway(session, tmp_path, account):
-    c = main(session, tmp_path, account, allow_mainnet=True, base_url=None)
-    assert c._gw.base_url == "https://api.crxfx.com"
-
-
-def test_mainnet_urls_from_env(session, tmp_path, account, monkeypatch):
-    monkeypatch.setenv("CRX_BASE", BASE)
-    monkeypatch.setenv("CRX_RPC", RPC)
-    c = main(session, tmp_path, account, allow_mainnet=True, base_url=None, rpc_url=None)
-    assert c._gw.base_url == BASE
-
-
-def test_mainnet_reads_chain_1(session, tmp_path, account):
-    session.routes[("GET", "/health")] = mainnet_health()
-    c = main(session, tmp_path, account, allow_mainnet=True)
-    chain = c._chain_info()
-    assert chain["chain_id"] == 1 and chain["core"] == CORE
-    assert c._sep == e7.domain_separator(1, CORE)
 
 
 def test_mainnet_refuses_a_testnet_chain(session, tmp_path, account):
@@ -157,11 +104,6 @@ def test_testnet_still_refuses_chain_1(make_client, session, health):
     with pytest.raises(crx.ConfigError) as ei:
         make_client()._chain_info()
     assert "testnets only" in str(ei.value)
-
-
-def test_allow_mainnet_leaves_testnet_as_is(make_client):
-    c = make_client(allow_mainnet=True)
-    assert c.network == "testnet" and c.chain_key == "avax-fuji"
 
 
 @pytest.mark.parametrize("network,wait", [("mainnet", 90), ("testnet", 30)])

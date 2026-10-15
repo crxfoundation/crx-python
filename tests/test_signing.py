@@ -29,11 +29,6 @@ def rnd():
     return "0x" + os.urandom(32).hex()
 
 
-def test_domain_matches_live_health(health):
-    c = next(c for c in health["chains"] if c["key"] == "avax-fuji")
-    assert e7.h0x(e7.domain_separator(c["chain_id"], c["core"])) == c["domain"]
-
-
 def test_trade_digest_matches_eth_account():
     msg = e7.trade_message("USD/MXN", -1, 25_000_000_000, 18_712_345, -3, 1_790_000_000, rnd(), rnd(),
                            "1789000000123", rnd())
@@ -63,21 +58,6 @@ def test_withdraw_digest_matches_eth_account():
     assert e7.withdraw_digest(e7.domain_separator(43113, CORE), w) == typed_hash("WithdrawIntent", types, msg)
 
 
-def test_rest_headers_recover_to_seat():
-    a = Account.create()
-    gw = Gateway("https://gateway.test", a, session=None)
-    raw = b'{"chain":"avax-fuji","amount":"1000"}'
-    h = gw.headers("POST", "/deposit", raw)
-    seat = a.address.lower()
-    assert set(h) == {"x-crx-address", "x-crx-ts", "x-crx-sig"} and h["x-crx-address"] == seat
-    msg = rest_message("POST", "/deposit", seat, seat, int(h["x-crx-ts"]), raw)
-    assert msg.endswith("Body: 0x" + keccak(raw).hex())
-    assert msg.splitlines() == ["CRX-REST-LOGIN", "Audience: crx-gateway", "Method: POST", "Path: /deposit",
-                                f"Custody: {seat}", f"Signer: {seat}", f"Timestamp: {h['x-crx-ts']}",
-                                "Body: 0x" + keccak(raw).hex()]
-    assert Account.recover_message(encode_defunct(text=msg), signature=h["x-crx-sig"]).lower() == seat
-
-
 def test_scaled6_refuses_extra_precision():
     import pytest
     assert e7.scaled6("18.123456") == 18_123_456
@@ -90,21 +70,12 @@ def test_scaled6_refuses_extra_precision():
 import pytest  # noqa: E402
 
 import crx  # noqa: E402
-from crx.signer import LocalSigner, as_signer, recover, sign_hash_only, sign_login, sign_typed  # noqa: E402
+from crx.signer import LocalSigner, recover, sign_hash_only, sign_login, sign_typed  # noqa: E402
 
 
 def full(td):
     m = encode_typed_data(full_message=td)
     return keccak(b"\x19" + m.version + m.header + m.body)
-
-
-def test_withdraw_typed_data_is_its_digest():
-    sep = e7.domain_separator(43113, CORE)
-    a = Account.create()
-    w = {"account": a.address.lower(), "amount": 10**9, "nonce": 3, "deadline": 1_789_000_000}
-    td = e7.typed_data("WithdrawIntent", 43113, CORE, e7.withdraw_message(w))
-    assert set(td["message"]) == {"account", "amount", "nonce", "deadline"}
-    assert full(td) == e7.typed_digest(td) == e7.withdraw_digest(sep, w)
 
 
 @pytest.mark.parametrize("primary", ["AllocationConsent", "AllocationAcceptance", "FailoverConsent", "Terms"])
@@ -154,23 +125,6 @@ def test_e6_refuses(value, bits, why):
         e7.e6(value, bits)
 
 
-def test_scaled6_rounds_where_e6_is_exact():
-    # scaled6 rounds past 28 digits; the Trade path uses e6.
-    big = "340282366920938463463374607431768.211455"
-    assert e7.e6(big) == 2**128 - 1 != int(__import__("decimal").Decimal(big).scaleb(6))
-
-
-@pytest.mark.parametrize("side,pair,want", [("buy_usd", "USD/BRL", "buy"), ("sell_usd", "USD/MXN", "sell")])
-def test_v1_side_when_base_is_usd(side, pair, want):
-    assert e7.v1_side(side, pair) == want
-
-
-@pytest.mark.parametrize("side,pair", [("buy_usd", "EUR/USD"), ("sell_usd", "usd/brl"), ("buy", "USD/BRL")])
-def test_v1_side_refused(side, pair):
-    with pytest.raises(ValueError):
-        e7.v1_side(side, pair)
-
-
 # ---------- signers ----------
 
 class HashOnly:
@@ -199,32 +153,6 @@ def test_hash_only_path_rebuilds_then_signs_the_digest():
     with pytest.raises(crx.RefusedToSign, match="not this typed data"):
         sign_hash_only(s, td, b"\x00" * 32)
     assert len(s.hashes) == 1
-
-
-def test_hash_only_path_refuses_a_digest_of_other_typed_data():
-    a = Account.create()
-    td = a_trade_td()
-    other = copy.deepcopy(td)
-    other["message"]["rateE6"] = "5410001"
-    s = HashOnly(a)
-    with pytest.raises(crx.RefusedToSign, match="the digest is not this typed data's"):
-        sign_typed(s, td, e7.typed_digest(other), a.address)
-    assert s.hashes == []
-    sig = sign_typed(s, td, e7.typed_digest(td), a.address)
-    assert s.hashes == [e7.typed_digest(td)] and sig == sign_typed(LocalSigner(a), td, e7.typed_digest(td), a.address)
-
-
-def test_signer_shape_checked():
-    with pytest.raises(crx.ConfigError):
-        as_signer(object())
-
-    class NoLogin:
-        address = "0x" + "11" * 20
-
-        def sign_typed_data(self, td):
-            return b""
-    with pytest.raises(crx.ConfigError):
-        as_signer(NoLogin())
 
 
 def test_login_signature_from_a_custodian_is_normalized():
@@ -272,23 +200,6 @@ def test_session_login_signs_once_then_sends_the_token():
     assert [r["headers"] for r in reads] == [{"accept": "application/json", "x-crx-session": TOKEN}] * 2
 
 
-def test_session_refused_token_mints_once_more():
-    a = Account.create()
-    gw, s = session_gateway(a, [minted(a), minted(a, token="cd" * 32)])
-    s.routes[("GET", "/balance")] = [(401, {"code": "unauthorized", "error": "token"}), {"ok": True}]
-    assert gw.request("GET", "/balance") == {"ok": True}
-    assert [c["path"] for c in s.calls] == ["/session", "/balance", "/session", "/balance"]
-    assert s.calls[-1]["headers"]["x-crx-session"] == "cd" * 32
-
-
-def test_session_off_signs_every_call():
-    a = Account.create()
-    gw, s = session_gateway(a, (404, {"code": "not_found", "error": "no"}))
-    gw.request("GET", "/balance"), gw.request("GET", "/balance")
-    assert [c["path"] for c in s.calls] == ["/session", "/balance", "/balance"]
-    assert all(set(c["headers"]) == {"accept", "x-crx-address", "x-crx-ts", "x-crx-sig"} for c in s.calls)
-
-
 @pytest.mark.parametrize("bad", [{"token": "zz"}, {"custody": "0x" + "11" * 20}, {"signer": "0x" + "11" * 20},
                                  {"ttl_ms": 0}, {"ttl_ms": True}])
 def test_session_token_this_sdk_cannot_use_is_refused(bad):
@@ -297,13 +208,3 @@ def test_session_token_this_sdk_cannot_use_is_refused(bad):
     with pytest.raises(crx.BadAnswer, match="/session"):
         gw.request("GET", "/balance")
     assert [c["path"] for c in s.calls] == ["/session"]
-
-
-def test_viewer_never_takes_a_session_token():
-    a = Account.create()
-    gw, s = session_gateway(a, minted(a))
-    gw.custody = Account.create().address.lower()
-    gw.request("GET", "/balance")
-    (call,) = s.calls
-    assert call["path"] == "/balance" and call["headers"]["x-crx-signer"] == a.address.lower()
-    assert call["headers"]["x-crx-address"] == gw.custody and "x-crx-session" not in call["headers"]

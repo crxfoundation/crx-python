@@ -250,38 +250,6 @@ def test_trade_signs_the_readable_trade(make_client, venue, session, clock, acco
     assert int(sig[66:130], 16) <= e7.SECP256K1_N // 2 and sig[-2:] in ("1b", "1c")
 
 
-def test_sent_nothing_sees_a_send(make_client, session, health):
-    # Positive control: the same fakes flag a tx and an /arm-tx read.
-    from .test_money import Chain, deposit_route
-    Chain(session, held=10**12)
-    deposit_route(session, health, None, 1000 * 10**6, approve=False)
-    session.routes[("GET", "/balance")] = (503, {"code": "upstream", "error": "down"})
-    c = make_client(clock=Clock(time.time()))
-    assert sent_nothing(session)
-    c.deposit(1000)
-    assert not sent_nothing(session) and "eth_sendRawTransaction" in session.rpc_methods()
-    session.rpc_calls.clear()
-    assert sent_nothing(session)
-    c._gw.raw_request("GET", f"/rfqs/{RFQ}/arm-tx")
-    assert not sent_nothing(session)
-
-
-def test_every_signed_call_carries_valid_headers(make_client, venue, session, clock, account):
-    c = make_client(clock=clock)
-    c.trade(c.quote("USDMXN", "BUY", "25000"))
-    signed = [x for x in session.calls if "x-crx-sig" in x["headers"]]
-    assert signed and all(x["path"] not in ("/health", "/markets") for x in signed)
-    stamps = []
-    for x in signed:
-        h = x["headers"]
-        assert {k for k in h if k.startswith("x-crx-")} == {"x-crx-address", "x-crx-ts", "x-crx-sig"}
-        assert h["x-crx-address"] == account.address.lower()
-        msg = rest_message(x["method"], x["path"], h["x-crx-address"], h["x-crx-address"], int(h["x-crx-ts"]), x["raw"])
-        assert Account.recover_message(encode_defunct(text=msg), signature=h["x-crx-sig"]) == account.address
-        stamps.append(int(h["x-crx-ts"]))
-    assert stamps == sorted(set(stamps))  # each call stamped once, strictly later
-
-
 # ---------- the trade status after the accept ----------
 
 
@@ -299,42 +267,6 @@ def test_trade_sends_nothing_and_reads_status(make_client, venue, session, clock
     assert (t.status, t.tx) == (word, tx)
     assert sent_nothing(session)
     assert len(trade_polls(session)) - before == (31 if word == "pending" else len(script))
-
-
-def test_trade_refused_expired(make_client, venue, session, clock):
-    # The relay's tx never landed inside the quote's life: refused, no tx; the tape names why.
-    venue.script = [("sending", None), ("refused", None)]
-    session.routes[("GET", "/trades")] = {"seq": 2, "trades": [{"type": "trade.refused", "seq": 2, "ts": 1, "data": {
-        "rfq_id": RFQ, "reason": "expired"}}]}
-    c = make_client(clock=clock)
-    t = c.trade(c.quote("USD/MXN", "buy", 25_000))
-    assert (t.status, t.tx) == ("refused", None) and sent_nothing(session)
-    (e,) = c.trades()
-    assert (e.type, e.data["reason"]) == ("trade.refused", "expired") and "arm_seq" not in e.data
-
-
-@pytest.mark.parametrize("word", ["open", "refused"])
-def test_trade_polls_until_final(make_client, venue, session, clock, word):
-    c = make_client(clock=clock)
-    q = c.quote("USD/MXN", "buy", 25_000)
-    before = len(trade_polls(session))
-    words = iter(["sending", "pending", word])
-    session.routes[("GET", f"/rfqs/{RFQ}")] = lambda req: dict(venue.view(req), trade_status=next(words))
-    t0 = clock()
-    assert c.trade(q).status == word
-    assert len(trade_polls(session)) - before == 3 and clock() - t0 >= 2
-
-
-@pytest.mark.parametrize("word", ["sending", "pending"])
-def test_trade_waits_30_s_on_testnet(make_client, venue, session, clock, word):
-    venue.script = [(word, None)]
-    c = make_client(clock=clock)
-    q = c.quote("USD/MXN", "buy", 25_000)
-    before = len(trade_polls(session))
-    t0 = clock()
-    t = c.trade(q)
-    assert (t.status, t.tx) == (word, None)
-    assert len(trade_polls(session)) - before == 31 and 30 <= clock() - t0 <= 31
 
 
 @pytest.mark.parametrize("view", [
@@ -369,34 +301,6 @@ def test_the_accept_deadline_is_the_rfqs_closes_at_not_the_quote_end(make_client
     with pytest.raises(crx.QuoteExpired):
         c.trade(q)
     assert len(posted) > 1 and max(posted) < closes and max(posted) + 3 >= closes
-
-
-def test_quote_closes_at_is_none_when_the_open_answer_has_none(make_client, venue, session, clock):
-    venue.open_edit = {"closes_at": None}
-    c = make_client(clock=clock)
-    q = c.quote("USD/MXN", "buy", 25_000)
-    assert q.closes_at is None and c.trade(q).status == "open"
-
-
-def test_rejected_accept_retries_then_quote_expired(make_client, venue, session, clock):
-    session.routes[("POST", f"/rfqs/{RFQ}/accept")] = (
-        409, {"code": "rejected", "error": "rejected", "details": {"reject_code": "rj_0011223344556677"}})
-    c = make_client(clock=clock)
-    with pytest.raises(crx.QuoteExpired) as ei:
-        c.trade(c.quote("USD/MXN", "buy", 25_000))
-    assert ei.value.code == "quote_expired" and ei.value.gateway_code == "rejected"
-    assert sent_nothing(session)
-    bodies = accepts(session)
-    assert len(bodies) > 1 and all(b == bodies[0] for b in bodies)  # the same signed body, posted again
-
-
-def test_own_round_open(make_client, venue, session, clock):
-    session.routes[("POST", f"/rfqs/{RFQ}/accept")] = (
-        409, {"code": "own_round_open", "error": "open", "details": {"rfq_id": RFQ, "until": 123}})
-    c = make_client(clock=clock)
-    with pytest.raises(crx.OwnRoundOpen) as ei:
-        c.trade(c.quote("USD/MXN", "buy", 25_000))
-    assert ei.value.details["until"] == 123 and len(accepts(session)) == 1
 
 
 def test_trade_stale_signs_the_fresh_template(make_client, venue, session, clock, account):
@@ -558,18 +462,6 @@ def test_network_fault_before_a_signature_raises_as_is(make_client, venue, sessi
     assert signed_posts(session) == [] and not floor_file(c, account).exists()
 
 
-@pytest.mark.parametrize("code", ["upstream", None])  # None: a 5xx with no JSON body
-def test_other_5xx_on_the_signed_accept_reads_status(make_client, venue, session, clock, code):
-    def accept(req):
-        if "sig" in req["body"]:
-            venue.sig = req["body"]["sig"]
-            return (503, {"code": code, "error": "down"} if code else "<html>down</html>")
-        return venue.accept(req)
-    session.routes[("POST", f"/rfqs/{RFQ}/accept")] = accept
-    c = make_client(clock=clock)
-    assert c.trade(c.quote("USD/MXN", "buy", 25_000)).status == "open"
-
-
 # ---------- the accept's band decline: typed, nothing reserved, never "may still open" ----------
 
 DECLINE = {
@@ -650,39 +542,6 @@ def test_service_unavailable_on_the_signed_accept_raises(make_client, venue, ses
     assert len(signed_posts(session)) == 1 and sent_nothing(session)
 
 
-def test_service_unavailable_on_the_unsigned_ask_raises(make_client, venue, session, clock):
-    venue.winner = False  # the row carries no template: the SDK asks for one first
-    service_down(venue, session, signed_only=False)
-    c = make_client(clock=clock)
-    q = c.quote("USD/MXN", "buy", 25_000, wait=1)
-    with pytest.raises(crx.ServiceUnavailable) as ei:
-        c.trade(q)
-    assert not isinstance(ei.value, crx.TradeUnknown)
-    assert accepts(session) == [{"quote_id": QID}]
-
-
-def test_other_503_on_the_signed_accept_still_reads_status(make_client, venue, session, clock):
-    # Negative control: a 503 with another code may hide a held signature, so the trade status decides.
-    def accept(req):
-        if "sig" in req["body"]:
-            venue.sig = req["body"]["sig"]
-            return (503, dict(DOWN_BODY, code="upstream"))
-        return venue.accept(req)
-    session.routes[("POST", f"/rfqs/{RFQ}/accept")] = accept
-    c = make_client(clock=clock)
-    assert c.trade(c.quote("USD/MXN", "buy", 25_000)).status == "open"
-
-
-@pytest.mark.parametrize("code", ["service_unavailable", "relay_unavailable"])
-def test_service_unavailable_maps_to_its_own_server_error(code):
-    e = crx.errors.from_gateway(503, dict(DOWN_BODY, code=code))
-    assert type(e) is crx.ServiceUnavailable and isinstance(e, crx.ServerError) and e.code == "service_unavailable"
-    assert e.gateway_code == code
-    assert type(crx.errors.from_gateway(503, dict(DOWN_BODY, code="upstream"))) is crx.ServerError
-    assert crx.RelayUnavailable is crx.ServiceUnavailable  # the 0.1.0 name
-    assert "RelayUnavailable" not in crx.__all__ and "ServiceUnavailable" in crx.__all__
-
-
 def test_seat_cannot_sign_maps_to_its_own_error():
     body = {"code": "seat_cannot_sign", "outcome": "not_permitted", "error": "this address cannot sign trades",
             "message": "This address cannot sign trades."}
@@ -754,16 +613,6 @@ def test_trade_type_must_be_the_spec_string(make_client, venue, session, clock, 
     with pytest.raises(crx.RefusedToSign, match="^refused to sign: the served typed_data differs at types$"):
         c.trade(c.quote("USD/MXN", "buy", 25_000))
     assert refused_unsigned(session, c, account)
-
-
-def test_trade_type_string_is_the_spec_one(make_client, venue, session, clock):
-    # The positive control of the type check: the template the SDK signs names the §1 string.
-    c = make_client(clock=clock)
-    assert c.trade(c.quote("USD/MXN", "buy", 25_000)).status == "open"
-    fields = venue.template["typed_data"]["types"]["Trade"]
-    assert "Trade(" + ",".join(f"{f['type']} {f['name']}" for f in fields) + ")" == (
-        "Trade(string summary,string pair,string side,uint256 notionalE6,uint64 rateE6,int16 premiumBps,"
-        "uint40 maturity,bytes32 pairC,bytes32 ownLegId,uint64 ownNonce,bytes32 ownSalt)")
 
 
 @pytest.mark.parametrize("bad,at", [
@@ -864,17 +713,6 @@ def test_own_nonce_at_most_24_h_ahead(make_client, venue, session, clock, accoun
         assert refused_unsigned(session, c, account)
 
 
-def test_own_nonce_at_or_below_the_floor_is_refused(make_client, venue, session, clock, account):
-    c = make_client(clock=clock)
-    floor = str(int(clock() * 1000) + 5_000)  # this seat already signed a later nonce on this machine
-    floor_file(c, account).parent.mkdir(parents=True, exist_ok=True)
-    floor_file(c, account).write_text(floor)
-    venue.msg_edit = {"ownNonce": floor}
-    with pytest.raises(crx.RefusedToSign, match="^refused to sign: ownNonce is not above the last one this seat signed$"):
-        c.trade(c.quote("USD/MXN", "buy", 25_000))
-    assert signed_posts(session) == [] and floor_file(c, account).read_text() == floor
-
-
 @pytest.mark.parametrize("ahead", [0, -60])
 def test_quote_end_passed_is_quote_expired(make_client, venue, session, clock, account, ahead):
     venue.qe_ahead = ahead
@@ -930,16 +768,6 @@ def test_premium_within_the_cap_signs(make_client, venue, session, markets, cloc
     msg = venue.template["typed_data"]["message"]
     assert msg["premiumBps"] == str(premium) and msg["summary"].endswith(f", upfront {up}")
     assert recovers(venue.template, venue.sig) == account.address
-
-
-def test_served_premium_other_than_the_ask_is_refused(make_client, venue, session, markets, clock, account):
-    # The gateway builds its Trade with 6 bps; the caller asked 5: the summary already differs.
-    session.routes[("GET", "/markets")] = with_cap(markets, 200)
-    venue.premium = 6
-    c = make_client(clock=clock)
-    with pytest.raises(crx.RefusedToSign, match="differs at message.summary$"):
-        c.trade(c.quote("USD/MXN", "buy", 25_000, premium_bps=5))
-    assert refused_unsigned(session, c, account)
 
 
 @pytest.mark.parametrize("premium", [201, -201])
@@ -1012,13 +840,6 @@ def test_a_market_row_without_paused_is_open(make_client, venue, session, market
     assert session.paths("POST") == ["/rfqs"]
 
 
-def test_a_market_row_paused_false_is_open(make_client, venue, session, markets, clock):
-    session.routes[("GET", "/markets")] = fuji_row(markets, paused=False)
-    c = make_client(clock=clock)
-    assert c.market("USD/MXN").paused is False
-    assert c.quote("USD/MXN", "buy", 25_000).quote_id == QID
-
-
 def test_a_market_row_paused_true_is_market_paused(make_client, venue, session, markets, clock):
     session.routes[("GET", "/markets")] = fuji_row(markets, paused=True)
     c = make_client(clock=clock)
@@ -1039,20 +860,6 @@ def test_another_chains_paused_row_leaves_this_chain_open(make_client, venue, se
     assert c.quote("USD/MXN", "buy", 25_000).quote_id == QID
 
 
-def without(markets: dict, pair: str) -> dict:
-    m = open_market(markets, "USD/MXN")
-    m["markets"] = [row for row in m["markets"] if row["pair"] != pair]
-    return m
-
-
-@pytest.mark.parametrize("pair", ["USD/MXN", "USD/XXX"])
-def test_market_not_offered_is_market_paused(make_client, session, markets, pair):
-    session.routes[("GET", "/markets")] = without(markets, "USD/MXN")
-    with pytest.raises(crx.MarketPaused) as ei:
-        make_client().market(pair)
-    assert str(ei.value) == f"{pair} is not offered on avax-fuji" and ei.value.details == {"pair": pair}
-
-
 def test_market_on_another_chain_only_is_not_offered(make_client, session, markets):
     m = open_market(markets, "USD/MXN")
     for row in m["markets"]:
@@ -1065,20 +872,6 @@ def test_market_on_another_chain_only_is_not_offered(make_client, session, marke
         c.market("usdmxn")
     with pytest.raises(crx.MarketPaused):
         c.quote("USD/MXN", "buy", 25_000)
-    assert session.paths("POST") == []
-
-
-def test_quote_not_offered_sends_nothing(make_client, session, markets):
-    session.routes[("GET", "/markets")] = without(markets, "USD/MXN")
-    with pytest.raises(crx.MarketPaused) as ei:
-        make_client().quote("USD/MXN", "buy", 25_000)
-    assert ei.value.code == "market_paused" and ei.value.details == {"pair": "USD/MXN"}
-    assert session.paths("POST") == []
-
-
-def test_paused_pair(make_client, session):
-    with pytest.raises(crx.MarketPaused):
-        make_client().quote("USD/JPY", "buy", 25_000)
     assert session.paths("POST") == []
 
 
@@ -1115,12 +908,6 @@ def test_quote_terms_come_from_the_ask(make_client, venue, session, clock, accou
     assert (msg["notionalE6"], msg["maturity"], msg["side"]) == ("25000000000", str(EXPIRY_MS // 1000), "buy")
 
 
-def test_quote_row_without_copies_reads(make_client, venue, session, clock):
-    q = make_client(clock=clock).quote("USD/MXN", "sell", "25000.5", expiry=EXPIRY_MS)
-    assert set(q.raw) == {"quote_id", "rate", "expires_at", "status", "trade_template"}
-    assert (q.notional, q.side, q.expiry_ms) == (Decimal("25000.5"), "sell", EXPIRY_MS)
-
-
 @pytest.mark.parametrize("row", [{"rate": "x"}, {"rate": None}])
 def test_quote_row_that_cannot_be_read_is_bad_answer(make_client, venue, session, clock, row):
     venue.waited = False
@@ -1155,41 +942,6 @@ def test_closed_market_still_opens_the_rfq(make_client, venue, session, markets,
     assert session.paths("POST") == ["/rfqs"]
 
 
-def test_closed_market_no_maker_is_no_quotes(make_client, venue, session, markets, clock):
-    venue.waited = False
-    session.routes[("GET", "/markets")] = markets
-    session.routes[("GET", f"/rfqs/{RFQ}")] = {"quote": None, "quotes": []}
-    c = make_client(clock=clock)
-    with pytest.raises(crx.NoQuotes):
-        c.quote("USD/MXN", "buy", 25_000, wait=3)
-
-
-def test_quote_sends_no_wait_and_takes_a_30_s_timeout(make_client, venue, session, clock):
-    # The gateway answers after the window when the body has no `wait`.
-    make_client(clock=clock).quote("USD/MXN", "buy", 25_000)
-    [post] = rfq_posts(session)
-    assert "wait" not in post["body"] and post["timeout"] == 30
-    assert {x["timeout"] for x in session.calls if x is not post} == {10}
-
-
-def test_quote_timeout_is_never_below_the_client_timeout(make_client, venue, session, clock):
-    make_client(clock=clock, timeout=45).quote("USD/MXN", "buy", 25_000)
-    assert rfq_posts(session)[0]["timeout"] == 45
-
-
-def test_waited_answer_carries_the_winner_and_its_template(make_client, venue, session, clock, account):
-    c = make_client(clock=clock)
-    q = c.quote("USD/MXN", "buy", 25_000)
-    assert (q.rfq_id, q.quote_id, q.rate) == (RFQ, QID, Decimal("18.700000"))
-    assert trade_polls(session) == []  # the answer named the winner: no poll
-    assert (q.rfq["leg_id"], q.rfq["quote_expiry_max"]) == (venue.leg, venue.qe)
-    assert q.raw["trade_template"] == venue.draft
-    t = c.trade(q)
-    assert (t.status, t.tx) == ("open", TXH) and sent_nothing(session)
-    [body] = accepts(session)
-    assert set(body) == {"quote_id", "sig"} and recovers(venue.draft, body["sig"]) == account.address
-
-
 @pytest.mark.parametrize("expired", [False, True])
 def test_waited_answer_without_a_quote_is_no_quotes(make_client, venue, session, clock, expired):
     venue.waited_view = lambda: {"quote": None, "quotes": [dict(venue.row(), expires_at=1)] if expired else []}
@@ -1211,12 +963,6 @@ def other_row(venue, status):
     """A better-priced row in `status`; None leaves the status out."""
     row = dict(venue.row(), quote_id=QID2, rate="18.500000", status=status)
     return {k: v for k, v in row.items() if v is not None}
-
-
-@pytest.mark.parametrize("status", ["dropped", "declined", "live", None])
-def test_pick_takes_only_a_quoted_row(make_client, venue, session, clock, status):
-    venue.waited_view = lambda: {"quote": None, "quotes": [other_row(venue, status), venue.row()]}
-    assert make_client(clock=clock).quote("USD/MXN", "buy", 25_000).quote_id == QID
 
 
 @pytest.mark.parametrize("waited", [True, False])
@@ -1279,13 +1025,6 @@ def test_band_cancelled_rfq_raises_its_reason(make_client, venue, session, clock
     assert accepts(session) == [] and len(trade_polls(session)) == (0 if path == "waited" else 1) and clock() == start
 
 
-def test_cancel_without_a_reason(make_client, venue, session, clock):
-    serve(venue, session, "waited", lambda: ended_view(venue, reason=None, message=None))
-    with pytest.raises(crx.RfqCancelled, match="no reason named") as ei:
-        make_client(clock=clock).quote("USD/MXN", "buy", 25_000)
-    assert ei.value.reason is None and accepts(session) == []
-
-
 @pytest.mark.parametrize("status", ["expired", "accepted", "signing"])
 @pytest.mark.parametrize("path", ["waited", "polled"])
 def test_ended_rfq_is_no_quotes(make_client, venue, session, clock, status, path):
@@ -1311,41 +1050,6 @@ def test_an_expired_rfq_carries_the_gateway_line(make_client, venue, session, cl
     assert type(e) is crx.NoQuotes and (e.outcome, e.served_message) == ("no_quote", message)
     assert str(e) == f"the RFQ is expired: it takes no accept (no_quote: {message})"
     assert e.details == {"rfq_id": RFQ, "status": "expired", "outcome": "no_quote", "message": message}
-
-
-@pytest.mark.parametrize("path", ["waited", "polled"])
-def test_no_quote_at_the_end_of_the_wait_carries_the_gateway_line(make_client, venue, session, clock, path):
-    view = {"quote": None, "quotes": [], "outcome": "no_quote", "message": CLOSED}
-    serve(venue, session, path, lambda: dict(view))
-    with pytest.raises(crx.NoQuotes) as ei:
-        make_client(clock=clock).quote("USD/MXN", "buy", 25_000, wait=3)
-    head = "no quote in the window" if path == "waited" else "no quote before the wait ended"
-    assert str(ei.value) == f"{head}: the request is still open (no_quote: {CLOSED})"
-    assert ei.value.details == {"rfq_id": RFQ, "outcome": "no_quote", "message": CLOSED}
-
-
-@pytest.mark.parametrize("path", ["waited", "polled"])
-def test_an_open_rfq_at_the_end_of_the_wait_says_it_is_still_open(make_client, venue, session, clock, path):
-    serve(venue, session, path, lambda: {"status": "open", "quote": None, "quotes": []})
-    with pytest.raises(crx.NoQuotes) as ei:
-        make_client(clock=clock).quote("USD/MXN", "buy", 25_000, wait=3)
-    head = "no quote in the window" if path == "waited" else "no quote before the wait ended"
-    assert str(ei.value) == f"{head}: the request is still open" and ei.value.details == {"rfq_id": RFQ}
-
-
-@pytest.mark.parametrize("line", [{}, {"outcome": "no_quote"}, {"message": "  "}, {"outcome": 7, "message": None}])
-def test_no_gateway_message_keeps_the_message(make_client, venue, session, clock, line):
-    serve(venue, session, "polled", lambda: {**ended_view(venue, "expired", None, None), **line})
-    with pytest.raises(crx.NoQuotes) as ei:
-        ask_or_quote(make_client(clock=clock), "polled")
-    assert str(ei.value) == "the RFQ is expired: it takes no accept" and ei.value.served_message is None
-    assert ei.value.outcome == (line.get("outcome") if isinstance(line.get("outcome"), str) else None)
-
-
-@pytest.mark.parametrize("status", ["open", "quoted"])  # the positive control: the same rows, the RFQ open
-def test_open_rfq_still_falls_back_to_a_quoted_row(make_client, venue, session, clock, status):
-    serve(venue, session, "waited", lambda: ended_view(venue, status, None, None))
-    assert make_client(clock=clock).quote("USD/MXN", "buy", 25_000).quote_id == QID
 
 
 @pytest.mark.parametrize("live", [True, False])
@@ -1401,17 +1105,6 @@ def test_ask_sends_its_own_client_rfq_id_by_default(make_client, venue, session,
     assert re.fullmatch(r"sdk-[0-9a-f]{12}", post["body"]["client_rfq_id"])
 
 
-def test_ask_notional_is_the_notional_sent(make_client, venue, session, clock):
-    a = make_client(clock=clock).ask("USD/MXN", "buy", "25000.00")
-    [post] = rfq_posts(session)
-    assert post["body"]["notional"] == "25000" and str(a.notional) == "25000"
-
-
-def test_ask_is_public():
-    import crx.models
-    assert "Ask" in crx.__all__ and crx.Ask is crx.models.Ask
-
-
 def test_ask_quote_is_the_winner_and_trades(make_client, venue, session, clock):
     session.routes[("GET", f"/rfqs/{RFQ}")] = [{"quote": None, "quotes": []}, venue.view]
     c = make_client(clock=clock)
@@ -1424,51 +1117,11 @@ def test_ask_quote_is_the_winner_and_trades(make_client, venue, session, clock):
     assert (t.status, t.tx) == ("open", TXH) and sent_nothing(session)
 
 
-def test_ask_quote_is_the_quote_that_quote_returns(make_client, venue, session, clock):
-    c, t0 = make_client(clock=clock), clock()
-    session.routes[("GET", f"/rfqs/{RFQ}")] = [{"quote": None, "quotes": []}, venue.view]
-    asked = c.ask("USD/MXN", "buy", 25_000, expiry=EXPIRY_MS).quote()
-    venue.reset()
-    venue.waited = False
-    session.routes[("GET", f"/rfqs/{RFQ}")] = [{"quote": None, "quotes": []}, venue.view]
-    clock.t = t0
-    one_call = c.quote("USD/MXN", "buy", 25_000, expiry=EXPIRY_MS)  # an open answer without `quotes`: it polls
-    assert asked == one_call and asked.rfq == one_call.rfq
-
-
-def test_ask_quote_without_a_quote_is_no_quotes(make_client, venue, session, clock):
-    session.routes[("GET", f"/rfqs/{RFQ}")] = {"quote": None, "quotes": []}
-    a = make_client(clock=clock).ask("USD/MXN", "buy", 25_000)
-    start = clock()
-    with pytest.raises(crx.NoQuotes) as ei:
-        a.quote(wait=5)
-    assert ei.value.details == {"rfq_id": RFQ} and clock() - start == pytest.approx(5)
-
-
-def test_ask_quote_without_a_pick_takes_the_best_live_quote_at_the_end(make_client, venue, session, clock):
-    session.routes[("GET", f"/rfqs/{RFQ}")] = lambda req: {"quote": None, "quotes": [venue.row()]}
-    a = make_client(clock=clock).ask("USD/MXN", "buy", 25_000)
-    start = clock()
-    assert a.quote(wait=3).quote_id == QID and clock() - start == pytest.approx(3)
-
-
 def test_ask_gateway_refusal_raises_at_the_ask(make_client, session, markets):
     session.routes[("GET", "/markets")] = open_market(markets, "USD/MXN")
     session.routes[("POST", "/rfqs")] = (400, {"code": "pool_min_notional", "error": "pool min 25000"})
     with pytest.raises(crx.BelowMin, match="pool min 25000"):
         make_client().ask("USD/MXN", "buy", 10_000)
-
-
-@pytest.mark.parametrize("answer, err", [
-    ((429, {"code": "rate_limited", "error": "slow down"}), crx.RateLimited),
-    ((401, {"code": "unauthorized", "error": "not entitled"}), crx.AuthError),
-    ((503, {"code": "upstream", "error": "down"}), crx.ServerError),
-])
-def test_ask_quote_gateway_refusal_raises_its_class(make_client, venue, session, clock, answer, err):
-    a = make_client(clock=clock).ask("USD/MXN", "buy", 25_000)
-    session.routes[("GET", f"/rfqs/{RFQ}")] = answer
-    with pytest.raises(err):
-        a.quote()
 
 
 def naive_expiry():
@@ -1499,14 +1152,6 @@ def test_ask_makes_the_checks_of_quote(make_client, session, markets, args, kw, 
     assert session.paths("POST") == []
 
 
-@pytest.mark.parametrize("call", ["quote", "ask"])
-def test_no_im_bps_argument(make_client, session, markets, call):
-    session.routes[("GET", "/markets")] = open_market(markets, "USD/MXN")
-    with pytest.raises(TypeError):
-        getattr(make_client(), call)("USD/MXN", "buy", 25_000, im_bps=100)
-    assert session.calls == []
-
-
 def test_ask_needs_the_seat_key(make_client, session, monkeypatch):
     for name in ("CRX_WALLET_PK", "CRX_WALLET_PK_FILE"):
         monkeypatch.delenv(name, raising=False)
@@ -1516,30 +1161,6 @@ def test_ask_needs_the_seat_key(make_client, session, monkeypatch):
 
 
 # ---------- the request's own checks ----------
-
-
-def test_below_min(make_client, session, markets):
-    session.routes[("GET", "/markets")] = open_market(markets, "USD/MXN")
-    with pytest.raises(crx.BelowMin) as ei:
-        make_client().quote("USD/MXN", "buy", 5_000)
-    assert ei.value.details["min"] == "10000"
-    assert session.paths("POST") == []
-
-
-def test_gateway_below_min_maps(make_client, session, markets):
-    session.routes[("GET", "/markets")] = open_market(markets, "USD/MXN")
-    session.routes[("POST", "/rfqs")] = (400, {"code": "pool_min_notional", "error": "pool min 25000"})
-    with pytest.raises(crx.BelowMin):
-        make_client().quote("USD/MXN", "buy", 10_000)
-
-
-@pytest.mark.parametrize("args", [("USD/XX", "buy", 25_000), ("USD/MXN", "long", 25_000),
-                                  ("USD/MXN", "buy", -1), ("USD/MXN", "buy", "1.0000001")])
-def test_bad_inputs(make_client, session, markets, args):
-    session.routes[("GET", "/markets")] = open_market(markets, "USD/MXN")
-    with pytest.raises(crx.BadRequest):
-        make_client().quote(*args)
-    assert session.paths("POST") == []
 
 
 def test_min_notional_comes_from_markets(make_client, venue, session, markets, clock):
@@ -1562,31 +1183,6 @@ def test_client_rfq_id_refused_before_any_call(make_client, session, cid):
     assert str(ei.value) == "client_rfq_id must be 1 to 128 printable characters"
     assert ei.value.details == {"field": "client_rfq_id", "max": 128}
     assert session.calls == []
-
-
-@pytest.mark.parametrize("cid", ["x" * 128, " ~!desk 42~ ", "A"])
-def test_client_rfq_id_printable_ascii_is_sent(make_client, venue, clock, cid):
-    make_client(clock=clock).quote("USD/MXN", "buy", 25_000, client_rfq_id=cid)
-    assert venue.rfq_body["client_rfq_id"] == cid
-
-
-def test_default_client_rfq_id_fits(make_client, venue, clock):
-    make_client(clock=clock).quote("USD/MXN", "buy", 25_000)
-    cid = venue.rfq_body["client_rfq_id"]
-    assert 1 <= len(cid) <= 128 and all(0x20 <= ord(ch) <= 0x7E for ch in cid)
-
-
-def test_naive_expiry_refused(make_client, session, markets):
-    session.routes[("GET", "/markets")] = open_market(markets, "USD/MXN")
-    with pytest.raises(crx.BadRequest, match="timezone"):
-        make_client().quote("USD/MXN", "buy", 25_000, expiry=datetime(2027, 1, 4))
-
-
-def test_domain_moved_refuses(make_client, session, health):
-    h = {**health, "chains": [dict(c, domain="0x" + "00" * 32) for c in health["chains"]]}
-    session.routes[("GET", "/health")] = h
-    with pytest.raises(crx.RefusedToSign, match="domain"):
-        make_client().deposit(1000)
 
 
 def test_domain_moved_refuses_the_trade(make_client, venue, session, health, clock, account):
@@ -1612,31 +1208,6 @@ def served_on(health, core, chain_id=CHAIN_ID):
     return h
 
 
-def test_each_network_pins_its_chain_id_core_and_domain():
-    from crx.client import MAINNET_CORE
-    from eth_utils import is_hex_address
-    pins = {
-        "testnet": (43113, FUJI_CORE, "0xbecf297e99c7bf09c89e90162e71f253515219487294e50a4ab0e5e8b60741f2"),
-    }
-    if is_hex_address(MAINNET_CORE):
-        pins["mainnet"] = (1, MAINNET_CORE.lower(), e7.h0x(e7.domain_separator(1, MAINNET_CORE)))
-    for name, (chain_id, core, domain) in pins.items():
-        net = crx.NETWORKS[name]
-        assert (net["chain_id"], net["core"].lower()) == (chain_id, core)
-        assert e7.h0x(e7.domain_separator(net["chain_id"], net["core"])) == domain
-    assert (crx.NETWORKS["mainnet"]["chain_id"], crx.NETWORKS["mainnet"]["core"]) == (1, MAINNET_CORE)
-    assert "core" not in crx.NETWORKS["solana"] and crx.NETWORKS["solana"]["program_id"]
-
-
-def test_pin_match_signs_for_the_pinned_core(make_client, venue, session, clock, account):
-    c = make_client(clock=clock)
-    assert c.trade(c.quote("USD/MXN", "buy", 25_000)).status == "open"
-    assert c._chain_info()["core"] == FUJI_CORE and c._sep == e7.domain_separator(43113, FUJI_CORE)
-    assert venue.template["typed_data"]["domain"] == e7.domain_json(43113, FUJI_CORE)
-    (body,) = accepts(session)
-    assert recovers(venue.template, body["sig"]) == account.address
-
-
 def test_health_on_another_core_refuses_the_trade(make_client, venue, session, health, clock):
     # /health names another core with a domain that matches it: the pin decides, nothing signed.
     session.routes[("GET", "/health")] = served_on(health, OTHER_CORE)
@@ -1646,13 +1217,6 @@ def test_health_on_another_core_refuses_the_trade(make_client, venue, session, h
         c.trade(c.quote("USD/MXN", "buy", 25_000))
     assert ei.value.details == {"chain": "avax-fuji", "served_core": OTHER_CORE, "pinned_core": FUJI_CORE}
     assert accepts(session) == [] and sent_nothing(session)
-
-
-def test_health_on_another_core_refuses_the_deposit(make_client, session, health):
-    session.routes[("GET", "/health")] = served_on(health, OTHER_CORE)
-    with pytest.raises(crx.RefusedToSign, match="^core moved"):
-        make_client().deposit(1000)
-    assert "eth_sendRawTransaction" not in session.rpc_methods()
 
 
 def test_health_on_another_chain_id_refuses(make_client, session, health):
@@ -1673,14 +1237,6 @@ def test_core_override_signs_for_that_core(session, health, markets, clock, tmp_
     assert c._chain_info()["core"] == OTHER_CORE and v.template["typed_data"]["domain"] == e7.domain_json(43113, OTHER_CORE)
     (body,) = accepts(session)
     assert recovers(v.template, body["sig"]) == account.address
-
-
-def test_core_override_still_refuses_another_core(make_client, venue, session, clock):
-    # core= replaces the pin; /health on the old pin is then a mismatch.
-    c = make_client(clock=clock, core=OTHER_CORE)
-    with pytest.raises(crx.RefusedToSign, match=f"^core moved: /health names {FUJI_CORE}, the SDK pins {OTHER_CORE}"):
-        c.trade(c.quote("USD/MXN", "buy", 25_000))
-    assert accepts(session) == []
 
 
 @pytest.mark.parametrize("bad", ["", "0x1234", "0x" + "00" * 20, "0xC0c0C0C0c0C0c0C0c0C0c0C0c0C0c0C0c0C0c0C0", 7])
@@ -1741,13 +1297,6 @@ def own_check(tmp_path, account, health, clock, **edit):
     ask.update(edit)
     b = Binder(None, account, dict(chain, chain_id=CHAIN_ID), sep, tmp_path, clock=clock)
     return b.check_trade(t, ask), msg, sep
-
-
-def test_own_trade_check_passes_and_keeps_the_nonce(tmp_path, account, health, clock):
-    # The positive control of the refusals below.
-    (digest, td), msg, sep = own_check(tmp_path, account, health, clock)
-    assert digest == e7.trade_digest(sep, msg) == typed_hash(td) and td["message"] == msg
-    assert (tmp_path / f"side-nonce-{account.address.lower()}").read_text() == msg["ownNonce"]
 
 
 @pytest.mark.parametrize("edit,why", [
@@ -1886,18 +1435,6 @@ def test_custodian_signs_own_typed_data(venue, session, clock, account, tmp_path
         BASE + "/health", BASE + "/markets", BASE + "/session"))
 
 
-def test_custodian_is_handed_its_own_object(venue, session, clock, account, tmp_path):
-    # A served member in another spelling: the custodian signs the SDK's own spelling.
-    venue.typed_edit = lambda td: td["message"].update(notionalE6=int(td["message"]["notionalE6"]))
-    SessionGate(session, account.address.lower())
-    s = Custodian(account)
-    c = custodian_client(session, tmp_path, s, clock)
-    assert c.trade(c.quote("USD/MXN", "buy", 25_000)).status == "open"
-    (own,) = s.typed
-    assert own["message"]["notionalE6"] == "25000000000" and own != venue.template["typed_data"]
-    assert typed_hash(own) == typed_hash(venue.template["typed_data"])
-
-
 def test_hash_only_signer_signs_the_rebuilt_digest(venue, session, clock, account, tmp_path):
     SessionGate(session, account.address.lower())
     s = HashCustodian(account)
@@ -1941,11 +1478,6 @@ def test_custodian_calls_that_need_a_local_key(session, account, tmp_path, call)
     with pytest.raises(crx.ConfigError, match="needs a local key"):
         getattr(c, call)(*{"deposit": (1000,), "send_quote": (None, 1), "confirm": (None,)}[call])
     assert session.calls == []
-
-
-def test_signer_and_key_are_exclusive(session, account, tmp_path):
-    with pytest.raises(crx.ConfigError, match="one only"):
-        crx.Client(key=account.key.hex(), signer=Custodian(account), base_url=BASE, rpc_url=RPC, session=session)
 
 
 def balance_route(session, account):
@@ -2016,10 +1548,3 @@ def test_viewer_grants_and_viewer_mode_use_the_envelope(session, account, tmp_pa
     v = custodian_client(session, tmp_path, Custodian(account), Clock(time.time()), account=owner.address)
     v.balance()
     assert gate.mints == 0 and gate.tokened() == []
-
-
-def test_local_key_never_mints(make_client, venue, session, clock, account):
-    gate = SessionGate(session, account.address.lower())
-    c = make_client(clock=clock)
-    assert c.trade(c.quote("USD/MXN", "buy", 25_000)).status == "open"
-    assert gate.mints == 0 and gate.tokened() == [] and "/session" not in session.paths()

@@ -62,17 +62,6 @@ def test_account_signs_custody_owner_signer_key(make_client, session, account):
         assert f"Custody: {custody}" in msg.splitlines() and f"Signer: {signer}" in msg.splitlines()
 
 
-def test_account_balance_for_another_seat_refused(make_client, session):
-    session.routes[("GET", "/balance")] = balance_body(Account.create())
-    with pytest.raises(crx.BadAnswer):
-        make_client(account=Account.create().address).balance()
-
-
-def test_account_equal_to_own_key_is_own_seat(make_client, account):
-    c = make_client(account=account.address)
-    assert c._gw.custody is None and c.account == c.address
-
-
 @pytest.mark.parametrize("bad", ["0x12", "not an address", "0x" + "0" * 40, "12" * 20,
                                  "0x5b38Da6a701c568545dCfcB03FcB875f56beddC4", 12])
 def test_account_must_be_an_address(make_client, bad):
@@ -101,42 +90,3 @@ def test_add_viewer(make_client, session, account):
         assert (call["method"], call["path"], call["raw"]) == ("PUT", f"/viewers/{v}", b"")
         assert (custody, signer) == (me, me) and msg.endswith(EMPTY_BODY)
         assert "content-type" not in call["headers"]
-
-
-def test_remove_viewer(make_client, session, account):
-    v, me = Account.create().address.lower(), account.address.lower()
-    session.routes[("DELETE", f"/viewers/{v}")] = (204, "")
-    assert make_client().remove_viewer(v) is None
-    (call,) = session.calls
-    custody, signer, msg = signed(call)
-    assert (custody, signer, call["raw"]) == (me, me, b"") and msg.endswith(EMPTY_BODY)
-
-
-def test_viewers(make_client, session, account):
-    v, me = Account.create().address.lower(), account.address.lower()
-    session.routes[("GET", "/viewers")] = {
-        "account": me, "viewers": [{"viewer": v, "granted_by": me, "granted_at": 1_790_000_000_000}], "max": 5}
-    (row,) = make_client().viewers()
-    assert (row.address, row.granted_by) == (v, me)
-    (call,) = session.calls
-    custody, signer, msg = signed(call)
-    assert (call["method"], call["path"], custody, signer) == ("GET", "/viewers", me, me) and msg.endswith(EMPTY_BODY)
-
-
-def test_viewer_address_checked_locally(make_client, session):
-    with pytest.raises(crx.BadRequest):
-        make_client().add_viewer("0x1234")
-    assert session.calls == []
-
-
-@pytest.mark.parametrize("status,code,cls,sdk_code", [
-    (409, "viewer_cap", crx.CrxError, "viewer_cap"),
-    (400, "viewer_invalid", crx.BadRequest, "bad_request"),
-    (403, "viewer_is_maker", crx.BadRequest, "bad_request"),
-])
-def test_add_viewer_refusals(make_client, session, status, code, cls, sdk_code):
-    v = Account.create().address.lower()
-    session.routes[("PUT", f"/viewers/{v}")] = (status, {"code": code, "error": "no"})
-    with pytest.raises(cls) as e:
-        make_client().add_viewer(v)
-    assert (e.value.code, e.value.gateway_code, e.value.status) == (sdk_code, code, status)

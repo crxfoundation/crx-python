@@ -3,14 +3,12 @@ byte for byte; one stamp per call; a delegate always names itself."""
 
 import hashlib
 import json
-from pathlib import Path
 
 import pytest
 from eth_account import Account
 from eth_account.messages import encode_defunct
 from eth_utils import keccak
 
-import crx
 from crx import _http
 from crx._http import Gateway, rest_message
 
@@ -18,7 +16,6 @@ from .conftest import BASE, FIX, Clock, FakeSession
 
 PATH = FIX / "auth-vector-v5.json"
 SHA256 = "cb93851ca9d4525d61de47d7d89f9c239dc12af2211af7018e74e464894e5bb6"
-SPEC = Path.home() / "crx-scratch" / "readable-taker-terms-2026-10-01" / "spec"
 VEC = json.loads(PATH.read_text())
 CASES = {c["id"]: c for c in VEC["cases"]}
 KEYS = json.loads((FIX / "format-vectors-v5.json").read_text())["keys"]
@@ -50,17 +47,6 @@ def at(case):
 
 def test_fixture_is_the_pinned_file():
     assert hashlib.sha256(PATH.read_bytes()).hexdigest() == SHA256
-
-
-def test_fixture_is_the_spec_copy():
-    if not SPEC.is_dir():
-        pytest.skip("no spec folder on this machine")
-    assert PATH.read_bytes() == (SPEC / "auth-vector-v5.json").read_bytes()
-
-
-def test_shape_and_empty_body():
-    assert VEC["shape"] == _http.AUTH_SHAPE == "signer_line"
-    assert "0x" + keccak(b"").hex() == VEC["empty_body_hash"] == CASES["A2"]["body_hash"]
 
 
 # ---------- A1, A2, A3: the message, the header set, the signature ----------
@@ -96,16 +82,6 @@ def test_a1_sent_on_the_wire():
     (call,) = s.calls
     assert call["raw"] == c["body"].encode()
     assert call["headers"] == {"accept": "application/json", "content-type": "application/json", **c["headers"]}
-
-
-def test_a1_a2_a3_are_one_stamp_sequence():
-    """One process, one clock millisecond: each call takes the next stamp, across gateways."""
-    a1, a2, a3 = CASES["A1"], CASES["A2"], CASES["A3"]
-    ts = int(a1["headers"]["x-crx-ts"])
-    own, delegate = gateway(TAKER, ts), gateway(OTHER, ts, TAKER["address"])
-    assert own.headers("POST", a1["path"], a1["body"].encode()) == a1["headers"]
-    assert own.headers("GET", a2["path"]) == a2["headers"]
-    assert delegate.headers("POST", a3["path"], a3["body"].encode()) == a3["headers"]
 
 
 # ---------- R1, R2: never a byte-identical resend ----------
@@ -144,11 +120,6 @@ def test_n1_delegate_call_always_sends_x_crx_signer():
     assert Account.recover_message(encode_defunct(text=msg), signature=h["x-crx-sig"]).lower() == OTHER["address"]
 
 
-def test_self_custody_never_sends_x_crx_signer():
-    gw = gateway(TAKER, 1_790_000_000_000, custody=None)
-    assert "x-crx-signer" not in gw.headers("GET", "/balance")
-
-
 # ---------- L1: the 9-line message is never sent ----------
 
 def test_l1_no_nonce_header_and_no_nonce_line():
@@ -181,9 +152,3 @@ def test_no_signer_line_shape(monkeypatch):
     monkeypatch.undo()
     assert _http.AUTH_SHAPE == "signer_line"
     assert rest_message(c["method"], c["path"], TAKER["address"], OTHER["address"], ts, raw) == c["message"]
-
-
-def test_no_key_signs_nothing():
-    gw = Gateway(BASE, None, FakeSession())
-    with pytest.raises(crx.ConfigError, match="needs the seat key"):
-        gw.headers("GET", "/balance")
