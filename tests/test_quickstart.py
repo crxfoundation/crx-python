@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+import importlib
+import inspect
 import re
+import runpy
+import textwrap
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -15,6 +20,7 @@ import crx.quickstart as qs
 from .conftest import FakeSession
 
 KEY = "0x" + "11" * 32
+EXAMPLE = Path(__file__).parent.parent / "examples" / "quickstart.py"
 STAMP = re.compile(r"^\d\d:\d\d:\d\d ")
 
 
@@ -120,6 +126,29 @@ def test_the_expiry_is_30_days_out_on_a_weekday_at_18_utc(monkeypatch, fake, mar
     assert expiry.utcoffset() == timedelta(0) and (expiry.hour, expiry.minute, expiry.second) == (18, 0, 0)
     assert expiry.date() == crx.client._default_expiry(start).date()
     assert tenor["min_secs"] <= (expiry - start).total_seconds() <= tenor["max_secs"]
+
+
+def test_the_deposit_covers_the_ask(monkeypatch, fake):
+    """A seat with nothing but the script's deposit must get its quote.
+
+    Before a quote, the gateway checks that the seat's free collateral
+    covers the trade: about 21 USD per 100 USD asked on USD/BRL. The deposit
+    is at least twice that. The ask is 25,000, the least a Testnet account
+    may ask.
+    """
+    monkeypatch.setenv("CRX_WALLET_PK", KEY)
+    assert qs.main([]) == 0
+    calls = FakeClient.last.calls
+    deposit = next(c[1] for c in calls if c[0] == "deposit")
+    ask = next(c[3] for c in calls if c[0] == "quote")
+    assert ask == 25_000
+    assert deposit >= 2 * 0.21 * ask
+
+
+def test_key_file_env_counts_as_set(monkeypatch, fake, no_key):
+    monkeypatch.setenv("CRX_WALLET_PK_FILE", "/nowhere/seat.key")
+    monkeypatch.setattr(qs.getpass, "getpass", no_prompt)
+    assert qs.main([]) == 0
 
 
 def test_unset_key_is_asked_hidden_and_never_printed(monkeypatch, capsys, fake, no_key):

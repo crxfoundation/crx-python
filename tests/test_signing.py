@@ -58,6 +58,21 @@ def test_withdraw_digest_matches_eth_account():
     assert e7.withdraw_digest(e7.domain_separator(43113, CORE), w) == typed_hash("WithdrawIntent", types, msg)
 
 
+def test_rest_headers_recover_to_seat():
+    a = Account.create()
+    gw = Gateway("https://gateway.test", a, session=None)
+    raw = b'{"chain":"avax-fuji","amount":"1000"}'
+    h = gw.headers("POST", "/deposit", raw)
+    seat = a.address.lower()
+    assert set(h) == {"x-crx-address", "x-crx-ts", "x-crx-sig"} and h["x-crx-address"] == seat
+    msg = rest_message("POST", "/deposit", seat, seat, int(h["x-crx-ts"]), raw)
+    assert msg.endswith("Body: 0x" + keccak(raw).hex())
+    assert msg.splitlines() == ["CRX-REST-LOGIN", "Audience: crx-gateway", "Method: POST", "Path: /deposit",
+                                f"Custody: {seat}", f"Signer: {seat}", f"Timestamp: {h['x-crx-ts']}",
+                                "Body: 0x" + keccak(raw).hex()]
+    assert Account.recover_message(encode_defunct(text=msg), signature=h["x-crx-sig"]).lower() == seat
+
+
 def test_scaled6_refuses_extra_precision():
     import pytest
     assert e7.scaled6("18.123456") == 18_123_456
@@ -76,6 +91,15 @@ from crx.signer import LocalSigner, recover, sign_hash_only, sign_login, sign_ty
 def full(td):
     m = encode_typed_data(full_message=td)
     return keccak(b"\x19" + m.version + m.header + m.body)
+
+
+def test_withdraw_typed_data_is_its_digest():
+    sep = e7.domain_separator(43113, CORE)
+    a = Account.create()
+    w = {"account": a.address.lower(), "amount": 10**9, "nonce": 3, "deadline": 1_789_000_000}
+    td = e7.typed_data("WithdrawIntent", 43113, CORE, e7.withdraw_message(w))
+    assert set(td["message"]) == {"account", "amount", "nonce", "deadline"}
+    assert full(td) == e7.typed_digest(td) == e7.withdraw_digest(sep, w)
 
 
 @pytest.mark.parametrize("primary", ["AllocationConsent", "AllocationAcceptance", "FailoverConsent", "Terms"])

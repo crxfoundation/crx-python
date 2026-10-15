@@ -103,6 +103,12 @@ def test_maker_vectors_are_the_projection_of_the_format_vectors():
     assert IDS == ["QV1", "QV2", "QV3", "QV4", "QV5"]
 
 
+def test_the_domain_is_the_vectors():
+    assert Account.from_key(KEY).address.lower() == SEAT == fixture(VEC_FILE)["seat"]
+    assert fixture(VEC_FILE)["domain"] == DOMAIN
+    assert e7.h0x(e7.domain_separator(DOMAIN["chain_id"], DOMAIN["verifying_contract"])) == DOMAIN["separator"]
+
+
 @pytest.mark.parametrize("qid", IDS)
 def test_quote_digest_and_sig_reproduce_the_vector(qid):
     v = from_file(qid)

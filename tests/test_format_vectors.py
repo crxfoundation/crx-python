@@ -1,9 +1,12 @@
 """The signed and hidden formats against the shared format vectors: the seven types, the Quote,
 the maker nonce, the taker ref, Terms ids, item commitments, consents and the withdraw intent."""
 
+import hashlib
 import json
+from pathlib import Path
 
 import pytest
+from eth_abi import encode
 from eth_account import Account
 from eth_utils import keccak, to_checksum_address
 
@@ -13,6 +16,8 @@ from crx.signer import LocalSigner, recover, sign_typed
 from .conftest import FIX
 
 PATH = FIX / "format-vectors-v5.json"
+SHA256 = "4d7c40e3aa2c67c07fc9d15c0fece8cb5fc61f96c312f4176e3001c1b83b4621"
+SPEC = Path.home() / "crx-scratch" / "readable-taker-terms-2026-10-01" / "spec"
 VEC = json.loads(PATH.read_text())
 TRADE_VEC = json.loads((FIX / "trade-vectors.json").read_text())
 DOM = VEC["domain"]
@@ -35,7 +40,29 @@ def own_typed(primary, message):
     return e7.typed_data(primary, DOM["chainId"], DOM["verifyingContract"], message)
 
 
+# ---------- the file ----------
+
+def test_fixture_is_the_pinned_file():
+    assert hashlib.sha256(PATH.read_bytes()).hexdigest() == SHA256
+
+
+def test_fixture_is_the_spec_copy():
+    if not SPEC.is_dir():
+        pytest.skip("no spec folder on this machine")
+    assert PATH.read_bytes() == (SPEC / "format-vectors-v5.json").read_bytes()
+
+
+def test_switches_are_the_vector_defaults():
+    assert VEC["switches"] == {"drop_quote_expiry": True, "drop_withdraw_recipient": True, "derive_maker_nonce": True}
+    assert (e7.DROP_QUOTE_EXPIRY, e7.DROP_WITHDRAW_RECIPIENT, e7.DERIVE_MAKER_NONCE) == (True, True, True)
+
+
 # ---------- the seven types ----------
+
+def test_the_seven_types_and_no_other():
+    assert set(VEC["types"]) == set(e7.structs()) == {
+        "Trade", "Quote", "Terms", "AllocationConsent", "FailoverConsent", "AllocationAcceptance", "WithdrawIntent"}
+
 
 @pytest.mark.parametrize("name", list(VEC["types"]))
 def test_type_string_and_typehash(name):
@@ -129,6 +156,27 @@ def test_consent_digest_and_signature(part, commitment):
     assert e7.h0x(digest) == part["digest"]
     who = part["signer"]
     assert sign_typed(signer(who), td, digest, KEYS[who]["address"]) == part["signature"]
+
+
+# ---------- the withdraw intent ----------
+
+W1 = VEC["withdraw"]
+
+
+def test_withdraw_digest_message_signature():
+    td, m = W1["typed_data"], W1["typed_data"]["message"]
+    assert e7.withdraw_message(m) == m and own_typed("WithdrawIntent", e7.withdraw_message(m)) == td
+    digest = e7.withdraw_digest(SEP, m)
+    assert e7.h0x(digest) == W1["digest"] == e7.h0x(e7.typed_digest(td))
+    assert e7.h0x(e7.struct_hash("WithdrawIntent", m)) == W1["struct_hash"]
+    assert sign_typed(signer("taker"), td, digest, KEYS["taker"]["address"]) == W1["signature"]
+
+
+def test_withdraw_item_id_is_kind_5_and_the_words():
+    m = W1["typed_data"]["message"]
+    want = keccak(encode(["uint256", "address", "uint256", "uint64", "uint64"],
+                         [5, to_checksum_address(m["account"]), int(m["amount"]), int(m["nonce"]), int(m["deadline"])]))
+    assert e7.withdraw_item(m) == want
 
 
 # ---------- a Quote signed in the retired format ----------

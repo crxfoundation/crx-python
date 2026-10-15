@@ -93,6 +93,25 @@ def test_post_put_delete_are_sent_once(make_client, session, method, path, fail,
     assert [(x["method"], x["path"]) for x in session.calls] == [(method, path)] and pauses == []
 
 
+def test_mark_unavailable_get_retry_keeps_the_rfq_read_alive(make_client, session):
+    # A maker loop reads one RFQ: one 503 mark_unavailable no longer ends it.
+    c = make_client()
+    c._sleep = pauses = Pauses()
+    session.routes[("GET", f"/rfqs/{RID}")] = [NO_MARK, {"rfq_id": RID, "kind": "open"}]
+    assert c._gw.request("GET", f"/rfqs/{RID}")["rfq_id"] == RID
+    assert len(gets(session, f"/rfqs/{RID}")) == 2 and pauses == [GET_RETRY_PAUSE]
+
+
+def test_withdraw_post_is_sent_once_on_503(make_client, session):
+    c = make_client()
+    c._sleep = pauses = Pauses()
+    session.routes[("GET", "/balance")] = dict(balance_of(c), withdraw={"nonce": "3"})
+    session.routes[("POST", "/withdraw")] = (503, {"code": "upstream", "error": "down"})
+    with pytest.raises(crx.WithdrawUnknown):  # no answer: the status read decides, and shows no item
+        c.withdraw(10)
+    assert len([x for x in session.calls if x["path"] == "/withdraw"]) == 1
+
+
 @pytest.mark.parametrize("fail, err", [(down, crx.NetworkError),
                                        ((503, {"code": "upstream", "error": "down"}), crx.ServerError),
                                        (NO_MARK, crx.MarkUnavailable)])

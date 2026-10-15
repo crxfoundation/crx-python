@@ -3,12 +3,14 @@ byte for byte; one stamp per call; a delegate always names itself."""
 
 import hashlib
 import json
+from pathlib import Path
 
 import pytest
 from eth_account import Account
 from eth_account.messages import encode_defunct
 from eth_utils import keccak
 
+import crx
 from crx import _http
 from crx._http import Gateway, rest_message
 
@@ -16,6 +18,7 @@ from .conftest import BASE, FIX, Clock, FakeSession
 
 PATH = FIX / "auth-vector-v5.json"
 SHA256 = "cb93851ca9d4525d61de47d7d89f9c239dc12af2211af7018e74e464894e5bb6"
+SPEC = Path.home() / "crx-scratch" / "readable-taker-terms-2026-10-01" / "spec"
 VEC = json.loads(PATH.read_text())
 CASES = {c["id"]: c for c in VEC["cases"]}
 KEYS = json.loads((FIX / "format-vectors-v5.json").read_text())["keys"]
@@ -47,6 +50,17 @@ def at(case):
 
 def test_fixture_is_the_pinned_file():
     assert hashlib.sha256(PATH.read_bytes()).hexdigest() == SHA256
+
+
+def test_fixture_is_the_spec_copy():
+    if not SPEC.is_dir():
+        pytest.skip("no spec folder on this machine")
+    assert PATH.read_bytes() == (SPEC / "auth-vector-v5.json").read_bytes()
+
+
+def test_shape_and_empty_body():
+    assert VEC["shape"] == _http.AUTH_SHAPE == "signer_line"
+    assert "0x" + keccak(b"").hex() == VEC["empty_body_hash"] == CASES["A2"]["body_hash"]
 
 
 # ---------- A1, A2, A3: the message, the header set, the signature ----------

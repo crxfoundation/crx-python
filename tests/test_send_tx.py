@@ -321,6 +321,15 @@ def test_an_own_replacement_the_node_still_refuses(session, account, tmp_path, m
     assert len(log.rows()) == 1
 
 
+@pytest.mark.parametrize("base, served, tip", [(129_000_000, 1_000_000, TIP_FLOOR), (30 * GWEI, 2 * GWEI, 2 * GWEI)])
+@pytest.mark.parametrize("with_log", [False, True])
+def test_no_pending_tx_keeps_the_0_7_1_fees(session, account, tmp_path, monkeypatch, base, served, tip, with_log):
+    pool = Pool(session, account, None, monkeypatch, base=base, gas_price=base + served, tip=served)
+    send_on(pool, session, account, TxLog(tmp_path / "txs.json") if with_log else None)
+    assert [fields(r) for r in pool.sent] == [(12, tip, 2 * base + tip)]
+    assert pool.sleeps == [] and "eth_getTransactionByHash" not in session.rpc_methods()
+
+
 def test_the_tx_record_is_mode_600_and_holds_no_key(session, account, tmp_path, monkeypatch):
     path = tmp_path / "state" / "txs.json"
     log = TxLog(path)
@@ -441,6 +450,15 @@ def test_concurrent_writers_keep_every_row(tmp_path):
     assert sorted(r["chain_id"] for r in TxLog(path).rows()) == sorted(1000 * i + k for i in range(8) for k in range(12))
     lock = path.with_name("txs.json.lock")
     assert lock.stat().st_mode & 0o777 == 0o600 and sorted(p.name for p in path.parent.iterdir()) == ["txs.json", "txs.json.lock"]
+
+
+@pytest.mark.parametrize("own_dir, mode", [(True, 0o700), (False, 0o755)])
+def test_only_the_sdk_own_state_dir_is_forced_to_700(tmp_path, account, own_dir, mode):
+    folder = tmp_path / "state"
+    folder.mkdir(mode=0o755)
+    folder.chmod(0o755)
+    TxLog(folder / "txs.json", own_dir=own_dir).add(row(account, LEGACY))
+    assert folder.stat().st_mode & 0o777 == mode and (folder / "txs.json").stat().st_mode & 0o777 == 0o600
 
 
 @pytest.mark.parametrize("named, mode", [("env", 0o755), ("arg", 0o755), ("default", 0o700)])

@@ -250,6 +250,38 @@ def test_trade_signs_the_readable_trade(make_client, venue, session, clock, acco
     assert int(sig[66:130], 16) <= e7.SECP256K1_N // 2 and sig[-2:] in ("1b", "1c")
 
 
+def test_sent_nothing_sees_a_send(make_client, session, health):
+    # Positive control: the same fakes flag a tx and an /arm-tx read.
+    from .test_money import Chain, deposit_route
+    Chain(session, held=10**12)
+    deposit_route(session, health, None, 1000 * 10**6, approve=False)
+    session.routes[("GET", "/balance")] = (503, {"code": "upstream", "error": "down"})
+    c = make_client(clock=Clock(time.time()))
+    assert sent_nothing(session)
+    c.deposit(1000)
+    assert not sent_nothing(session) and "eth_sendRawTransaction" in session.rpc_methods()
+    session.rpc_calls.clear()
+    assert sent_nothing(session)
+    c._gw.raw_request("GET", f"/rfqs/{RFQ}/arm-tx")
+    assert not sent_nothing(session)
+
+
+def test_every_signed_call_carries_valid_headers(make_client, venue, session, clock, account):
+    c = make_client(clock=clock)
+    c.trade(c.quote("USDMXN", "BUY", "25000"))
+    signed = [x for x in session.calls if "x-crx-sig" in x["headers"]]
+    assert signed and all(x["path"] not in ("/health", "/markets") for x in signed)
+    stamps = []
+    for x in signed:
+        h = x["headers"]
+        assert {k for k in h if k.startswith("x-crx-")} == {"x-crx-address", "x-crx-ts", "x-crx-sig"}
+        assert h["x-crx-address"] == account.address.lower()
+        msg = rest_message(x["method"], x["path"], h["x-crx-address"], h["x-crx-address"], int(h["x-crx-ts"]), x["raw"])
+        assert Account.recover_message(encode_defunct(text=msg), signature=h["x-crx-sig"]) == account.address
+        stamps.append(int(h["x-crx-ts"]))
+    assert stamps == sorted(set(stamps))  # each call stamped once, strictly later
+
+
 # ---------- the trade status after the accept ----------
 
 
@@ -267,6 +299,42 @@ def test_trade_sends_nothing_and_reads_status(make_client, venue, session, clock
     assert (t.status, t.tx) == (word, tx)
     assert sent_nothing(session)
     assert len(trade_polls(session)) - before == (31 if word == "pending" else len(script))
+
+
+def test_trade_refused_expired(make_client, venue, session, clock):
+    # The relay's tx never landed inside the quote's life: refused, no tx; the tape names why.
+    venue.script = [("sending", None), ("refused", None)]
+    session.routes[("GET", "/trades")] = {"seq": 2, "trades": [{"type": "trade.refused", "seq": 2, "ts": 1, "data": {
+        "rfq_id": RFQ, "reason": "expired"}}]}
+    c = make_client(clock=clock)
+    t = c.trade(c.quote("USD/MXN", "buy", 25_000))
+    assert (t.status, t.tx) == ("refused", None) and sent_nothing(session)
+    (e,) = c.trades()
+    assert (e.type, e.data["reason"]) == ("trade.refused", "expired") and "arm_seq" not in e.data
+
+
+@pytest.mark.parametrize("word", ["open", "refused"])
+def test_trade_polls_until_final(make_client, venue, session, clock, word):
+    c = make_client(clock=clock)
+    q = c.quote("USD/MXN", "buy", 25_000)
+    before = len(trade_polls(session))
+    words = iter(["sending", "pending", word])
+    session.routes[("GET", f"/rfqs/{RFQ}")] = lambda req: dict(venue.view(req), trade_status=next(words))
+    t0 = clock()
+    assert c.trade(q).status == word
+    assert len(trade_polls(session)) - before == 3 and clock() - t0 >= 2
+
+
+@pytest.mark.parametrize("word", ["sending", "pending"])
+def test_trade_waits_30_s_on_testnet(make_client, venue, session, clock, word):
+    venue.script = [(word, None)]
+    c = make_client(clock=clock)
+    q = c.quote("USD/MXN", "buy", 25_000)
+    before = len(trade_polls(session))
+    t0 = clock()
+    t = c.trade(q)
+    assert (t.status, t.tx) == (word, None)
+    assert len(trade_polls(session)) - before == 31 and 30 <= clock() - t0 <= 31
 
 
 @pytest.mark.parametrize("view", [
@@ -540,6 +608,39 @@ def test_service_unavailable_on_the_signed_accept_raises(make_client, venue, ses
     assert "not opened" in str(e) and "relay" not in str(e).lower()
     assert len(trade_polls(session)) == polls and clock() == start  # no status polls: no pending trade
     assert len(signed_posts(session)) == 1 and sent_nothing(session)
+
+
+def test_service_unavailable_on_the_unsigned_ask_raises(make_client, venue, session, clock):
+    venue.winner = False  # the row carries no template: the SDK asks for one first
+    service_down(venue, session, signed_only=False)
+    c = make_client(clock=clock)
+    q = c.quote("USD/MXN", "buy", 25_000, wait=1)
+    with pytest.raises(crx.ServiceUnavailable) as ei:
+        c.trade(q)
+    assert not isinstance(ei.value, crx.TradeUnknown)
+    assert accepts(session) == [{"quote_id": QID}]
+
+
+def test_other_503_on_the_signed_accept_still_reads_status(make_client, venue, session, clock):
+    # Negative control: a 503 with another code may hide a held signature, so the trade status decides.
+    def accept(req):
+        if "sig" in req["body"]:
+            venue.sig = req["body"]["sig"]
+            return (503, dict(DOWN_BODY, code="upstream"))
+        return venue.accept(req)
+    session.routes[("POST", f"/rfqs/{RFQ}/accept")] = accept
+    c = make_client(clock=clock)
+    assert c.trade(c.quote("USD/MXN", "buy", 25_000)).status == "open"
+
+
+@pytest.mark.parametrize("code", ["service_unavailable", "relay_unavailable"])
+def test_service_unavailable_maps_to_its_own_server_error(code):
+    e = crx.errors.from_gateway(503, dict(DOWN_BODY, code=code))
+    assert type(e) is crx.ServiceUnavailable and isinstance(e, crx.ServerError) and e.code == "service_unavailable"
+    assert e.gateway_code == code
+    assert type(crx.errors.from_gateway(503, dict(DOWN_BODY, code="upstream"))) is crx.ServerError
+    assert crx.RelayUnavailable is crx.ServiceUnavailable  # the 0.1.0 name
+    assert "RelayUnavailable" not in crx.__all__ and "ServiceUnavailable" in crx.__all__
 
 
 def test_seat_cannot_sign_maps_to_its_own_error():
@@ -1217,6 +1318,13 @@ def test_health_on_another_core_refuses_the_trade(make_client, venue, session, h
         c.trade(c.quote("USD/MXN", "buy", 25_000))
     assert ei.value.details == {"chain": "avax-fuji", "served_core": OTHER_CORE, "pinned_core": FUJI_CORE}
     assert accepts(session) == [] and sent_nothing(session)
+
+
+def test_health_on_another_core_refuses_the_deposit(make_client, session, health):
+    session.routes[("GET", "/health")] = served_on(health, OTHER_CORE)
+    with pytest.raises(crx.RefusedToSign, match="^core moved"):
+        make_client().deposit(1000)
+    assert "eth_sendRawTransaction" not in session.rpc_methods()
 
 
 def test_health_on_another_chain_id_refuses(make_client, session, health):

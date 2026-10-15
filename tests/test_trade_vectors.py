@@ -5,6 +5,7 @@ import copy
 import hashlib
 import json
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 from eth_account import Account
@@ -23,6 +24,7 @@ PATH = FIX / "trade-vectors.json"
 SHA256 = "d784e894f128490c218f8fa6205bb2056262c281e12ef60e8c10d33771de5a6b"
 TEMPLATE_PATH = FIX / "template-sample-v5.json"
 TEMPLATE_SHA256 = "aec95090f2cb48fe5435d26198a57cabdbde632078471a24ef2678daeee50272"
+SPEC = Path.home() / "crx-scratch" / "readable-taker-terms-2026-10-01" / "spec"
 VEC = json.loads(PATH.read_text())
 TEMPLATE = json.loads(TEMPLATE_PATH.read_text())
 BY_ID = {v["id"]: v for v in VEC["positive"] + VEC["format_edges"] + VEC["negative"]}
@@ -98,6 +100,22 @@ def test_fixture_is_the_pinned_file(path, sha):
     assert hashlib.sha256(path.read_bytes()).hexdigest() == sha
 
 
+@pytest.mark.parametrize("ours,spec", [(PATH, "trade-vectors-v5.json"), (TEMPLATE_PATH, "template-sample-v5.json")],
+                         ids=["trade", "template"])
+def test_fixture_is_the_spec_copy(ours, spec):
+    if not SPEC.is_dir():
+        pytest.skip("no spec folder on this machine")
+    assert ours.read_bytes() == (SPEC / spec).read_bytes()
+
+
+def test_vector_counts_and_switches():
+    assert (len(VEC["positive"]), len(VEC["format_edges"]), len(VEC["negative"])) == (5, 14, 19)
+    assert VEC["switches"] == {"drop_quote_expiry": e7.DROP_QUOTE_EXPIRY,
+                               "drop_withdraw_recipient": e7.DROP_WITHDRAW_RECIPIENT,
+                               "derive_maker_nonce": e7.DERIVE_MAKER_NONCE} == {
+        "drop_quote_expiry": True, "drop_withdraw_recipient": True, "derive_maker_nonce": True}
+
+
 def test_type_string_and_constants():
     assert e7.type_string("Trade") == VEC["type_string"] and e7.h0x(e7.typehash("Trade")) == VEC["typehash"]
     c = VEC["constants"]
@@ -167,6 +185,15 @@ N6 = BY_ID["N6"]
 
 def n6_typed_data():
     return e7.typed_data("Trade", DOM["chainId"], DOM["verifyingContract"], message(N6))
+
+
+def test_n6_vector_is_an_honest_signature_over_its_own_trade():
+    td = n6_typed_data()
+    assert td["message"]["ownLegId"] == N6["set"]["taker_leg_id"] == N6["inputs"]["taker_leg"]["leg_id"]
+    assert e7.leg_id_tail(td["message"]["ownLegId"]) == int(N6["inputs"]["rfq_quote_expiry_max"]) + 1
+    assert e7.h0x(e7.typed_digest(td)) == N6["guest_digest"] == N6["signed_digest"]
+    assert recover(e7.hx(N6["guest_digest"]), e7.hx(N6["signature"])) == TAKER["address"]
+    assert N6["recovered_from_guest_digest"] == TAKER["address"]
 
 
 @pytest.mark.parametrize("leg_id", [N6["set"]["taker_leg_id"], None], ids=["leg-id-served", "no-leg-id"])

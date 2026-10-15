@@ -1,8 +1,11 @@
 import copy
 import os
 import pickle
+import re
+from pathlib import Path
 
 import pytest
+from eth_account import Account
 
 import crx
 from crx.errors import from_gateway
@@ -50,6 +53,14 @@ def test_gateway_codes_map_to_typed_errors(status, body, cls, code):
     assert e.code == code
     assert e.status == status
     assert isinstance(e, crx.CrxError)
+
+
+def test_no_fold_or_crank_words():
+    root = Path(__file__).parent.parent
+    files = [root / "README.md", *(root / "examples").glob("*.py"), *(root / "src" / "crx").glob("*.py")]
+    hits = [f"{f.name}:{i}" for f in files for i, line in enumerate(f.read_text().splitlines(), 1)
+            if re.search(r"\b(fold|folds|crank)\b", line, re.I)]
+    assert hits == []
 
 
 @pytest.mark.parametrize("details,headers,wait", [

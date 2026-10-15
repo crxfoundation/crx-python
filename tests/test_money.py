@@ -17,6 +17,7 @@ import crx
 import crx._chain
 from crx import _eip712 as e7
 from crx._chain import revert_name
+from crx.signer import LocalSigner
 
 from .conftest import BASE, CHAIN_ID, RPC, Clock, fixture
 
@@ -120,6 +121,13 @@ def test_deposit_mined_revert_is_tx_failed(make_client, session, health, account
         make_client(clock=Clock(time.time())).deposit(1000, mint=False)
     assert type(ei.value) is crx.TxFailed and ei.value.details["tx"] == "0x" + f"{1:064x}" and len(chain.sent) == 1
     assert str(ei.value).endswith(" reverted")
+
+
+def test_deposit_no_mint(make_client, session, health, account):
+    chain = Chain(session, held=1000 * 10**6)
+    deposit_route(session, health, account, 1000 * 10**6, approve=False)
+    money_view(session, account, chain, "deposit")
+    assert len(make_client(clock=Clock(time.time())).deposit(1000, mint=False).txs) == 1 and len(chain.sent) == 1
 
 
 @pytest.mark.parametrize("word", ["credited", "failed"])
@@ -268,6 +276,17 @@ def test_deposit_short_of_usdc_sends_nothing(make_client, session, health, accou
     assert "eth_estimateGas" not in session.rpc_methods()
 
 
+def test_deposit_revert_reads_the_reason(make_client, session, health, account):
+    chain = Chain(session, held=10**12)
+    deposit_route(session, health, account, 1000 * 10**6, approve=False)
+    data = ERROR_STRING + encode(["string"], [SHORT]).hex()
+    session.rpc["eth_call"] = lambda p: chain.call(p) if p[0]["data"] == e7.calldata("decimals()", [], []) \
+        or p[0]["data"].startswith(e7.h0x(e7.selector("balanceOf(address)"))) else {"__error__": revert(data)}
+    with pytest.raises(crx.TxFailed, match=f"^deposit would revert: {SHORT}; nothing sent$"):
+        make_client().deposit(1000)
+    assert chain.sent == []
+
+
 LANDED = "0x" + "7a" * 32
 OTHER = "0x" + "ee" * 32
 OWN = object()  # stands for the item of the withdraw the gateway queued
@@ -356,6 +375,27 @@ def test_withdraw_one_signed_post_sends_no_tx(make_client, session, health, acco
     assert g.intent == {"account": account.address.lower(), "amount": 1000 * 10**6, "nonce": 3,
                         "deadline": now + 22 * 3600}
     assert g.signer == account.address  # the digest signed is the gateway's 4-member rebuild
+
+
+def test_withdraw_signs_the_four_member_intent_on_the_health_domain(
+        make_client, session, health, account, monkeypatch):
+    Chain(session)
+    g = gate(session, health, account)
+    session.routes[("GET", "/balance")] = [balance_body(account), g.view("accepted")]
+    seen = []
+    sign = LocalSigner.sign_typed_data
+    monkeypatch.setattr(LocalSigner, "sign_typed_data", lambda self, td: seen.append(copy.deepcopy(td)) or sign(self, td))
+    clock = Clock(time.time())
+    now = int(clock())
+    make_client(clock=clock).withdraw(1000)
+    (td,) = seen
+    w1 = fixture("format-vectors-v5.json")["withdraw"]["typed_data"]
+    assert td["primaryType"] == "WithdrawIntent" and td["types"] == w1["types"]
+    assert [m["name"] for m in td["types"]["WithdrawIntent"]] == ["account", "amount", "nonce", "deadline"]
+    assert td["domain"] == {"name": "CRX", "version": "rulebook-1.0", "chainId": CHAIN_ID,
+                            "verifyingContract": core_of(health)}
+    assert td["message"] == {"account": account.address.lower(), "amount": "1000000000", "nonce": "3",
+                             "deadline": str(now + 22 * 3600)}
 
 
 @pytest.mark.parametrize("amount,nonce", [("1000", "0"), ("0.000001", "3"), ("12345.678901", "18446744073709551615")])
@@ -474,6 +514,29 @@ def test_withdraw_polls_until_its_own_item_is_final(make_client, session, health
     assert polls(session, "/balance") == 5 and clock() - t0 == 3
 
 
+@pytest.mark.parametrize("word", ["sending", "pending"])
+def test_withdraw_waits_30_s_on_testnet(make_client, session, health, account, word):
+    chain = Chain(session)
+    g = gate(session, health, account)
+    session.routes[("GET", "/balance")] = [balance_body(account), g.view(word)]
+    clock = Clock(time.time())
+    t0 = clock()
+    out = make_client(clock=clock).withdraw(1000)
+    assert (out.status, out.tx) == (word, None)
+    assert 30 <= clock() - t0 <= 31 and polls(session, "/balance") == 1 + 31 and chain.sent == []
+
+
+def test_withdraw_in_progress_sends_nothing(make_client, session, account):
+    chain = Chain(session)
+    session.routes[("GET", "/balance")] = balance_body(account)
+    session.routes[("POST", "/withdraw")] = (409, {
+        "code": "withdraw_in_progress", "error": "one withdraw at a time; the next opens when this one is paid"})
+    with pytest.raises(crx.CrxError) as ei:
+        make_client().withdraw(1000)
+    assert ei.value.code == "withdraw_in_progress" and ei.value.status == 409
+    assert chain.sent == [] and polls(session, "/balance") == 1
+
+
 def test_balance(make_client, session, account):
     session.routes[("GET", "/balance")] = balance_body(account)
     b = make_client().balance()
@@ -488,6 +551,23 @@ def test_balance_for_other_account_refused(make_client, session, account):
     session.routes[("GET", "/balance")] = balance_body(Account.create())
     with pytest.raises(crx.BadAnswer):
         make_client().balance()
+
+
+def test_positions(make_client, session):
+    session.routes[("GET", "/positions")] = {"positions": [
+        {"trade_id": "0x01", "rfq_id": "0x02", "pair": "USDMXN", "side": -1, "notional": "25000.000000",
+         "rate": "18.700000", "status": "pending"}]}
+    (p,) = make_client().positions()
+    assert (p.side, p.notional, p.rate, p.status) == ("sell", Decimal("25000"), Decimal("18.7"), "pending")
+
+
+def test_trades_pages(make_client, session):
+    page1 = {"trades": [{"type": "trade.opened", "ts": 1, "data": {"trade_id": str(i)}} for i in range(1000)], "seq": 1000}
+    page2 = {"trades": [{"type": "trade.settled", "ts": 2, "data": {"trade_id": "0"}}], "seq": 1001}
+    session.routes[("GET", "/trades")] = [page1, page2]
+    ev = make_client().trades()
+    assert len(ev) == 1001 and ev[-1].type == "trade.settled" and ev[-1].seq is None
+    assert [c["query"]["after"] for c in session.calls if c["path"] == "/trades"] == [["0"], ["1000"]]
 
 
 def test_trades_limit_at_most_1000_and_loops(make_client, session):
