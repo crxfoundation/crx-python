@@ -302,6 +302,13 @@ def test_an_own_tx_the_count_hides_is_replaced_after_the_refusal(session, accoun
     assert pool.held is None and pool.sleeps == []
 
 
+def test_an_unknown_tx_the_count_hides_is_not_replaced(session, account, tmp_path, monkeypatch):
+    pool = Pool(session, account, dict(LEGACY), monkeypatch, shown=False)
+    with pytest.raises(TxFailed, match=PENDING.format(12)):
+        send_on(pool, session, account, TxLog(tmp_path / "txs.json"))
+    assert len(pool.sent) == 1 and pool.t == 60
+
+
 @pytest.mark.parametrize("shown, sends", [(True, 1), (False, 2)])
 def test_an_own_replacement_the_node_still_refuses(session, account, tmp_path, monkeypatch, shown, sends):
     log = TxLog(tmp_path / "txs.json")

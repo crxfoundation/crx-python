@@ -319,6 +319,21 @@ def test_withdraw_returned_pending_then_paid_is_told_once(make_client, session, 
     assert (first["nonce"], second["nonce"]) == ("3", "4")
 
 
+def test_withdraw_nonce_passed_row_of_another_amount_is_not_the_intent(make_client, session, health, account):
+    # A row with no item at the intent's nonce but another amount is not the held intent.
+    Chain(session)
+    g = gate(session, health, account)
+    session.routes[("POST", "/withdraw")] = fault_after(lambda req: None, "dropped")
+    session.routes[("GET", "/balance")] = Money(account, g)
+    c = make_client(clock=Clock(time.time()))
+    with pytest.raises(crx.WithdrawUnknown):
+        c.withdraw(1000)
+    row = dict(item_row("paid", None, LANDED), amount="250.000000")
+    session.routes[("GET", "/balance")] = balance_body(account, nonce="4", withdraw=row)
+    with pytest.raises(crx.EarlierOutcome, match="read balance"):
+        c.withdraw(1000)
+
+
 def test_withdraw_no_repeat_post_near_the_deadline(make_client, session, health, account):
     Chain(session)
     g = gate(session, health, account)

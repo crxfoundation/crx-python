@@ -155,6 +155,19 @@ def test_hash_only_path_rebuilds_then_signs_the_digest():
     assert len(s.hashes) == 1
 
 
+def test_hash_only_path_refuses_a_digest_of_other_typed_data():
+    a = Account.create()
+    td = a_trade_td()
+    other = copy.deepcopy(td)
+    other["message"]["rateE6"] = "5410001"
+    s = HashOnly(a)
+    with pytest.raises(crx.RefusedToSign, match="the digest is not this typed data's"):
+        sign_typed(s, td, e7.typed_digest(other), a.address)
+    assert s.hashes == []
+    sig = sign_typed(s, td, e7.typed_digest(td), a.address)
+    assert s.hashes == [e7.typed_digest(td)] and sig == sign_typed(LocalSigner(a), td, e7.typed_digest(td), a.address)
+
+
 def test_login_signature_from_a_custodian_is_normalized():
     a = Account.create()
 

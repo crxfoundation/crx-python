@@ -358,6 +358,17 @@ def test_withdraw_one_signed_post_sends_no_tx(make_client, session, health, acco
     assert g.signer == account.address  # the digest signed is the gateway's 4-member rebuild
 
 
+@pytest.mark.parametrize("amount,nonce", [("1000", "0"), ("0.000001", "3"), ("12345.678901", "18446744073709551615")])
+def test_withdraw_signs_the_gateway_rebuild(make_client, session, health, account, amount, nonce):
+    Chain(session)
+    g = gate(session, health, account)
+    session.routes[("GET", "/balance")] = [balance_body(account, nonce=nonce), g.view("accepted")]
+    out = make_client(clock=Clock(time.time())).withdraw(amount)
+    assert g.signer == account.address
+    assert g.intent["amount"] == int(Decimal(amount).scaleb(6)) and g.intent["nonce"] == int(nonce)
+    assert out.nonce == int(nonce) and out.item == g.item
+
+
 def test_withdraw_digest_and_item_match_vector_w1():
     v = fixture("format-vectors-v5.json")
     w1, taker = v["withdraw"], v["keys"]["taker"]
