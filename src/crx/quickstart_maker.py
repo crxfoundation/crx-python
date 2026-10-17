@@ -76,13 +76,15 @@ def _fund(maker, timeout: float, poll: float) -> None:
     log("free collateral", _free(balance), "USDC")
 
 
-def steps(*, credit_timeout: float = 300, trade_timeout: float = 300, poll: float = 2) -> crx.Trade:
-    """Deposit the shortfall (at least 100 USDC), request and quote a test RFQ, then wait until the trade is open.
+def steps(*, credit_timeout: float = 300, trade_timeout: float = 300, final_timeout: float = 1800,
+          poll: float = 2) -> crx.Trade:
+    """Deposit the shortfall (at least 100 USDC), request and quote a test RFQ, wait until the trade is open,
+    then read it back from ``/positions`` until it is final and print it.
 
-    A pending deposit or trade at the deadline raises an error. Individual SDK calls
-    also have their own network and confirmation timeouts.
+    A pending deposit, a pending trade or a trade not final at its deadline raises an error. Individual SDK
+    calls also have their own network and confirmation timeouts.
     """
-    for value in (credit_timeout, trade_timeout, poll):
+    for value in (credit_timeout, trade_timeout, final_timeout, poll):
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
             raise crx.BadRequest("timeouts and poll must be positive seconds")
     maker = crx.Client(network="mainnet", base_url="https://api.crxfx.com", allow_mainnet=True)
@@ -99,10 +101,19 @@ def steps(*, credit_timeout: float = 300, trade_timeout: float = 300, poll: floa
             trade = maker.confirm(quote, timeout=max(0, end - time.monotonic()), poll=poll)
             if trade.status == "open":
                 log("maker: open")
-                return trade
+                break
             if trade.status not in ("pending", "sending"):
                 raise crx.CrxError(f"the trade is {trade.status}", code="not_open")
             _pause(end, poll, "trade_timeout", "the trade did not open before the deadline")
+        # Read the trade back from the API until it is final.
+        end = time.monotonic() + final_timeout
+        while True:
+            position = next((p for p in maker.positions() if p.rfq_id == trade.rfq_id), None)
+            if position is not None and position.final:
+                break
+            _pause(end, max(poll, 15), "final_timeout", "the trade was not final before the deadline")
+        log(position.pair, position.side, position.notional, position.rate, position.status, "final")
+        return trade
     finally:
         maker.close()
 
@@ -127,7 +138,7 @@ def ask_key(name: str, file_name: str | None = None) -> bool:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Run the maker quickstart. Return zero only when the trade is open."""
+    """Run the maker quickstart. Return zero only when the trade is open and final."""
     parser = argparse.ArgumentParser(
         prog="python -m crx.quickstart_maker",
         description="Run a 100 USD maker test request on Ethereum mainnet.",

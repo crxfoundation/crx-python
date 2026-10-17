@@ -5,7 +5,7 @@ Trade FX forwards on CRX from Python.
 ## Install
 
 ```bash
-pip install "git+https://github.com/crxfoundation/crx-python@v0.2.9"
+pip install "git+https://github.com/crxfoundation/crx-python@v0.2.10"
 ```
 
 Python 3.10 or newer.
@@ -99,7 +99,7 @@ python -m crx.quickstart_maker
 
 Set `CRX_WALLET_PK` or `CRX_WALLET_PK_FILE`, and `CRX_RPC`. The script uses one approved maker account on Ethereum mainnet at `https://api.crxfx.com`. A missing key is requested with hidden input.
 
-Under 20 USDC of free collateral, the script deposits the shortfall, at least the 100 USDC minimum deposit, waits for credit, and calls `test_request()` for a 100 USD USD/MXN RFQ. It uses the returned `reference_rate` as an example quote price. The request lasts three hours. Each RFQ closes after 120 seconds; settlement is two hours after `request_expires_at`. The script exits successfully only when the trade is `open`; a deposit or trade timeout fails. The same flow runs from `examples/maker.py`.
+Under 20 USDC of free collateral, the script deposits the shortfall, at least the 100 USDC minimum deposit, waits for credit, and calls `test_request()` for a 100 USD USD/MXN RFQ. It uses the returned `reference_rate` as an example quote price. The request lasts three hours. Each RFQ closes after 120 seconds; settlement is two hours after `request_expires_at`. It then reads the trade back from `positions()` until it is final and prints it. The script exits successfully only when the trade is `open` and final; a deposit, trade or finality timeout fails. The same flow runs from `examples/maker.py`.
 
 | Call | Does |
 |---|---|
@@ -159,10 +159,10 @@ A viewer reads `balance()`, `positions()` and `trades()` only. Other calls raise
 
 Sign up first at portal.crxfx.com/sign-up with the same wallet. The sign-up runs in a browser wallet: for a keypair file, import the key into a browser wallet first.
 
-Install version 0.2.9 with the extra:
+Install version 0.2.10 with the extra:
 
 ```bash
-pip install "crx-python[solana] @ git+https://github.com/crxfoundation/crx-python@v0.2.9"
+pip install "crx-python[solana] @ git+https://github.com/crxfoundation/crx-python@v0.2.10"
 ```
 
 ```python

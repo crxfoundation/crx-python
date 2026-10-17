@@ -25,6 +25,7 @@ class Maker:
         self.closed = False
         self.credit = True
         self.deposit_status = "pending"
+        self.finals = [False, True]
         self.rfq = SimpleNamespace(rfq_id="rfq", pair="USD/MXN", side="sell", notional=Decimal(100),
                                    reference_rate=Decimal("18.123456"))
 
@@ -55,6 +56,13 @@ class Maker:
         self.calls.append("confirm")
         word = self.statuses.pop(0) if len(self.statuses) > 1 else self.statuses[0]
         return SimpleNamespace(status=word, rfq_id=q.rfq_id, tx="0x" + "ff" * 32)
+
+    def positions(self):
+        self.calls.append("positions")
+        final = self.finals.pop(0) if len(self.finals) > 1 else self.finals[0]
+        return [SimpleNamespace(rfq_id="other", final=True),
+                SimpleNamespace(rfq_id="rfq", pair="USD/MXN", side="sell", notional=Decimal(100),
+                                rate=Decimal("18.123456"), status="open", final=final)]
 
     def close(self):
         self.closed = True
@@ -88,7 +96,9 @@ def test_one_client_deposits_the_minimum_for_a_small_shortfall_and_waits_through
     assert maker.calls.count("confirm") == 3
     assert maker.calls.index("balance") < maker.calls.index("deposit") < maker.calls.index("test_request")
     out = capsys.readouterr().out
-    assert out.splitlines()[-1].endswith("maker: open")
+    assert out.splitlines()[-2].endswith("maker: open")
+    assert out.splitlines()[-1].endswith("USD/MXN sell 100 18.123456 open final")
+    assert maker.calls.count("positions") == 2
     assert "maker: accepted" not in out
 
 
@@ -180,6 +190,15 @@ def test_executable_returns_failure_for_pending_timeout(setup, capsys):
     assert "trade_timeout" in capsys.readouterr().err
 
 
+def test_trade_not_final_by_the_deadline_fails(setup, capsys):
+    maker, clients, clock = setup
+    maker.finals = [False]
+    with pytest.raises(crx.CrxError) as e:
+        qs.steps(credit_timeout=5, trade_timeout=5, final_timeout=30, poll=1)
+    assert e.value.code == "final_timeout"
+    assert "final" not in capsys.readouterr().out.splitlines()[-1]
+
+
 def test_import_runs_nothing(monkeypatch):
     def forbidden(*args, **kwargs):
         raise AssertionError("import constructed a client")
@@ -217,6 +236,9 @@ def test_real_client_quote_and_confirmation_with_recorded_gateway(
     venue.accept_at = 1
     venue.script = [("pending", TXH)] * 4 + ([("open", TXH)] if finishes else [])
     session.routes[("POST", "/test-requests")] = wire
+    session.routes[("GET", "/positions")] = {"positions": [{
+        "trade_id": "t1", "rfq_id": wire["rfq_id"], "pair": "USD/MXN", "side": -1, "notional": "100",
+        "rate": "18.123456", "status": "open", "final": True}]}
     session.routes[("GET", "/balance")] = {
         "account": maker.address, "free": "20", "deposit": {"last": None}}
     monkeypatch.setattr(crx, "Client", lambda **kwargs: maker)
