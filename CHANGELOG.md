@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- The maker quickstart waits up to 15 minutes for the trade to open. On 17 Oct a mainnet test trade took 320 s from quote to open; 0.2.10 waited 300 s.
 - The maker quickstart waits up to 30 minutes for deposit credit, counted from the deposit call. 0.2.10 counted 300 s from the start, so a mainnet deposit (the call alone takes up to 90 s) could time out before credit.
 
 ## 0.2.10
