@@ -110,6 +110,30 @@ def test_shortfall_above_the_minimum_is_deposited_whole(setup, monkeypatch):
     assert maker.deposits == [(Decimal("120.000000"), {"mint": False})]
 
 
+def test_credit_wait_counts_from_the_deposit_call(setup):
+    maker, clients, clock = setup
+    real = maker.deposit
+
+    def slow_deposit(amount, **kwargs):
+        clock.sleep(90)
+        return real(amount, **kwargs)
+
+    maker.deposit = slow_deposit
+    maker.credit = False
+    calls = []
+    real_balance = maker.balance
+
+    def balance():
+        calls.append(1)
+        if len(calls) == 4:
+            maker.credit = True
+        return real_balance()
+
+    maker.balance = balance
+    assert qs.steps(credit_timeout=60, trade_timeout=5, poll=1).status == "open"
+    assert clock() >= 90 and len(maker.deposits) == 1
+
+
 def test_funded_maker_deposits_nothing(setup):
     maker, clients, clock = setup
     maker.free = Decimal(20)

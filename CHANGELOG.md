@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- The maker quickstart waits up to 30 minutes for deposit credit, counted from the deposit call. 0.2.10 counted 300 s from the start, so a mainnet deposit (the call alone takes up to 90 s) could time out before credit.
+
 ## 0.2.10
 
 - `test_request()` returns a validated 100 USD USD/MXN request for one maker. The request lasts three hours. Each RFQ closes after 120 seconds. Repeating after an unaccepted RFQ expires renews it without changing `Rfq.request_expires_at` or settlement, two hours after that deadline. Renewal does not consume another daily request. `Rfq.reference_rate` provides an example quote price.

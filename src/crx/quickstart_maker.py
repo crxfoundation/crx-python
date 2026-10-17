@@ -67,6 +67,8 @@ def _fund(maker, timeout: float, poll: float) -> None:
         deposit = maker.deposit(amount, mint=False)
         if deposit.status == "failed":
             raise crx.CrxError("the deposit failed", code="deposit_failed")
+        # The credit wait counts from the deposit: the deposit call itself can take 90 s.
+        end = time.monotonic() + timeout
         balance = maker.balance()
         while _free(balance) < COLLATERAL:
             if _deposit_status(balance) == "failed":
@@ -76,7 +78,7 @@ def _fund(maker, timeout: float, poll: float) -> None:
     log("free collateral", _free(balance), "USDC")
 
 
-def steps(*, credit_timeout: float = 300, trade_timeout: float = 300, final_timeout: float = 1800,
+def steps(*, credit_timeout: float = 1800, trade_timeout: float = 300, final_timeout: float = 1800,
           poll: float = 2) -> crx.Trade:
     """Deposit the shortfall (at least 100 USDC), request and quote a test RFQ, wait until the trade is open,
     then read it back from ``/positions`` until it is final and print it.
