@@ -8,7 +8,7 @@ import pytest
 import crx
 from crx import _eip712 as e7
 from .conftest import Clock
-from .test_quote_trade import Venue, HEAD, QID, RFQ, signed_posts
+from .test_quote_trade import Venue, HEAD, QID, RFQ, TXH, accepts, signed_posts
 from .test_test_request import NOW, request_wire
 
 
@@ -31,8 +31,14 @@ def setup(make_client, session, health, markets):
     events[0]["data"].pop("status")
     events[0]["data"].pop("kind")
     session.routes[("GET", "/trades")] = lambda req: {"trades": events, "seq": 1}
-    session.routes[("GET", f"/rfqs/{RFQ}")] = lambda req: dict(
-        wire, **v.view(req), status="accepted" if v.sig else wire["status"])
+    def view(req):
+        current = dict(wire, **v.view(req), status="accepted" if v.sig else wire["status"])
+        if v.sig:
+            current["quote"] = current["quote"] or v.row()
+            current["quote"]["status"] = "accepted"
+            current["quotes"][0]["status"] = "accepted"
+        return current
+    session.routes[("GET", f"/rfqs/{RFQ}")] = view
     session.routes[("GET", f"/rfqs/{RFQ}/accept-check")] = lambda req: {
         "ok": True, "rfq_id": RFQ, "quote_id": QID, "trade_template": v.draft}
     return c, v, wire, events, session, clock
@@ -229,3 +235,128 @@ def test_worker_accepts_renewed_rfq_under_original_request_deadline(setup):
     assert len(signed_posts(session)) == 1
     assert wire["request_expires_at"] == (NOW + 10800) * 1000
     assert wire["expiry"] == (NOW + 18000) * 1000
+
+
+def retain_accept(setup):
+    """Keep a signed round pending until an unsigned accept submits it."""
+    c, venue, wire, events, session, clock = setup
+    venue.script = [("pending", None)]
+    first = session.routes[("POST", f"/rfqs/{RFQ}/accept")]
+
+    def accept(req):
+        if venue.sig is None:
+            return first(req)
+        assert req["body"] == {"quote_id": QID}
+        venue.script = [("open", TXH)]
+        return {"rfq_id": RFQ, "quote_id": QID}
+
+    session.routes[("POST", f"/rfqs/{RFQ}/accept")] = accept
+    assert worker_type()(c).run_once()[0].status == "pending"
+    assert len(signed_posts(session)) == 1
+    return accept
+
+
+@pytest.mark.parametrize("after", [0, 121, 570, 571, 10801])
+@pytest.mark.parametrize("status", [None, "pending", "sending"])
+def test_worker_recovers_retained_accept_after_restart_and_expiry(setup, make_client, monkeypatch, after, status):
+    c, venue, wire, events, session, clock = setup
+    retain_accept(setup)
+    clock.t = max(clock(), NOW + after)
+    venue.script = [(status, None)]
+    restarted = make_client(clock=clock)
+
+    def no_signature():
+        raise AssertionError("accepted recovery must not use the trade signer")
+
+    monkeypatch.setattr(restarted, "_binder", no_signature)
+    worker = worker_type()(restarted)
+    worker.run_once()
+    assert accepts(session)[1:] == [{"quote_id": QID}]
+    assert venue.script == [("open", TXH)]
+    worker.run_once()
+    assert len(accepts(session)) == 2
+    assert len(signed_posts(session)) == 1
+    assert sum(x["path"].endswith("accept-check") for x in session.calls) == 1
+
+
+def test_worker_retries_retained_accept_failures_until_server_terminal(setup, make_client):
+    c, venue, wire, events, session, clock = setup
+    recover = retain_accept(setup)
+    clock.t = NOW + 569
+    session.routes[("POST", f"/rfqs/{RFQ}/accept")] = [
+        (503, {"code": "unavailable", "error": "unavailable"}),
+        (409, {"code": "mark_unavailable", "error": "mark unavailable"}),
+        recover,
+    ]
+    worker_type()(make_client(clock=clock), poll=1).run(duration=5)
+    assert accepts(session)[1:] == [{"quote_id": QID}] * 3
+    assert len(signed_posts(session)) == 1
+    assert venue.script == [("open", TXH)]
+    assert clock() == NOW + 574
+
+
+@pytest.mark.parametrize("edit", [
+    {"test_request": False}, {"client_rfq_id": "test-request-"},
+    {"client_rfq_id": "test-request-another-owner"}, {"chain": "wrong"},
+    {"side": -1}, {"pair": "USD/BRL"}, {"notional": "101"},
+    {"kind": "close"}, {"premium_bps": 1}, {"expiry": (NOW + 18001) * 1000},
+    {"request_expires_at": (NOW + 10801) * 1000},
+    {"closes_at": (NOW + 119) * 1000}, {"taker_ref": "0x" + "f0" * 32},
+    {"quote": None}, {"quote": {"quote_id": "bad", "status": "accepted"}},
+    {"quote": {"quote_id": QID, "status": "quoted"}},
+    {"status": "cancelled"}, {"status": "expired"}, {"status": "rejected"},
+    {"status": "opened"}, {"status": "settled"},
+    {"trade_status": "open"}, {"trade_status": "refused"}, {"trade_status": "closed"},
+])
+def test_worker_recovery_requires_own_fixed_pending_request(setup, make_client, edit):
+    c, venue, wire, events, session, clock = setup
+    retain_accept(setup)
+    clock.t = NOW + 600
+    view = session.routes[("GET", f"/rfqs/{RFQ}")]
+    session.routes[("GET", f"/rfqs/{RFQ}")] = lambda req: dict(view(req), **edit)
+    worker_type()(make_client(clock=clock)).run_once()
+    assert len(accepts(session)) == len(signed_posts(session)) == 1
+
+
+def test_worker_never_signs_a_template_returned_during_recovery(setup, make_client):
+    c, venue, wire, events, session, clock = setup
+    recover = retain_accept(setup)
+    session.routes[("POST", f"/rfqs/{RFQ}/accept")] = [venue.stale_answer(QID), recover]
+    restarted = worker_type()(make_client(clock=clock))
+    restarted.run_once()
+    restarted.run_once()
+    assert accepts(session)[1:] == [{"quote_id": QID}] * 2
+    assert len(signed_posts(session)) == 1
+
+
+def test_worker_recovers_accept_retained_before_initial_error(setup, make_client):
+    c, venue, wire, events, session, clock = setup
+    first = session.routes[("POST", f"/rfqs/{RFQ}/accept")]
+    venue.script = [("pending", None)]
+
+    def retain_then_fail(req):
+        first(req)
+        return (503, {"code": "mark_unavailable", "error": "mark unavailable"})
+
+    session.routes[("POST", f"/rfqs/{RFQ}/accept")] = retain_then_fail
+    assert worker_type()(c).run_once() == []
+    assert venue.sig is not None
+    session.routes[("POST", f"/rfqs/{RFQ}/accept")] = {"rfq_id": RFQ, "quote_id": QID}
+    clock.t = NOW + 121
+    worker_type()(make_client(clock=clock)).run_once()
+    assert accepts(session)[1:] == [{"quote_id": QID}]
+    assert len(signed_posts(session)) == 1
+
+
+def test_worker_polls_expired_signature_until_server_refuses(setup, make_client):
+    c, venue, wire, events, session, clock = setup
+    retain_accept(setup)
+    clock.t = NOW + 570
+    view = session.routes[("GET", f"/rfqs/{RFQ}")]
+    session.routes[("GET", f"/rfqs/{RFQ}")] = [view, view, dict(view(None), trade_status="refused")]
+    session.routes[("POST", f"/rfqs/{RFQ}/accept")] = (
+        409, {"code": "round_closed", "error": "round closed"})
+    worker_type()(make_client(clock=clock), poll=1).run(duration=5)
+    assert accepts(session)[1:] == [{"quote_id": QID}] * 2
+    assert len(signed_posts(session)) == 1
+    assert clock() == NOW + 575

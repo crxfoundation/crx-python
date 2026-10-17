@@ -21,7 +21,9 @@ class TestRequestWorker:
 
     Each pass starts at the beginning of the account's event history. Current RFQ
     status decides whether an accept is permitted; no persisted cursor skips work.
-    The gateway's accept check and the standard trade signer run before each accept.
+    New accepts use the gateway's accept check and the standard trade signer.
+    Accepted requests resume through the unsigned repeat route until the server
+    reports a terminal status, including after the quote and request deadlines.
     """
 
     def __init__(self, client: Client, *, poll: float = 2, max_pages: int = 100):
@@ -33,7 +35,7 @@ class TestRequestWorker:
         self.client, self.poll, self.max_pages = client, float(poll), max_pages
 
     def run_once(self) -> list[Trade]:
-        """Scan a bounded event history and accept each eligible current quote once."""
+        """Accept or resume requests in a bounded scan. Return newly signed trades."""
         c = self.client
         cursor, seen, results = 0, set(), []
         for _ in range(self.max_pages):
@@ -43,7 +45,7 @@ class TestRequestWorker:
                     continue
                 d = event.get("data")
                 try:
-                    validate(d, c.chain_key, c._clock(), maker=False, event=True)
+                    validate(d, c.chain_key, c._clock(), maker=False, event=True, historical_event=True)
                 except BadAnswer:
                     continue
                 rid = d["rfq_id"]
@@ -63,10 +65,16 @@ class TestRequestWorker:
     def _accept(self, event: dict) -> Trade | None:
         c, rid = self.client, event["rfq_id"]
         view = c._gw.request("GET", f"/rfqs/{rid}")
-        validate(view, c.chain_key, c._clock(), maker=False)
-        for key in ("rfq_id", "client_rfq_id", "expiry", "closes_at", "request_expires_at", "taker_ref"):
+        validate(view, c.chain_key, c._clock(), maker=False, allow_accepted=True)
+        for key in ("rfq_id", "client_rfq_id", "expiry", "closes_at", "request_expires_at", "taker_ref",
+                    "quote_expiry_max"):
             if view.get(key) != event.get(key):
                 raise BadAnswer("the test request changed after its opening event")
+        if view["status"] == "accepted":
+            self._recover(view)
+            return None
+        if view["status"] == "opened":
+            return None
         if view.get("trade_status") not in (None, ""):
             return None
         if not word(view.get("leg_id")):
@@ -86,6 +94,19 @@ class TestRequestWorker:
         if not quote.rate.is_finite() or quote.rate <= 0:
             raise BadAnswer("the test quote rate is invalid")
         return c.trade(quote)
+
+    def _recover(self, view: dict) -> None:
+        """Ask the server to submit its stored acceptance. Never sign another trade."""
+        if view.get("trade_status") not in (None, "", "pending", "sending"):
+            return
+        quote = view.get("quote")
+        if (not isinstance(quote, dict) or quote.get("status") != "accepted"
+                or not word(quote.get("quote_id"))):
+            raise BadAnswer("the test request has no accepted quote")
+        rid, qid = view["rfq_id"], quote["quote_id"]
+        answer = self.client._gw.request("POST", f"/rfqs/{rid}/accept", body={"quote_id": qid})
+        if answer.get("rfq_id") != rid or answer.get("quote_id") != qid:
+            raise BadAnswer("the test request recovery returned different identifiers")
 
     def run(self, *, duration: float = 60) -> None:
         """Poll for a bounded duration. Each HTTP request and trade has its own timeout."""

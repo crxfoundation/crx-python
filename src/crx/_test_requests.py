@@ -33,7 +33,8 @@ def rate(value) -> Decimal:
 
 
 def validate(d: dict, chain: str, now: float, *, maker: bool, event: bool = False,
-             require_reference: bool = True, allow_accepted: bool = False) -> None:
+             require_reference: bool = True, allow_accepted: bool = False,
+             historical_event: bool = False) -> None:
     """Reject changed terms before any trade signature. Maker responses require a reference rate."""
     if not isinstance(d, dict) or d.get("test_request") is not True:
         raise BadAnswer("the response is not a test request")
@@ -48,7 +49,8 @@ def validate(d: dict, chain: str, now: float, *, maker: bool, event: bool = Fals
     if type(premium) is not int or premium != 0:
         raise BadAnswer("the test request premium must be zero")
     status = d.get("status", "open" if event else None)
-    accepted = allow_accepted and maker and not event and status in ("accepted", "opened")
+    accepted = allow_accepted and not event and status in ("accepted", "opened")
+    past = accepted or (historical_event and event and not maker)
     if status not in ("open", "quoted") and not accepted:
         raise BadAnswer("the test request is closed")
     expiry, closes, request_end = d.get("expiry"), d.get("closes_at"), d.get("request_expires_at")
@@ -57,7 +59,7 @@ def validate(d: dict, chain: str, now: float, *, maker: bool, event: bool = Fals
             or request_end > (now + REQUEST_SECONDS + 30) * 1000
             or closes > (now + RFQ_SECONDS + 30) * 1000
             or expiry != request_end + SETTLEMENT_DELAY_SECONDS * 1000
-            or (not accepted and (request_end <= now * 1000 or closes <= now * 1000))):
+            or (not past and (request_end <= now * 1000 or closes <= now * 1000))):
         raise BadAnswer("the test request has an invalid time window")
     end = d.get("quote_expiry_max")
     if type(end) is not int or end <= 0 or not word(d.get("taker_ref")):
