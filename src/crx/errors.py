@@ -420,6 +420,21 @@ def retry_after_secs(value: Any) -> int | None:
         return None
 
 
+# A UTC time a gateway line names: ``17:05 UTC``, ``Tue 02:34 UTC`` or ``Sun 4 Oct 23:00 UTC``.
+_UTC_TIME = re.compile(
+    r"(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) (?:\d{1,2} (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) )?)?"
+    r"\d{2}:\d{2}(?::\d{2})? UTC")
+
+
+def utc_time(*texts: Any) -> str | None:
+    """The first UTC time that ``texts`` name, as written (``17:05 UTC``); None when none names one."""
+    for t in texts:
+        m = _UTC_TIME.search(t) if isinstance(t, str) else None
+        if m:
+            return m.group(0)
+    return None
+
+
 def wait_secs(details: dict) -> float | None:
     """``details['retry_after_secs']`` as seconds; None unless a number from 0 to ``RETRY_AFTER_MAX``."""
     try:
@@ -434,8 +449,11 @@ def from_gateway(status: int, body: Any, text: str = "", *, host: str = "", retr
 
     The message is the gateway's ``message``; with none, its ``error``. When the body has both,
     ``details['error']`` holds the ``error``. A body that is not a JSON object gives the message
-    ``HTTP <status> from <host>``; its first text line goes to ``details['body']``. A Retry-After
-    header fills ``details['retry_after_secs']`` when the body has none.
+    ``HTTP <status> from <host>``; its first text line goes to ``details['body']``.
+
+    The time to try again, when the gateway names one: ``details['retry_after_secs']`` from the body's
+    ``details``, else from the body, else from the Retry-After header; ``details['time_utc']``, the UTC time
+    the body's ``message`` or ``error`` names (``17:05 UTC``).
     """
     if isinstance(body, dict):
         gw = gateway_code(body) or None
@@ -444,6 +462,11 @@ def from_gateway(status: int, body: Any, text: str = "", *, host: str = "", retr
         details = dict(body["details"]) if isinstance(body.get("details"), dict) else {}
         if said and why:
             details.setdefault("error", clean(why))
+        if "retry_after_secs" not in details and wait_secs(body) is not None:
+            details["retry_after_secs"] = body["retry_after_secs"]
+        at = utc_time(said, why)
+        if at is not None:
+            details.setdefault("time_utc", at)
     else:
         gw = None
         msg = f"HTTP {status} from {clean(host, 100)}" if host else f"HTTP {status}"

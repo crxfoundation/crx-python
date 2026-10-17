@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- `trade()` and `withdraw()` post each signed request once. A refusal raises at once and names the time to try again when the gateway names one.
+- `trade()`: a 409 `rejected` raises `QuoteExpired` (`gateway_code` `rejected`) at once. 0.2.9 posted the same accept again every 3 s until the RFQ closed.
+- `trade()`: on 409 `quote_dropped`, `QuoteDropped` raises and nothing is signed for another quote. `.best` is the best live quote on the same RFQ, or None: pass it to `trade()` to accept it. 0.2.9 accepted `.best` once when its rate was no worse.
+- `withdraw()`: a 409 `conflict` ("the latest settlement is not read yet") raises at once with the gateway's line. Nothing is queued: call `withdraw()` again after the time it names. 0.2.9 posted the same intent again for up to 20 minutes.
+- Any gateway refusal: `details["time_utc"]` is the UTC time its `message` or `error` names (`17:05 UTC`). `details["retry_after_secs"]` comes from the body's `details`, else the body, else the `Retry-After` header.
+- `trade()` refusals keep the gateway's `message`, `outcome` and time in `details`, and the `Retry-After` header too.
+- `withdraw()` of the same amount after `WithdrawUnknown` still posts the same signed intent, once per call. The gateway's answer to that post, when it refuses it, is in the next `WithdrawUnknown` as `details["refusal"]`.
+
 ## 0.2.9
 
 - Ethereum mainnet (chain 1) pins core `0x0d716cA9Fc2BFD8c66D2AF2fB38b56D08809A8cc`. The signing domain is built from this pin. 0.2.8 pins the former core: from the move, it refuses to sign on Ethereum mainnet (`RefusedToSign`, "core moved"). Update to 0.2.9.

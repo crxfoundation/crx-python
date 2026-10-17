@@ -806,49 +806,23 @@ UNREAD = {"error": "conflict: the latest settlement is not read yet; retry short
           "outcome": "unavailable", "message": "Service unavailable."}
 
 
-def unread_gate(session, health, account, clock, refusals):
-    """POST /withdraw answers ``refusals`` 409s first (an int, or every post with None), then as ``Gate``."""
-    g = gate(session, health, account)
-    posts = []
-
-    def answer(req):
-        posts.append((clock(), req["body"]))
-        if refusals is None or len(posts) <= refusals:
-            return (409, UNREAD)
-        return g.answer(req)
-
-    session.routes[("POST", "/withdraw")] = answer
-    session.routes[("GET", "/balance")] = [balance_body(account), g.view("accepted", tx=LANDED)]
-    return g, posts
-
-
 @pytest.mark.parametrize("text", [UNREAD["error"], UNREAD["error"].removeprefix("conflict: ")], ids=["wire", "bare"])
-def test_withdraw_posts_the_same_intent_again_until_the_settlement_is_read(
-        make_client, session, health, account, monkeypatch, text):
+def test_withdraw_unread_409_is_posted_once(make_client, session, health, account, monkeypatch, text):
+    # The 409 comes back at once with the gateway's line: nothing queued, nothing posted again.
     monkeypatch.setitem(UNREAD, "error", text)
     Chain(session)
     clock = Clock(time.time())
-    g, posts = unread_gate(session, health, account, clock, refusals=3)
-    t0 = clock()
-    out = make_client(clock=clock).withdraw(1000)
-    assert (out.status, out.item) == ("accepted", g.item)
-    assert [round(t - t0) for t, _ in posts] == [0, 15, 45, 105]  # 15 s, 30 s, then 60 s apart
-    assert all(b == posts[0][1] for _, b in posts)  # one signature: the same item each time
-
-
-def test_withdraw_stops_after_20_minutes(make_client, session, health, account):
-    Chain(session)
-    clock = Clock(time.time())
-    _, posts = unread_gate(session, health, account, clock, refusals=None)
+    gate(session, health, account)
+    session.routes[("GET", "/balance")] = balance_body(account)
+    posts = []
+    session.routes[("POST", "/withdraw")] = lambda req: posts.append(req["body"]) or (409, UNREAD)
+    c = make_client(clock=clock)
     t0 = clock()
     with pytest.raises(crx.CrxError) as e:
-        make_client(clock=clock).withdraw(1000)
-    assert str(e.value) == ("withdraw not sent: the latest settlement is not yet confirmed; "
-                            "the request was retried for 20 minutes.")
-    assert (e.value.code, e.value.status) == ("conflict", 409)
-    times = [round(t - t0) for t, _ in posts]
-    assert times[:5] == [0, 15, 45, 105, 165] and times[-1] == 1200 and len(times) == 23
-    assert all(b == posts[0][1] for _, b in posts)
+        c.withdraw(1000)
+    assert (e.value.code, e.value.status, str(e.value)) == ("conflict", 409, UNREAD["message"])
+    assert e.value.details["error"] == text
+    assert len(posts) == 1 and clock() == t0 and c._held_withdraw is None
 
 
 @pytest.mark.parametrize("status, body", [

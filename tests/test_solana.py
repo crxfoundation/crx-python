@@ -1852,7 +1852,7 @@ def test_readme_solana_quickstart_names_the_version_binds_by_the_keys_and_waits_
         assert claim not in section, claim
 
 
-# ---------- withdraw: the repost after the 409 "the latest settlement is not read yet" ----------
+# ---------- withdraw: the 409 "the latest settlement is not read yet" ----------
 
 # The wire text of crx-api: its Conflict error displays as "conflict: {0}".
 UNREAD = {"error": "conflict: the latest settlement is not read yet; retry shortly", "code": "conflict",
@@ -1878,39 +1878,24 @@ def withdraw_routes(session, c, refusals):
     return posts
 
 
-def test_solana_withdraw_posts_the_same_signed_intent_again_after_the_refusal(solnet, solsession, tmp_path, account,
-                                                                              monkeypatch):
-    """One signature. The bound check and the nonce read run once, before the first post. Each repost follows
-    a 409 and carries the same body: 15 s, 30 s, then 60 s apart."""
+def test_solana_withdraw_posts_once_on_the_409(solnet, solsession, tmp_path, account, monkeypatch):
+    """One signature, one post. The bound check and the nonce read run once, before the post. The 409 comes
+    back at once with the gateway's line."""
     c = sclient(solsession, tmp_path, account)
-    posts = withdraw_routes(solsession, c, refusals=3)
+    posts = withdraw_routes(solsession, c, refusals=None)
     signed = []
     real = crx.client.sign_typed
     monkeypatch.setattr(crx.client, "sign_typed", lambda *a, **k: signed.append(1) or real(*a, **k))
     t0 = c._clock()
-    out = c.withdraw("10")
-    assert [round(t - t0) for t, _ in posts] == [0, 15, 45, 105]
-    assert all(b == posts[0][1] for _, b in posts) and len(signed) == 1
-    assert out.nonce == 4 and posts[0][1]["nonce"] == "4" and posts[0][1]["deadline"] == int(t0) + 22 * 3600
+    with pytest.raises(crx.CrxError) as ei:
+        c.withdraw("10")
+    assert (ei.value.code, ei.value.status, str(ei.value)) == ("conflict", 409, UNREAD["message"])
+    assert len(posts) == len(signed) == 1 and c._clock() == t0 and c._held_withdraw is None
+    assert posts[0][1]["nonce"] == "4" and posts[0][1]["deadline"] == int(t0) + 22 * 3600
     calls = calls_of(solsession)
     first = calls.index(("POST", "/withdraw"))
     assert calls[:first].count(("GET", "/bind")) == 1 and calls[:first].count(("GET", "/balance")) == 1
-    assert calls[first:first + 4] == [("POST", "/withdraw")] * 4 and ("GET", "/bind") not in calls[first:]
-
-
-def test_solana_withdraw_stops_at_the_20_minute_bound(solnet, solsession, tmp_path, account):
-    c = sclient(solsession, tmp_path, account)
-    posts = withdraw_routes(solsession, c, refusals=None)
-    t0 = c._clock()
-    with pytest.raises(crx.CrxError) as ei:
-        c.withdraw("10")
-    assert str(ei.value) == ("withdraw not sent: the latest settlement is not yet confirmed; "
-                             "the request was retried for 20 minutes.")
-    assert (ei.value.code, ei.value.status) == ("conflict", 409)
-    times = [round(t - t0) for t, _ in posts]
-    assert times[:5] == [0, 15, 45, 105, 165] and times[-1] == 1200 and len(times) == 23
-    assert all(b == posts[0][1] for _, b in posts)
-    assert posts[0][1]["deadline"] > t0 + 1200  # the signed deadline outlasts the retries
+    assert calls[first:] == [("POST", "/withdraw")]
 
 
 @pytest.mark.parametrize("status, body", [

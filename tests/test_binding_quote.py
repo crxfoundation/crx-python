@@ -22,7 +22,7 @@ def venue(session, health, markets, clock):
     return Venue(session, health, markets, clock)
 
 
-# ---------- 409 quote_dropped: the best live quote, taken once ----------
+# ---------- 409 quote_dropped: the best live quote, for the caller to take ----------
 
 
 def drops(venue, session, best_edit, then=None):
@@ -42,29 +42,26 @@ def drops(venue, session, best_edit, then=None):
     session.routes[("POST", f"/rfqs/{RFQ}/accept")] = accept
 
 
-@pytest.mark.parametrize("side,rate,taken", [
-    ("buy", "18.650000", True), ("buy", "18.700000", True), ("buy", "18.750000", False),
-    ("sell", "18.750000", True), ("sell", "18.650000", False),
+@pytest.mark.parametrize("side,rate", [
+    ("buy", "18.650000"), ("buy", "18.700000"), ("buy", "18.750000"), ("sell", "18.750000"), ("sell", "18.650000"),
 ])
-def test_dropped_quote_takes_the_best_once(make_client, venue, session, clock, account, side, rate, taken):
+def test_dropped_quote_names_the_best_and_signs_nothing_for_it(make_client, venue, session, clock, account, side,
+                                                               rate):
+    # Better, equal or worse: the best quote is the caller's to take.
     drops(venue, session, {"quote_id": QID2, "rate": rate})
     c = make_client(clock=clock)
     q = c.quote("USD/MXN", side, 25_000)
     assert q.rate == Decimal("18.700000")
-    if taken:
-        t = c.trade(q)
-        assert (t.status, t.quote_id, str(t.rate)) == ("open", QID2, rate)
-        first, second = accepts(session)
-        assert (first["quote_id"], second["quote_id"]) == (QID, QID2) and set(second) == {"quote_id", "sig"}
-    else:
-        with pytest.raises(crx.QuoteDropped) as ei:
-            c.trade(q)
-        e = ei.value
-        assert isinstance(e, crx.QuoteExpired) and e.code == "quote_dropped" and e.status == 409
-        assert (e.best.quote_id, str(e.best.rate), e.best.rfq_id) == (QID2, rate, RFQ)
-        assert len(accepts(session)) == 1
-        t = c.trade(e.best)  # the caller's one more call
-        assert (t.status, t.quote_id) == ("open", QID2) and len(accepts(session)) == 2
+    with pytest.raises(crx.QuoteDropped) as ei:
+        c.trade(q)
+    e = ei.value
+    assert isinstance(e, crx.QuoteExpired) and e.code == "quote_dropped" and e.status == 409
+    assert (e.best.quote_id, str(e.best.rate), e.best.rfq_id) == (QID2, rate, RFQ)
+    assert len(accepts(session)) == len(signed_posts(session)) == 1
+    t = c.trade(e.best)  # the caller's one more call
+    assert (t.status, t.quote_id, str(t.rate)) == ("open", QID2, rate)
+    first, second = accepts(session)
+    assert (first["quote_id"], second["quote_id"]) == (QID, QID2) and set(second) == {"quote_id", "sig"}
     # The best quote binds this taker's own leg, at its own rate.
     msg = venue.template["typed_data"]["message"]
     assert msg["ownLegId"] == venue.leg and msg["rateE6"] == str(int(Decimal(rate) * 10**6))
@@ -100,6 +97,10 @@ def test_dropped_twice_raises(make_client, venue, session, clock):
     c = make_client(clock=clock)
     with pytest.raises(crx.QuoteDropped) as ei:
         c.trade(c.quote("USD/MXN", "buy", 25_000))
+    best = ei.value.best
+    assert best.quote_id == QID2 and [b["quote_id"] for b in accepts(session)] == [QID]
+    with pytest.raises(crx.QuoteDropped) as ei:
+        c.trade(best)  # the caller takes the best: its maker dropped it too
     assert ei.value.best is None
     assert [b["quote_id"] for b in accepts(session)] == [QID, QID2] and sent_nothing(session)
 

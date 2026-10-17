@@ -85,7 +85,7 @@ def binder(tmp_path, now):
     session = FakeSession()
     gw = Gateway(BASE, None, session)
     b = Binder(gw, Account.from_key(TAKER["private_key"]), {"chain_id": DOM["chainId"],
-               "core": DOM["verifyingContract"]}, SEP, tmp_path / "state", sleep=lambda s: None, clock=lambda: now)
+               "core": DOM["verifyingContract"]}, SEP, tmp_path / "state", clock=lambda: now)
     return b, session
 
 

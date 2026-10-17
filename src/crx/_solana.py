@@ -866,9 +866,9 @@ class SeatBinder(Binder):
 
     _stopped: SeatStopped | None = None
 
-    def post_accept(self, rfq_id: str, body: dict, until: float) -> Any:
+    def post_accept(self, rfq_id: str, body: dict) -> Any:
         try:
-            return super().post_accept(rfq_id, body, until)
+            return super().post_accept(rfq_id, body)
         except SeatStopped as e:
             self._stopped = e
             raise

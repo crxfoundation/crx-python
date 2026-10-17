@@ -413,33 +413,6 @@ def test_withdraw_unread_balance_is_no_repeat(make_client, session, health, acco
     assert len(withdraw_posts(session)) == 1
 
 
-def test_withdraw_sent_is_stamped_on_each_post_of_the_conflict_loop(make_client, session, health, account):
-    # 409 "not read yet" posts the intent again; the last of them starts the in-flight window.
-    Chain(session)
-    g = gate(session, health, account)
-    unread = (409, {"code": "conflict", "error": "conflict: the latest settlement is not read yet; retry shortly"})
-    posts = []
-
-    def post(req):
-        posts.append(req)
-        if len(posts) < 4:
-            return unread
-        g.answer(req)
-        raise requests.ReadTimeout("read timed out")
-    session.routes[("POST", "/withdraw")] = post
-    session.routes[("GET", "/balance")] = Money(account, g)
-    clock = Clock(time.time())
-    c = make_client(clock=clock)
-    with pytest.raises(crx.WithdrawUnknown):
-        c.withdraw(1000)
-    last_post = c._held_withdraw["sent"]
-    assert clock() - last_post < 300  # the window runs from the last post, not the first
-    session.routes[("POST", "/withdraw")] = (409, {"code": "withdraw_in_progress", "error": "in progress"})
-    with pytest.raises(crx.WithdrawUnknown):
-        c.withdraw(1000)  # inside the window: read only
-    assert len(posts) == 4 and c._held_withdraw is not None
-
-
 def withdraw_posts(session):
     return [x["body"] for x in session.calls if x["method"] == "POST" and x["path"] == "/withdraw"]
 

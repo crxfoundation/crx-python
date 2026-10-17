@@ -29,7 +29,7 @@ from .errors import (
 QUOTE_WINDOW = 630  # s: the chain arms only while the quote end is at most 600 s ahead, plus 30 s of clock slack
 NONCE_AHEAD_MS = 86_400_000  # the gateway's bound: ownNonce at most 24 h past now, in ms
 NEW_QUOTE = "not opened; request a new quote"
-MAX_POSTS = 3  # accept bodies per trade; a re-post of the same body after 409 rejected does not count
+MAX_POSTS = 3  # accept bodies per trade, each posted once
 # Accept refusals that reserve nothing and send nothing, even after a signed post.
 NOTHING_SENT = (QuoteExpired, OwnRoundOpen, QuoteNotYours, RateLimited, Declined, ServiceUnavailable)
 # The gateway's band declines: answered before the accept reserves anything, whatever the HTTP status.
@@ -61,30 +61,42 @@ def obj(r: Any) -> dict:
     return body if isinstance(body, dict) else {}
 
 
+def served(r: Any) -> dict:
+    """The details of the refusal ``r``: the gateway's ``details``, its line (``message``, ``outcome``) and the
+    time it names (``retry_after_secs``, ``time_utc``), each when served."""
+    if r is None:
+        return {}
+    d = dict(Gateway.error_of(r).details)
+    for key in ("message", "outcome"):
+        v = obj(r).get(key)
+        if isinstance(v, str) and v.strip():
+            d.setdefault(key, clean(v, 300))
+    return d
+
+
 def refused(r: Any) -> CrxError:
     """A bind refusal: a closed round asks for a new quote."""
     k = status_code(r)
     if k[0] == 410 or k in ((409, "rejected"), (409, "round_closed"), (409, "conflict")):
-        return QuoteExpired(NEW_QUOTE, status=k[0], gateway_code=k[1] or None)
+        return QuoteExpired(NEW_QUOTE, status=k[0], gateway_code=k[1] or None, details=served(r))
     return Gateway.error_of(r)
 
 
 def accept_refused(r: Any) -> CrxError:
-    """An accept refusal. 409 rejected here is the end of the busy-maker retries.
+    """An accept refusal, raised as it came: the accept is posted once. ``details`` carries ``served(r)``.
     409 quote_dropped keeps the served best live quote in ``details["best"]`` (a row, or None)."""
     k = status_code(r)
-    d = obj(r).get("details")
-    d = d if isinstance(d, dict) else {}
+    d = served(r)
     if k == (409, "quote_dropped"):
         best = d.get("best", obj(r).get("best"))
+        d["best"] = best if isinstance(best, dict) else None
         return QuoteDropped(f"the maker dropped this quote; {NEW_QUOTE}", status=409, gateway_code="quote_dropped",
-                            details={"best": best if isinstance(best, dict) else None})
+                            details=d)
     if k == (409, "own_round_open"):
         return OwnRoundOpen("your previous round is still open; no new trade before it ends",
                             status=409, gateway_code="own_round_open", details=d)
     if k == (409, "rejected"):
-        return QuoteExpired(f"the maker refused the accept; {NEW_QUOTE}", status=409, gateway_code="rejected",
-                            details=d)
+        return QuoteExpired(f"the accept was refused; {NEW_QUOTE}", status=409, gateway_code="rejected", details=d)
     if k[1] in UNAVAILABLE:
         return ServiceUnavailable(f"service temporarily unavailable: the trade is {NEW_QUOTE}", status=k[0],
                                   gateway_code=k[1], details=d)
@@ -122,7 +134,6 @@ class Binder:
         chain: dict,
         separator: bytes,
         state_dir: Path,
-        sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.time,
     ) -> None:
         """``account``: the signer (``crx.signer``), or a local account."""
@@ -132,7 +143,6 @@ class Binder:
         self.chain = chain
         self.sep = separator
         self.state_path = Path(state_dir).expanduser() / f"side-nonce-{self.seat}"
-        self.sleep = sleep
         self.now = clock
 
     def typed(self, primary: str, message: dict) -> dict:
@@ -256,14 +266,9 @@ class Binder:
         closes = closes_at_ms if isinstance(closes_at_ms, int) and not isinstance(closes_at_ms, bool) else 10**13
         return min(self.now() + 120, closes / 1000)
 
-    def post_accept(self, rfq_id: str, body: dict, until: float) -> Any:
-        """POST /accept. 409 rejected can be a busy maker: post the same body again every 3 s until ``until``."""
-        while True:
-            r = self.gw.raw_request("POST", f"/rfqs/{rfq_id}/accept", body=body)
-            if status_code(r) == (409, "rejected") and self.now() + 3 < until:
-                self.sleep(3)
-                continue
-            return r
+    def post_accept(self, rfq_id: str, body: dict) -> Any:
+        """POST /accept, once. The caller reads the answer."""
+        return self.gw.raw_request("POST", f"/rfqs/{rfq_id}/accept", body=body)
 
     def accept_trade(
         self, rfq_id: str, quote_id: str, ask: dict, t: dict | None, closes_at_ms: Any,
@@ -273,8 +278,9 @@ class Binder:
         ``t`` is the template on the quote row. With none, ``{quote_id}`` asks the gateway
         for it: 409 trade_stale carries it. A template whose ownNonce is not above this
         seat's last signed one is asked for again, while a signed post still fits.
-        409 trade_stale on a signed post carries a fresh template: it is checked and signed
-        in turn. At most MAX_POSTS bodies, before the RFQ's ``closes_at_ms``.
+        409 trade_stale on a signed post carries a fresh template: the gateway reserved nothing, and the
+        fresh template is checked and signed in turn. Each body is posted once; at most MAX_POSTS bodies,
+        before the RFQ's ``closes_at_ms``. Any other refusal raises at once, with ``served()`` in ``details``.
 
         Returns (the 200 answer, the template signed, the answer time). When the gateway
         does not answer a signed post, the answer is ``{}``: the gateway may hold the
@@ -291,7 +297,7 @@ class Binder:
             ask_for = t is None
             while True:
                 if ask_for:
-                    r = self.post_accept(rfq_id, {"quote_id": quote_id}, until)
+                    r = self.post_accept(rfq_id, {"quote_id": quote_id})
                     posts += 1
                     if r is not None and r.status_code == 200:
                         # The gateway answers an RFQ it holds an accept on with that accept, and can arm it.
@@ -307,7 +313,7 @@ class Binder:
                 sig = self.sign_template(t, ask)
                 signed = t
                 try:
-                    r = self.post_accept(rfq_id, {"quote_id": quote_id, "sig": sig}, until)
+                    r = self.post_accept(rfq_id, {"quote_id": quote_id, "sig": sig})
                 except NetworkError:
                     r = None
                 posts += 1

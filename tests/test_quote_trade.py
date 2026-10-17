@@ -354,21 +354,20 @@ def test_trade_no_status_is_pending(make_client, venue, session, clock, view):
 
 def test_the_accept_deadline_is_the_rfqs_closes_at_not_the_quote_end(make_client, venue, session, clock):
     # closes_at: 20 s after the open. The quote end (expires_at) is 570 s out: it never sets the deadline.
+    # Each signed post answers trade_stale 15 s later: the second post goes before closes_at, a third does not.
     venue.open_edit = {"closes_at": int(clock() * 1000) + 20_000}
     venue.row_edit = {"expires_at": int(clock() * 1000) + 570_000}
+    venue.stale = 99
     posted = []
-
-    def rejected(req):
-        posted.append(clock())
-        return 409, {"code": "rejected", "error": "rejected"}
-    session.routes[("POST", f"/rfqs/{RFQ}/accept")] = rejected
+    venue.on_stale = lambda: posted.append(clock()) or clock.sleep(15)
     c = make_client(clock=clock)
     q = c.quote("USD/MXN", "buy", 25_000)
     closes = venue.open_edit["closes_at"] / 1000
     assert q.closes_at == datetime.fromtimestamp(closes, timezone.utc) and q.expires_at > q.closes_at
-    with pytest.raises(crx.QuoteExpired):
+    with pytest.raises(crx.QuoteExpired) as ei:
         c.trade(q)
-    assert len(posted) > 1 and max(posted) < closes and max(posted) + 3 >= closes
+    assert ei.value.gateway_code == "trade_stale"
+    assert len(posted) == len(signed_posts(session)) == 2 and max(posted) < closes
 
 
 def test_trade_stale_signs_the_fresh_template(make_client, venue, session, clock, account):

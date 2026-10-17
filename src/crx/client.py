@@ -95,8 +95,6 @@ WITHDRAW_TTL = 22 * 3600  # s; the gateway takes a deadline at most 23 h out
 OPEN_TIMEOUT = 30.0  # s; POST /rfqs answers after the 10 s window, the gateway stops at 30 s
 # The 409 conflict of POST /withdraw while the gateway reads an older settlement.
 UNREAD_SETTLEMENT = "the latest settlement is not read yet"
-UNREAD_RETRY_S = 1200.0  # s that withdraw() posts the same signed intent again on that 409
-UNREAD_BACKOFF = (15.0, 60.0)  # s: the first pause between posts, doubled up to the second
 REPOST_MARGIN = 300  # s before the deadline: no repeat post; the gateway checks the deadline before a held item
 IN_FLIGHT_S = 300  # s after a withdraw post: it may still reach the gateway (30 s request cap, plus proxies)
 OPEN_STATUSES = ("open", "quoted")  # RFQ statuses that still take an accept
@@ -174,11 +172,6 @@ def _side(side: str) -> str:
     if s not in ("buy", "sell"):
         raise BadRequest("side is 'buy' or 'sell'")
     return s
-
-
-def _no_worse(quote: Quote, other: Quote) -> bool:
-    """True when ``other`` costs the taker no more than ``quote``: a buy pays no higher rate, a sell gets no lower."""
-    return other.rate <= quote.rate if quote.side == "buy" else other.rate >= quote.rate
 
 
 def _said(view: Any) -> dict:
@@ -271,6 +264,14 @@ def _past_held_check(e: CrxError) -> bool:
     return e.status == 422 and ("expected" in d and "got" in d or "free" in d and "requested" in d)
 
 
+def _refused(e: CrxError) -> dict:
+    """A gateway answer that refused a post: its code, HTTP status and line, and the time it names, when it
+    names one (``retry_after_secs``, ``time_utc``)."""
+    out = {"code": e.code, "status": e.status, "message": str(e)}
+    out.update({k: e.details[k] for k in ("retry_after_secs", "time_utc") if k in e.details})
+    return out
+
+
 def _default_expiry(now: datetime) -> datetime:
     """One month out, a weekend rolled to Monday."""
     t = now + timedelta(days=30)
@@ -309,7 +310,9 @@ class Client:
     as none.
 
     A GET that fails on the network or with a 5xx is sent once more after 0.5 s.
-    POST, PUT and DELETE are sent once.
+    POST, PUT and DELETE are sent once. In custodian mode, a call refused 401 on its session token
+    is sent once more, the same bytes with a new token: the gateway refuses the token before it
+    reads the call.
 
     ``keepalive`` (1 to 10 s, default 5): the first maker call (``rfqs``,
     ``send_quote``, ``confirm``, ``drop_quote``) starts a daemon thread. It reads
@@ -566,7 +569,7 @@ class Client:
     def _binder(self) -> Binder:
         c = self._chain_ready()
         binder = sol.SeatBinder if self._net.get("family") == "solana" else Binder
-        return binder(self._gw, self._signer, c, self._sep, self._state_dir, self._sleep, self._clock)
+        return binder(self._gw, self._signer, c, self._sep, self._state_dir, clock=self._clock)
 
     # ---------- public reads ----------
 
@@ -913,9 +916,11 @@ class Client:
         ``RefusedToSign`` and nothing is signed. When the template is stale, the gateway
         answers with a fresh one, which is checked and signed in turn.
 
-        When the maker dropped the quote, the gateway names the best live quote on the
-        same RFQ. The SDK accepts it once when its rate is no worse than ``quote.rate``.
-        Otherwise ``QuoteDropped`` raises, with that quote on ``.best`` (or None).
+        Each signed accept is posted once. A refusal raises at once: ``details`` holds the gateway's
+        line (``message``) and the time it names (``retry_after_secs``, ``time_utc``), when it names one.
+
+        When the maker dropped the quote, ``QuoteDropped`` raises. ``.best`` is the best live quote
+        on the same RFQ, or None. Nothing is signed for it: pass it to ``trade()`` to accept it.
 
         Returns once the trade is ``open`` or ``refused``. When neither shows within
         30 s (testnet) or 90 s (mainnet), returns ``sending`` or ``pending``.
@@ -947,7 +952,7 @@ class Client:
             self._accepts[quote.rfq_id] = rec
             self._keep_accepts()
             try:
-                t, view = self._trade_once(b, quote, rec)
+                t, view = self._trade_once(b, quote)
             except TradeUnknown:
                 raise
             except MarkUnavailable as e:
@@ -961,22 +966,13 @@ class Client:
                        provisional=t.provisional, tx=t.tx)
             return t
 
-    def _trade_once(self, b: Binder, quote: Quote, rec: dict) -> tuple[Trade, dict]:
-        """Accept ``quote``; when its maker dropped it, the best live quote on the same RFQ once."""
+    def _trade_once(self, b: Binder, quote: Quote) -> tuple[Trade, dict]:
+        """Accept ``quote``. When its maker dropped it, ``QuoteDropped`` names the best live quote on the same
+        RFQ in ``.best``: nothing is signed for it."""
         try:
             return self._take(b, quote)
         except QuoteDropped as e:
             e.best = self._best_of(quote, e)
-            if e.best is None or not _no_worse(quote, e.best):
-                raise
-            best = e.best
-        log.info("rfq %s: quote %s dropped; accepting quote %s @ %s", quote.rfq_id, quote.quote_id,
-                 best.quote_id, best.rate)
-        rec["quote"] = best
-        try:
-            return self._take(b, best)
-        except QuoteDropped as e:
-            e.best = self._best_of(best, e)
             raise
 
     def _keep_accepts(self) -> None:
@@ -1360,21 +1356,25 @@ class Client:
     def withdraw(self, amount: Any) -> Withdraw:
         """Withdraw USDC to your own wallet. You sign the intent. CRX sends the tx and pays gas.
 
-        Builds the intent from your next withdraw nonce, signs it and posts it in one request.
-        The deadline is 22 h out. A 409 ``conflict`` "the latest settlement is not read yet" posts
-        the same signed intent again, after 15 s, then 30 s, then every 60 s, for at most 20 minutes;
-        then ``CrxError`` (``conflict``). Returns once the withdraw shows a status other than
-        ``sending`` or ``pending``. When none shows within 30 s (testnet) or 90 s (mainnet),
-        returns ``sending`` or ``pending``. The status is the one ``/balance`` shows for the signed item.
+        Builds the intent from your next withdraw nonce, signs it and posts it once, in one request.
+        The deadline is 22 h out. A refusal raises at once: ``str(e)`` is the gateway's line, and
+        ``details`` holds the time it names (``retry_after_secs``, ``time_utc``), when it names one.
+        Nothing is queued; call withdraw() again after that time. Returns once the withdraw shows a
+        status other than ``sending`` or ``pending``. When none shows within 30 s (testnet) or 90 s
+        (mainnet), returns ``sending`` or ``pending``. The status is the one ``/balance`` shows for the
+        signed item.
 
         At most once. One withdraw() at a time per client. When the post gets no answer (network,
         timeout, 5xx), the status read decides; when the item does not show, ``WithdrawUnknown``
         raises. Until that withdraw has a final answer the caller read, withdraw() signs nothing.
         After a call that raised, the same amount reads that withdraw's status and returns it,
-        and posts the same signed intent again when ``/balance`` does not show it, 300 s or more
-        after the last post and not within 300 s of its deadline. A refusal the gateway gives only
-        past its held-item check ends the hold. Any other call raises ``WithdrawUnknown`` while it
-        has no final answer, then ``EarlierOutcome`` once. A new ``Client`` holds no earlier withdraw.
+        and posts the same signed intent again, once per call, when ``/balance`` does not show it,
+        300 s or more after the last post and not within 300 s of its deadline. The gateway answers
+        the same intent as it answered the first; nothing new is signed. A refusal the gateway gives
+        only past its held-item check ends the hold. Any other refusal of that post is in the
+        ``WithdrawUnknown`` that follows, as ``details['refusal']``. Any other call raises
+        ``WithdrawUnknown`` while it has no final answer, then ``EarlierOutcome`` once. A new
+        ``Client`` holds no earlier withdraw.
         """
         self._need_seat()
         amount = _amount(amount)
@@ -1416,36 +1416,20 @@ class Client:
         # returned: the caller got a Withdraw for it, with no final status.
         held = self._held_withdraw = {"amount": amount, "nonce": nonce, "deadline": w["deadline"], "item": item,
                                       "body": body, "returned": False, "sent": self._clock()}
-        until, pause = self._clock() + UNREAD_RETRY_S, UNREAD_BACKOFF[0]
-        while True:
-            held["sent"] = self._clock()
-            try:
-                r = self._gw.request("POST", "/withdraw", body=body, ok=(200, 202))
-                break
-            except (NetworkError, ServerError) as e:
-                if isinstance(e, ServiceUnavailable):  # CRX sends nothing
-                    self._held_withdraw = None
-                    raise
-                # No answer: the gateway may hold the intent. Its status decides; the intent is not posted again.
-                log.info("withdraw nonce %s: %s on the post; reading its status", nonce, e.code)
-                return self._withdraw_settle(held, posted=False)
-            except CrxError as e:
-                # crx-api writes its conflict as "conflict: <why>" in the body's error.
-                text = str(e.details.get("error") or e).removeprefix("conflict: ")
-                if not (e.status == 409 and e.code == "conflict" and text.startswith(UNREAD_SETTLEMENT)):
-                    if isinstance(e, BadAnswer):
-                        raise  # an answer this SDK cannot read: the status decides on the next call
-                    self._held_withdraw = None  # refused: nothing queued
-                    raise
-                left = until - self._clock()
-                if left <= 0:
-                    self._held_withdraw = None
-                    raise CrxError("withdraw not sent: the latest settlement is not yet confirmed; "
-                                   "the request was retried for 20 minutes.", code="conflict", status=409,
-                                   details=e.details, gateway_code=e.gateway_code) from None
-                # The same signed intent: the gateway answers a held item with the same body.
-                self._sleep(min(pause, left))
-                pause = min(pause * 2, UNREAD_BACKOFF[1])
+        try:
+            r = self._gw.request("POST", "/withdraw", body=body, ok=(200, 202))
+        except ServiceUnavailable:
+            self._held_withdraw = None  # CRX sends nothing
+            raise
+        except (NetworkError, ServerError) as e:
+            # No answer: the gateway may hold the intent. Its status decides; this call posts it no more.
+            log.info("withdraw nonce %s: %s on the post; reading its status", nonce, e.code)
+            return self._withdraw_settle(held, posted=False)
+        except BadAnswer:
+            raise  # an answer this SDK cannot read: the status decides on the next call
+        except CrxError:
+            self._held_withdraw = None  # refused: nothing queued; the error names the reason and the time
+            raise
         got = _word(r.get("item"))
         if got is None:
             raise BadAnswer("/withdraw named no item")
@@ -1480,8 +1464,9 @@ class Client:
             return "refused", True, None
         return "pending", False, None
 
-    def _withdraw_settle(self, held: dict, posted: bool) -> Withdraw:
-        """Poll the held intent's status for at most ``settle_wait`` s. ``posted``: the gateway queued it."""
+    def _withdraw_settle(self, held: dict, posted: bool, refused: dict | None = None) -> Withdraw:
+        """Poll the held intent's status for at most ``settle_wait`` s. ``posted``: the gateway queued it.
+        ``refused``: the gateway's answer to a repeat post, kept in a ``WithdrawUnknown``."""
         deadline = self._clock() + self._settle_wait
         while True:
             word, final, last = self._withdraw_read(held)
@@ -1489,9 +1474,11 @@ class Client:
                 break
             self._sleep(1.0)
         if not last and not posted and not final:
+            details = self._held_details(word)
+            if refused is not None:
+                details["refusal"] = refused
             raise WithdrawUnknown(f"the withdraw of {_plain(held['amount'])} may still be sent; nothing else "
-                                  f"signed; call withdraw({_plain(held['amount'])}) to read it",
-                                  details=self._held_details(word))
+                                  f"signed; call withdraw({_plain(held['amount'])}) to read it", details=details)
         if final:
             self._held_withdraw = None
         if word == "unknown":
@@ -1514,6 +1501,7 @@ class Client:
         intent: the same item and nonce, never a new signature."""
         word, final, last = self._withdraw_read(held)
         now = self._clock()
+        refused = None
         # A post still in flight can be queued after a repeat is refused: no repeat until none can be.
         if last is None and not final and held["sent"] + IN_FLIGHT_S <= now < held["deadline"] - REPOST_MARGIN:
             log.info("withdraw nonce %s: not shown; posting the same signed intent", held["nonce"])
@@ -1525,7 +1513,8 @@ class Client:
                     self._held_withdraw = None  # nothing in flight, and the gateway answers a held item 200 first
                     raise
                 log.info("withdraw nonce %s: %s on the repeat post; reading its status", held["nonce"], e.code)
-        return self._withdraw_settle(held, posted=False)
+                refused = _refused(e) if e.status is not None else None
+        return self._withdraw_settle(held, posted=False, refused=refused)
 
     def _held_details(self, word: str, held: dict | None = None) -> dict:
         h = held or self._held_withdraw or {}

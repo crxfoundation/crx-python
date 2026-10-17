@@ -217,6 +217,8 @@ c.withdraw("500")      # paid to the wallet's USDC account fixed at bind
 
 Every error is a `crx.CrxError`. Branch on `.code`. Show `str(e)`: on a gateway refusal it is the gateway's `message`.
 
+`trade()` and `withdraw()` post each signed request once. A refusal raises at once. When the gateway names a time to try again, `details["retry_after_secs"]` holds the wait in seconds and `details["time_utc"]` the UTC time its message names (`17:05 UTC`). Call again after that time.
+
 | Code | Meaning |
 |---|---|
 | `market_paused` | Pair not live. |
@@ -235,7 +237,7 @@ Every error is a `crx.CrxError`. Branch on `.code`. Show `str(e)`: on a gateway 
 | `already_accepted` | The taker accepted before your drop. The trade stands: `confirm` it. |
 | `unknown_or_ended` | Nothing to drop: the RFQ ended. |
 | `quote_expired` | Round ended, or the maker refused. Quote again. |
-| `quote_dropped` | The maker dropped the quote. `trade()` takes the best live quote once when its rate is no worse. Else `.best` holds it, or None. |
+| `quote_dropped` | The maker dropped the quote. `.best` is the best live quote on the same RFQ, or None. Nothing is signed for it: pass it to `trade()` to accept it. |
 | `quote_not_yours` | The quote was made for another request or seat. Nothing sent. |
 | `rate_limited` | Too many requests. `.retry_after` is the wait in seconds, when sent. |
 | `own_round_open` | Your last round is still open. |
