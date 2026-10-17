@@ -23,10 +23,10 @@ def setup(make_client, session, health, markets):
     v = Venue(session, health, markets, clock)
     v.rfq_body = {"pair": "USDMXN", "side": "buy", "notional": "100", "premium_bps": 0,
                   "expiry": (NOW + 18_000) * 1000}
-    v.qe = NOW + 600
+    v.qe = NOW + 570
     v.leg = e7.leg_id_for(HEAD, v.qe)
     v.rate = "18.123456"
-    wire = request_wire(rfq_id=RFQ, side=1, client_rfq_id=None, leg_id=v.leg)
+    wire = request_wire(rfq_id=RFQ, side=1, client_rfq_id="test-request-fixture-1", leg_id=v.leg)
     events = [{"type": "rfq.opened", "seq": 1, "data": copy.deepcopy(wire)}]
     events[0]["data"].pop("status")
     events[0]["data"].pop("kind")
@@ -68,7 +68,8 @@ def test_worker_ignores_other_or_malformed_events(setup, edit):
 
 
 @pytest.mark.parametrize("edit", [
-    {"test_request": False}, {"client_rfq_id": "someone-else"}, {"side": -1},
+    {"test_request": False}, {"client_rfq_id": "someone-else"},
+    {"client_rfq_id": "test-request-someone-else"}, {"side": -1},
     {"notional": "200"}, {"pair": "USD/BRL"}, {"premium_bps": 1},
     {"status": "accepted"}, {"status": "cancelled"}, {"status": "expired"},
     {"status": "rejected"}, {"trade_status": "pending"}, {"trade_status": "refused"},
@@ -170,3 +171,61 @@ def test_worker_checks_whole_history_and_bounds_bad_pagination(setup, monkeypatc
         "seq": int(req["query"]["after"][0]) + 2}
     with pytest.raises(crx.BadAnswer, match="max_pages"):
         worker_type()(c, max_pages=2).run_once()
+
+
+@pytest.mark.parametrize("cid", [None, "", "ordinary-rfq", "test-request-", "test-request- ", 123])
+def test_worker_rejects_missing_or_wrong_test_request_ownership(setup, cid):
+    c, v, wire, events, session, clock = setup
+    wire["client_rfq_id"] = events[0]["data"]["client_rfq_id"] = cid
+    assert worker_type()(c).run_once() == []
+    assert not signed_posts(session)
+
+
+def test_worker_does_not_renew_expired_rfq(setup):
+    c, v, wire, events, session, clock = setup
+    clock.t = NOW + 121
+    assert worker_type()(c).run_once() == []
+    assert not signed_posts(session)
+    assert not any(x["method"] == "POST" for x in session.calls)
+
+
+def test_worker_requires_explicit_enable_before_constructing_client(monkeypatch, capsys):
+    module = importlib.import_module("crx.test_request_worker")
+    def forbidden(**kwargs):
+        raise AssertionError("disabled CLI constructed a client")
+    monkeypatch.setattr(module, "Client", forbidden)
+    with pytest.raises(SystemExit) as error:
+        module.main(["--key-file", "fixture-path", "--state-dir", "fixture-state"])
+    assert error.value.code == 2
+    assert "--enable" in capsys.readouterr().err
+
+
+def test_enabled_worker_uses_client_rpc_environment_without_rpc_argument(monkeypatch, setup):
+    module = importlib.import_module("crx.test_request_worker")
+    c, v, wire, events, session, clock = setup
+    calls = []
+    def client(**kwargs):
+        calls.append(kwargs)
+        return c
+    monkeypatch.setattr(module, "Client", client)
+    monkeypatch.setenv("CRX_RPC", "https://rpc.test/fixture-token")
+    assert module.main(["--enable", "--key-file", "fixture-path", "--state-dir", "fixture-state",
+                        "--duration", "1"]) == 0
+    assert len(calls) == 1 and "rpc_url" not in calls[0]
+    assert calls[0]["network"] == "mainnet" and calls[0]["allow_mainnet"] is True
+    assert len(signed_posts(session)) == 1
+
+
+def test_worker_accepts_renewed_rfq_under_original_request_deadline(setup):
+    c, v, wire, events, session, clock = setup
+    clock.t = NOW + 7200
+    v.qe = NOW + 7770
+    v.leg = e7.leg_id_for(HEAD, v.qe)
+    renewal = {"closes_at": (NOW + 7320) * 1000, "quote_expiry_max": v.qe, "leg_id": v.leg,
+               "taker_ref": "0x" + "c4" * 32}
+    wire.update(renewal)
+    events[0]["data"].update(renewal)
+    assert worker_type()(c).run_once()[0].status == "open"
+    assert len(signed_posts(session)) == 1
+    assert wire["request_expires_at"] == (NOW + 10800) * 1000
+    assert wire["expiry"] == (NOW + 18000) * 1000

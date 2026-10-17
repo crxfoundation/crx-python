@@ -261,6 +261,11 @@ class Rfq:
         return self.raw.get("test_request") is True
 
     @property
+    def request_expires_at(self) -> datetime | None:
+        """The original test request deadline. RFQ renewal keeps this deadline."""
+        return ms_to_dt(self.raw.get("request_expires_at"))
+
+    @property
     def reference_rate(self) -> Decimal | None:
         """The reference rate returned by ``test_request()``, when present."""
         value = dec(self.raw.get("reference_rate"))

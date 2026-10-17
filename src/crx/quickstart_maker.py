@@ -4,6 +4,8 @@ Use an approved maker account on Ethereum mainnet. Set CRX_WALLET_PK or
 CRX_WALLET_PK_FILE, and CRX_RPC. The account needs USDC and ETH for its deposit.
 The example adds only the amount needed for 20 USDC of free collateral.
 The returned reference rate is an example price for this 100 USD test request.
+Quote the returned RFQ promptly: it closes after 120 seconds. The request
+can renew an unaccepted RFQ for three hours, with the same settlement date.
 """
 
 from __future__ import annotations

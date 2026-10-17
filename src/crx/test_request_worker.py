@@ -64,7 +64,7 @@ class TestRequestWorker:
         c, rid = self.client, event["rfq_id"]
         view = c._gw.request("GET", f"/rfqs/{rid}")
         validate(view, c.chain_key, c._clock(), maker=False)
-        for key in ("rfq_id", "client_rfq_id", "expiry", "closes_at", "taker_ref"):
+        for key in ("rfq_id", "client_rfq_id", "expiry", "closes_at", "request_expires_at", "taker_ref"):
             if view.get(key) != event.get(key):
                 raise BadAnswer("the test request changed after its opening event")
         if view.get("trade_status") not in (None, ""):
@@ -105,9 +105,12 @@ class TestRequestWorker:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Accept dedicated CRX test requests on Ethereum mainnet.")
+    parser = argparse.ArgumentParser(
+        description="Accept dedicated CRX test requests on Ethereum mainnet.",
+        epilog="Set CRX_RPC for the Ethereum connection.",
+    )
+    parser.add_argument("--enable", action="store_true", required=True, help="Enable test request acceptance.")
     parser.add_argument("--key-file", required=True, help="Dedicated taker key file.")
-    parser.add_argument("--rpc-url", required=True, help="Ethereum RPC URL.")
     parser.add_argument("--state-dir", required=True, help="Dedicated SDK state directory.")
     parser.add_argument("--duration", type=float, default=60, help="Polling duration in seconds (default: 60).")
     parser.add_argument("--poll", type=float, default=2, help="Seconds between scans (default: 2).")
@@ -116,7 +119,7 @@ def main(argv: list[str] | None = None) -> int:
     client = None
     try:
         client = Client(key_file=args.key_file, network="mainnet", allow_mainnet=True,
-                        base_url="https://api.crxfx.com", rpc_url=args.rpc_url,
+                        base_url="https://api.crxfx.com",
                         state_dir=args.state_dir, keepalive=None)
         TestRequestWorker(client, poll=args.poll).run(duration=args.duration)
     except CrxError as e:

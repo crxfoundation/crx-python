@@ -16,8 +16,9 @@ def request_wire(**edit):
     return dict({
         "rfq_id": RID, "chain": "avax-fuji", "pair": "USD/MXN", "side": -1,
         "notional": "100", "premium_bps": 0, "kind": "open", "status": "open",
-        "expiry": (NOW + 18_000) * 1000, "closes_at": (NOW + 10_800) * 1000,
-        "quote_expiry_max": NOW + 600, "taker_ref": REF,
+        "expiry": (NOW + 18_000) * 1000, "closes_at": (NOW + 120) * 1000,
+        "request_expires_at": (NOW + 10_800) * 1000,
+        "quote_expiry_max": NOW + 570, "taker_ref": REF,
         "test_request": True, "reference_rate": "18.123456",
     }, **edit)
 
@@ -30,8 +31,9 @@ def test_request_posts_only_chain_and_returns_maker_terms(make_client, session):
     assert (r.rfq_id, r.pair, r.side, r.notional) == (RID, "USD/MXN", "sell", Decimal(100))
     assert r.test_request is True and r.reference_rate == Decimal("18.123456")
     assert r.expiry.timestamp() == NOW + 18_000
-    assert r.closes_at.timestamp() == NOW + 10_800
-    assert r.quote_expiry_max.timestamp() == NOW + 600
+    assert r.closes_at.timestamp() == NOW + 120
+    assert r.request_expires_at.timestamp() == NOW + 10_800
+    assert r.quote_expiry_max.timestamp() == NOW + 570
     call = session.calls[-1]
     assert (call["path"], call["body"]) == ("/test-requests", {"chain": c.chain_key})
     assert call["headers"]["x-crx-address"] == c.address
@@ -48,7 +50,14 @@ BAD = [
     {"closes_at": NOW * 1000}, {"quote_expiry_max": (NOW + 600) * 1000},
     {"quote_expiry_max": NOW}, {"reference_rate": "NaN"}, {"reference_rate": "Infinity"},
     {"reference_rate": "0"}, {"reference_rate": 18.1}, {"reference_rate": None},
-    {"reference_rate": "18.1234567"}, {"status": "accepted"}, {"client_rfq_id": "own"},
+    {"request_expires_at": None}, {"request_expires_at": True},
+    {"request_expires_at": str((NOW + 10_800) * 1000)},
+    {"request_expires_at": NOW * 1000},
+    {"request_expires_at": (NOW + 10_831) * 1000, "expiry": (NOW + 18_031) * 1000},
+    {"closes_at": (NOW + 151) * 1000},
+    {"request_expires_at": (NOW + 60) * 1000, "expiry": (NOW + 7_260) * 1000},
+    {"quote_expiry_max": NOW + 631},
+    {"reference_rate": "18.1234567"}, {"status": "cancelled"}, {"client_rfq_id": "own"},
 ]
 
 
@@ -100,3 +109,32 @@ def test_marked_stream_rfq_can_be_quoted_without_reference_rate(session, health,
     quoted = maker.send_quote(_maker.rfq_of(wire), "18.123456")
     assert quoted.notional == Decimal(100)
     assert len(venue.bodies) == 1
+
+
+def test_two_hour_old_request_renews_rfq_but_keeps_request_and_settlement_deadlines(make_client, session):
+    clock = Clock(NOW)
+    c = make_client(clock=clock)
+    session.routes[("POST", "/test-requests")] = request_wire()
+    first = c.test_request()
+    clock.t += 7200
+    session.routes[("POST", "/test-requests")] = request_wire(
+        rfq_id="0x" + "c3" * 32, taker_ref="0x" + "d4" * 32,
+        closes_at=(NOW + 7320) * 1000, quote_expiry_max=NOW + 7770)
+    renewed = c.test_request()
+    assert renewed.rfq_id != first.rfq_id
+    assert renewed.raw["taker_ref"] != first.raw["taker_ref"]
+    assert renewed.request_expires_at == first.request_expires_at
+    assert renewed.expiry == first.expiry
+    assert renewed.closes_at.timestamp() == NOW + 7320
+    assert renewed.quote_expiry_max.timestamp() == NOW + 7770
+
+
+@pytest.mark.parametrize("status", ["accepted", "opened"])
+def test_accepted_repeat_returns_original_request_but_cannot_be_quoted(make_client, session, status):
+    c = make_client(clock=Clock(NOW + 200))
+    session.routes[("POST", "/test-requests")] = request_wire(status=status)
+    request = c.test_request()
+    assert request.status == status and request.rfq_id == RID
+    with pytest.raises(crx.RefusedToSign):
+        c.send_quote(request, request.reference_rate)
+    assert len(session.calls) == 1 and not session.rpc_calls

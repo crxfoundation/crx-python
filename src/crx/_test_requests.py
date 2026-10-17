@@ -6,8 +6,10 @@ import re
 from ._bind import QUOTE_WINDOW
 from .errors import BadAnswer
 
-COLLECTION_SECONDS = 3 * 3600
-SETTLEMENT_SECONDS = 5 * 3600
+REQUEST_SECONDS = 3 * 3600
+RFQ_SECONDS = 120
+SETTLEMENT_DELAY_SECONDS = 2 * 3600
+OWNER_PREFIX = "test-request-"
 WORD = re.compile(r"0x[0-9a-fA-F]{64}\Z")
 DECIMAL = re.compile(r"[0-9]+(?:\.[0-9]+)?\Z")
 
@@ -31,7 +33,7 @@ def rate(value) -> Decimal:
 
 
 def validate(d: dict, chain: str, now: float, *, maker: bool, event: bool = False,
-             require_reference: bool = True) -> None:
+             require_reference: bool = True, allow_accepted: bool = False) -> None:
     """Reject changed terms before any trade signature. Maker responses require a reference rate."""
     if not isinstance(d, dict) or d.get("test_request") is not True:
         raise BadAnswer("the response is not a test request")
@@ -45,17 +47,22 @@ def validate(d: dict, chain: str, now: float, *, maker: bool, event: bool = Fals
     premium = d.get("premium_bps", 0)
     if type(premium) is not int or premium != 0:
         raise BadAnswer("the test request premium must be zero")
-    expiry, closes = d.get("expiry"), d.get("closes_at")
-    if (type(expiry) is not int or type(closes) is not int or closes <= now * 1000
-            or closes > (now + COLLECTION_SECONDS + 30) * 1000
-            or expiry - closes != (SETTLEMENT_SECONDS - COLLECTION_SECONDS) * 1000):
-        raise BadAnswer("the test request has an invalid time window")
-    if d.get("status", "open" if event else None) not in ("open", "quoted"):
+    status = d.get("status", "open" if event else None)
+    accepted = allow_accepted and maker and not event and status in ("accepted", "opened")
+    if status not in ("open", "quoted") and not accepted:
         raise BadAnswer("the test request is closed")
+    expiry, closes, request_end = d.get("expiry"), d.get("closes_at"), d.get("request_expires_at")
+    if (type(expiry) is not int or type(closes) is not int or type(request_end) is not int
+            or closes <= 0 or request_end <= 0 or closes > request_end
+            or request_end > (now + REQUEST_SECONDS + 30) * 1000
+            or closes > (now + RFQ_SECONDS + 30) * 1000
+            or expiry != request_end + SETTLEMENT_DELAY_SECONDS * 1000
+            or (not accepted and (request_end <= now * 1000 or closes <= now * 1000))):
+        raise BadAnswer("the test request has an invalid time window")
     end = d.get("quote_expiry_max")
     if type(end) is not int or end <= 0 or not word(d.get("taker_ref")):
         raise BadAnswer("the test request has invalid quote terms")
-    if not event and not now < end <= now + QUOTE_WINDOW:
+    if not event and (end > now + QUOTE_WINDOW or (not accepted and end <= now)):
         raise BadAnswer("the test request quote window is not current")
     cid = d.get("client_rfq_id")
     if maker:
@@ -63,5 +70,6 @@ def validate(d: dict, chain: str, now: float, *, maker: bool, event: bool = Fals
             raise BadAnswer("the test request is not a maker request")
         if require_reference or "reference_rate" in d:
             rate(d.get("reference_rate"))
-    elif "client_rfq_id" not in d or (cid is not None and (not isinstance(cid, str) or not cid)):
+    elif (not isinstance(cid, str) or not cid.startswith(OWNER_PREFIX)
+          or len(cid) <= len(OWNER_PREFIX) or not all("!" <= ch <= "~" for ch in cid)):
         raise BadAnswer("the test request does not belong to this account")

@@ -1546,9 +1546,12 @@ class Client:
     def test_request(self) -> Rfq:
         """Request a 100 USD USD/MXN RFQ for this maker, at zero premium.
 
-        Quotes remain open for three hours; settlement is five hours after creation.
-        Repeats return the active request. The gateway limits each maker to one request
-        per UTC day and all makers to ten. ``reference_rate`` is an example quote price.
+        The request lasts three hours; each RFQ closes after 120 seconds. Repeat this
+        call to renew an expired, unaccepted RFQ. Renewal keeps ``request_expires_at``
+        and settlement, two hours after that deadline. The last minute permits no renewal.
+        Active or accepted RFQs return unchanged. Accepted RFQs cannot be quoted again.
+        Limits are one request start per maker per UTC day and ten globally. Renewal
+        does not use another request. ``reference_rate`` is an example quote price.
         The gateway checks a fresh reference rate at quote and acceptance.
         """
         from ._test_requests import validate
@@ -1556,7 +1559,7 @@ class Client:
         self._need_seat()
         self._keep_live()
         answer = self._gw.request("POST", "/test-requests", body={"chain": self.chain_key})
-        validate(answer, self.chain_key, self._clock(), maker=True)
+        validate(answer, self.chain_key, self._clock(), maker=True, allow_accepted=True)
         return _maker.rfq_of(answer)
 
     def rfqs(
