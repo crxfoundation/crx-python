@@ -99,7 +99,7 @@ python -m crx.quickstart_maker
 
 Set `CRX_WALLET_PK` or `CRX_WALLET_PK_FILE`, and `CRX_RPC`. The script uses one approved maker account on Ethereum mainnet at `https://api.crxfx.com`. A missing key is requested with hidden input.
 
-The script deposits only the shortfall to 20 USDC, waits for credit, and calls `test_request()` for a 100 USD USD/MXN RFQ. It uses the returned `reference_rate` as an example quote price. The request lasts three hours. Each RFQ closes after 120 seconds; settlement is two hours after `request_expires_at`. The script exits successfully only when the trade is `open`; a deposit or trade timeout fails. The same flow runs from `examples/maker.py`.
+Under 20 USDC of free collateral, the script deposits the shortfall, at least the 100 USDC minimum deposit, waits for credit, and calls `test_request()` for a 100 USD USD/MXN RFQ. It uses the returned `reference_rate` as an example quote price. The request lasts three hours. Each RFQ closes after 120 seconds; settlement is two hours after `request_expires_at`. The script exits successfully only when the trade is `open`; a deposit or trade timeout fails. The same flow runs from `examples/maker.py`.
 
 | Call | Does |
 |---|---|

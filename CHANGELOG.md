@@ -3,7 +3,7 @@
 ## Unreleased
 
 - `test_request()` returns a validated 100 USD USD/MXN request for one maker. The request lasts three hours. Each RFQ closes after 120 seconds. Repeating after an unaccepted RFQ expires renews it without changing `Rfq.request_expires_at` or settlement, two hours after that deadline. Renewal does not consume another daily request. `Rfq.reference_rate` provides an example quote price.
-- The maker quickstart uses one maker account and deposits only the shortfall to 20 USDC. It waits for credited collateral and an open trade; a timeout returns an error.
+- The maker quickstart uses one maker account and deposits the shortfall to 20 USDC, at least the 100 USDC minimum deposit. It waits for credited collateral and an open trade; a timeout returns an error.
 - `python -m crx.test_request_worker` accepts only the dedicated account's marked test requests through the existing acceptance checks and signed trade path. Each scan rereads current status and requires a nonempty `test-request-` owner id. The CLI requires `--enable` and reads its connection from `CRX_RPC`. The existing quote signing ceiling is unchanged.
 - The test request worker resumes accepted, pending requests through the idempotent accept route without another trade signature. Recovery survives restart and elapsed deadlines; server status ends recovery. `Client.trade()` retains its at-most-once behavior.
 

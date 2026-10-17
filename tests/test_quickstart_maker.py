@@ -79,17 +79,25 @@ def setup(monkeypatch):
     return maker, clients, clock
 
 
-def test_one_client_deposits_only_shortfall_and_waits_through_pending(setup, capsys):
+def test_one_client_deposits_the_minimum_for_a_small_shortfall_and_waits_through_pending(setup, capsys):
     maker, clients, clock = setup
     t = qs.steps(credit_timeout=5, trade_timeout=5, poll=1)
     assert t.status == "open" and maker.closed
     assert clients == [{"network": "mainnet", "base_url": "https://api.crxfx.com", "allow_mainnet": True}]
-    assert maker.deposits == [(Decimal("12.5"), {"mint": False})]
+    assert maker.deposits == [(Decimal("100"), {"mint": False})]
     assert maker.calls.count("confirm") == 3
     assert maker.calls.index("balance") < maker.calls.index("deposit") < maker.calls.index("test_request")
     out = capsys.readouterr().out
     assert out.splitlines()[-1].endswith("maker: open")
     assert "maker: accepted" not in out
+
+
+def test_shortfall_above_the_minimum_is_deposited_whole(setup, monkeypatch):
+    maker, clients, clock = setup
+    monkeypatch.setattr(qs, "COLLATERAL", Decimal("120"))
+    maker.free = Decimal("0")
+    assert qs.steps(credit_timeout=5, trade_timeout=5, poll=1).status == "open"
+    assert maker.deposits == [(Decimal("120.000000"), {"mint": False})]
 
 
 def test_funded_maker_deposits_nothing(setup):

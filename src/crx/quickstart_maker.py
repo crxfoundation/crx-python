@@ -2,7 +2,8 @@
 
 Use an approved maker account on Ethereum mainnet. Set CRX_WALLET_PK or
 CRX_WALLET_PK_FILE, and CRX_RPC. The account needs USDC and ETH for its deposit.
-The example adds only the amount needed for 20 USDC of free collateral.
+Under 20 USDC of free collateral, the example deposits the shortfall, at least the
+100 USDC minimum deposit.
 The returned reference rate is an example price for this 100 USD test request.
 Quote the returned RFQ promptly: it closes after 120 seconds. The request
 can renew an unaccepted RFQ for three hours, with the same settlement date.
@@ -25,6 +26,8 @@ import crx
 ENV_KEY = "CRX_WALLET_PK"
 ENV_KEY_FILE = "CRX_WALLET_PK_FILE"
 COLLATERAL = Decimal("20")
+# The core refuses a deposit under 100 USDC.
+MIN_DEPOSIT = Decimal("100")
 
 
 def log(*values):
@@ -60,7 +63,8 @@ def _fund(maker, timeout: float, poll: float) -> None:
         balance = maker.balance()
     remaining = COLLATERAL - _free(balance)
     if remaining > 0:
-        deposit = maker.deposit(remaining.quantize(Decimal("0.000001"), rounding=ROUND_UP), mint=False)
+        amount = max(remaining.quantize(Decimal("0.000001"), rounding=ROUND_UP), MIN_DEPOSIT)
+        deposit = maker.deposit(amount, mint=False)
         if deposit.status == "failed":
             raise crx.CrxError("the deposit failed", code="deposit_failed")
         balance = maker.balance()
@@ -73,7 +77,7 @@ def _fund(maker, timeout: float, poll: float) -> None:
 
 
 def steps(*, credit_timeout: float = 300, trade_timeout: float = 300, poll: float = 2) -> crx.Trade:
-    """Deposit the shortfall, request and quote a test RFQ, then wait until the trade is open.
+    """Deposit the shortfall (at least 100 USDC), request and quote a test RFQ, then wait until the trade is open.
 
     A pending deposit or trade at the deadline raises an error. Individual SDK calls
     also have their own network and confirmation timeouts.
