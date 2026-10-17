@@ -94,26 +94,25 @@ Accept within 120 s of your request: `trade()` posts the accept before `Quote.cl
 A maker seat quotes the RFQs other seats open.
 
 ```bash
-CRX_WALLET_PK=0x... CRX_TAKER_PK=0x... python -m crx.quickstart_maker
+python -m crx.quickstart_maker
 ```
 
-Runs the maker Quickstart on Testnet with two accounts: your test taker asks, you quote, sign and open the trade. Without a key, it asks for it and hides the input. Same script: `examples/maker.py`.
+Set `CRX_WALLET_PK` or `CRX_WALLET_PK_FILE`, and `CRX_RPC`. The script uses one approved maker account on Ethereum mainnet at `https://api.crxfx.com`. A missing key is requested with hidden input.
 
-The trade reads `open`, or `pending` with a `tx`: accepted, the tx landed. The script exits 0 on both.
-
-Other desks ask on Testnet too, so the script quotes its own test taker's RFQ only: `rfqs(only=ask, wait=10)`.
+The script deposits only the shortfall to 20 USDC, waits for credit, and calls `test_request()` for a 100 USD USD/MXN RFQ. It uses the returned `reference_rate` as an example quote price. The request takes quotes for three hours and settles five hours after creation. The script exits successfully only when the trade is `open`; a deposit or trade timeout fails. The same flow runs from `examples/maker.py`.
 
 | Call | Does |
 |---|---|
+| `test_request()` | Requests a fixed test RFQ for this maker. Returns `Rfq` with `test_request=True` and `reference_rate`. Repeats return the active request; limits are one per maker per UTC day and ten globally. |
 | `rfqs()` | Streams the open RFQs you can quote. A seat with no collateral receives none. `only=` (an `Ask`, or an RFQ id) yields that RFQ alone. `after=` (an `Rfq.seq`) starts after that seq. |
 | `rfq(rfq_id)` | One RFQ as your seat reads it. Its taker reads the winning quote only. A maker reads its own quotes only. |
-| `send_quote(rfq, rate)` | Signs and posts a binding quote. The gateway takes quotes for the first 10 s of an RFQ only. The taker gets the best quote only. It signs a premium of 0 and the expiry `rfq.expiry` shows, else raises `RefusedToSign`. Pass `premium_bps=` or `expiry=` (a datetime or unix ms, or a timedelta bound) when your rate prices other terms. |
+| `send_quote(rfq, rate)` | Signs and posts a binding quote. Normal RFQs take quotes for ten seconds; test requests take quotes for three hours. The taker gets the best quote only. It signs a premium of 0 and the expiry `rfq.expiry` shows, else raises `RefusedToSign`. Pass `premium_bps=` or `expiry=` (a datetime or unix ms, or a timedelta bound) when your rate prices other terms. |
 | `confirm(quote)` | Waits for the accept. You sign nothing more. CRX sends the tx and pays gas. `status`: `open`, `sending`, `pending` or `refused`. |
 | `drop_quote(quote)` | Ends your binding quote at once. |
 
 Your quote is a signed `Quote`: your trade signature until the RFQ's `quote_expiry_max`, or until you drop it. Its leg id ends in that second. You sign nothing after the accept. A later quote on the same RFQ replaces the earlier one.
 
-The gateway counts a maker live for 15 s after it reads `/trades`. The first maker call (`rfqs`, `send_quote`, `confirm` or `drop_quote`) starts a background thread that reads `/trades` when the client read none for 5 s. `Client(keepalive=)` sets the interval, 1 to 10 s; `None` turns it off. `close()` stops it.
+The gateway counts a maker live for 15 s after it reads `/trades`. The first maker call (`test_request`, `rfqs`, `send_quote`, `confirm` or `drop_quote`) starts a background thread that reads `/trades` when the client read none for 5 s. `Client(keepalive=)` sets the interval, 1 to 10 s; `None` turns it off. `close()` stops it.
 
 ## Custodian signer
 

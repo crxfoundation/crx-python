@@ -256,6 +256,17 @@ class Rfq:
     raw: dict = field(repr=False, compare=False, default_factory=dict)
 
     @property
+    def test_request(self) -> bool:
+        """True for a test request addressed to one maker."""
+        return self.raw.get("test_request") is True
+
+    @property
+    def reference_rate(self) -> Decimal | None:
+        """The reference rate returned by ``test_request()``, when present."""
+        value = dec(self.raw.get("reference_rate"))
+        return value if value is not None and value.is_finite() and value > 0 else None
+
+    @property
     def own(self) -> bool:
         """True on this seat's own RFQ: the gateway serves ``client_rfq_id`` to the RFQ's taker only."""
         cid = self.raw.get("client_rfq_id")

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `test_request()` returns a validated 100 USD USD/MXN request for one maker. The quote window lasts three hours; settlement is five hours after creation. `Rfq.reference_rate` provides an example quote price.
+- The maker quickstart uses one maker account and deposits only the shortfall to 20 USDC. It waits for credited collateral and an open trade; a timeout returns an error.
+- `python -m crx.test_request_worker` accepts only the dedicated account's marked test requests through the existing acceptance checks and signed trade path. Each scan rereads current status.
+
 - `trade()` and `withdraw()` post each signed request once. A refusal raises at once and names the time to try again when the gateway names one.
 - `trade()`: a 409 `rejected` raises `QuoteExpired` (`gateway_code` `rejected`) at once. 0.2.9 posted the same accept again every 3 s until the RFQ closed.
 - `trade()`: on 409 `quote_dropped`, `QuoteDropped` raises and nothing is signed for another quote. `.best` is the best live quote on the same RFQ, or None: pass it to `trade()` to accept it. 0.2.9 accepted `.best` once when its rate was no worse.

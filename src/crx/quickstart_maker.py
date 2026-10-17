@@ -1,94 +1,104 @@
-"""The maker Quickstart, ready to run: ``python -m crx.quickstart_maker``.
+"""Run one maker test request: ``python -m crx.quickstart_maker``.
 
-Two Testnet accounts: account 1 quotes (the maker), account 2 asks (the test
-taker). The test taker opens one RFQ. The maker reads that RFQ off its stream
-and quotes it. The test taker accepts the winning quote, and the maker confirms
-the trade. The maker signs one binding quote and nothing after the accept. Each
-line starts with the local time. The steps are line for line the ones
-``examples/maker.py`` and the maker Quickstart page print.
-
-The maker key comes from ``CRX_WALLET_PK`` or ``CRX_WALLET_PK_FILE``, the test
-taker key from ``CRX_TAKER_PK``. With one unset, the script asks for it and does
-not show what you type. The keys then sit in this process's environment only.
+Use an approved maker account on Ethereum mainnet. Set CRX_WALLET_PK or
+CRX_WALLET_PK_FILE, and CRX_RPC. The account needs USDC and ETH for its deposit.
+The example adds only the amount needed for 20 USDC of free collateral.
+The returned reference rate is an example price for this 100 USD test request.
 """
 
 from __future__ import annotations
 
 import argparse
 import getpass
+import math
 import os
 import sys
+import time
 import warnings
 from datetime import datetime
+from decimal import Decimal, ROUND_UP
 
 import crx
 
 ENV_KEY = "CRX_WALLET_PK"
 ENV_KEY_FILE = "CRX_WALLET_PK_FILE"
-ENV_TAKER_KEY = "CRX_TAKER_PK"
+COLLATERAL = Decimal("20")
 
 
 def log(*values):
     print(datetime.now().strftime("%H:%M:%S"), *values)
 
 
-def steps():
-    """The eight steps of the maker Quickstart."""
-    # 1. Connect. Account 1 quotes: CRX_WALLET_PK.
-    #    Account 2 is your test taker: CRX_TAKER_PK.
-    maker = crx.Client(network="testnet")
-    taker = crx.Client(os.environ["CRX_TAKER_PK"], network="testnet")
-    log(maker.address, taker.address)
-    # 11:38:49 0xc457…90e5 0x2ae3…8347
+def _free(balance) -> Decimal:
+    value = balance.free
+    if not isinstance(value, Decimal) or not value.is_finite() or value < 0:
+        raise crx.BadAnswer("the free collateral balance is unavailable")
+    return value
 
-    # 2. Fund both. You pay gas. An account with no collateral gets no RFQs.
-    maker.deposit(20_000)
-    taker.deposit(20_000)
-    log(maker.balance().free, taker.balance().free)
-    # 11:39:32 20000.000000 20000.000000
 
-    # 3. Your USD/MXN rate. Replace it with your own price.
-    RATE = "18.12"
+def _deposit_status(balance) -> str | None:
+    deposit = balance.raw.get("deposit")
+    last = deposit.get("last") if isinstance(deposit, dict) else None
+    return last.get("status") if isinstance(last, dict) else None
 
-    # 4. Your test taker asks.
-    ask = taker.ask("USD/MXN", "buy", 25_000)  # POST /rfqs
 
-    # 5. Quote your test taker's RFQ. Your key signs a binding quote.
-    #    Quote within 10 s. send_quote signs a premium of 0 bps and
-    #    the expiry shown; other terms raise RefusedToSign.
-    rfq = next(maker.rfqs(only=ask, wait=10))
-    log(rfq.pair, rfq.side, rfq.notional)  # 11:39:32 USD/MXN sell 25000
-    log("premium", rfq.premium_bps, "bps, expiry", rfq.expiry)
-    # 11:39:32 premium 0 bps, expiry 2026-11-02 18:00:00+00:00
-    q = maker.send_quote(rfq, RATE)  # POST /rfqs/{rfq_id}/quotes
-    log("maker: quoted", q.rate)  # 11:39:32 maker: quoted 18.12
+def _pause(end: float, poll: float, code: str, message: str) -> None:
+    left = end - time.monotonic()
+    if left <= 0:
+        raise crx.CrxError(message, code=code)
+    time.sleep(min(poll, left))
 
-    # 6. Your test taker gets the winning quote. It accepts yours only.
-    won = ask.quote()
-    mine = won.quote_id == q.quote_id
-    log("taker: winning quote", won.rate, "yours" if mine else "not yours")
-    # 11:39:43 taker: winning quote 18.12 yours
-    if mine:
-        t = taker.trade(won)  # POST /rfqs/{rfq_id}/accept
-        log("taker:", t.status)  # 11:40:04 taker: open
 
-    # 7. Read the accept. Your quote is your signature:
-    #    you sign nothing more. CRX sends the tx and pays gas.
-    #    No accept in 60 s: cancel your quote.
+def _fund(maker, timeout: float, poll: float) -> None:
+    end = time.monotonic() + timeout
+    balance = maker.balance()
+    # Wait for a previous deposit before calculating any remaining amount.
+    while _free(balance) < COLLATERAL and _deposit_status(balance) in ("sending", "pending"):
+        _pause(end, poll, "deposit_timeout", "deposit credit was not confirmed before the deadline")
+        balance = maker.balance()
+    remaining = COLLATERAL - _free(balance)
+    if remaining > 0:
+        deposit = maker.deposit(remaining.quantize(Decimal("0.000001"), rounding=ROUND_UP), mint=False)
+        if deposit.status == "failed":
+            raise crx.CrxError("the deposit failed", code="deposit_failed")
+        balance = maker.balance()
+        while _free(balance) < COLLATERAL:
+            if _deposit_status(balance) == "failed":
+                raise crx.CrxError("the deposit failed", code="deposit_failed")
+            _pause(end, poll, "deposit_timeout", "deposit credit was not confirmed before the deadline")
+            balance = maker.balance()
+    log("free collateral", _free(balance), "USDC")
+
+
+def steps(*, credit_timeout: float = 300, trade_timeout: float = 300, poll: float = 2) -> crx.Trade:
+    """Deposit the shortfall, request and quote a test RFQ, then wait until the trade is open.
+
+    A pending deposit or trade at the deadline raises an error. Individual SDK calls
+    also have their own network and confirmation timeouts.
+    """
+    for value in (credit_timeout, trade_timeout, poll):
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+            raise crx.BadRequest("timeouts and poll must be positive seconds")
+    maker = crx.Client(network="mainnet", base_url="https://api.crxfx.com", allow_mainnet=True)
     try:
-        t = maker.confirm(q, timeout=60)
-    except crx.QuoteLost as e:
-        if e.reason == "timeout":
-            maker.drop_quote(q)  # DELETE /rfqs/{rfq_id}/quotes/{leg_id}
-        raise
-    log("maker:", t.status)  # 11:40:04 maker: open
-
-    # 8. Pending: accepted, the tx landed.
-    if t.status == "pending" and t.tx:
-        log("maker: accepted")
-    elif t.status != "open":
-        raise crx.CrxError(
-            f"the trade is {t.status}, not open", code="not_open")
+        log(maker.address)
+        _fund(maker, credit_timeout, poll)
+        rfq = maker.test_request()
+        log(rfq.pair, rfq.side, rfq.notional)
+        # Use the returned reference rate as the example quote price.
+        quote = maker.send_quote(rfq, rfq.reference_rate)
+        log("maker: quoted", quote.rate)
+        end = time.monotonic() + trade_timeout
+        while True:
+            trade = maker.confirm(quote, timeout=max(0, end - time.monotonic()), poll=poll)
+            if trade.status == "open":
+                log("maker: open")
+                return trade
+            if trade.status not in ("pending", "sending"):
+                raise crx.CrxError(f"the trade is {trade.status}", code="not_open")
+            _pause(end, poll, "trade_timeout", "the trade did not open before the deadline")
+    finally:
+        maker.close()
 
 
 def ask_key(name: str, file_name: str | None = None) -> bool:
@@ -111,21 +121,18 @@ def ask_key(name: str, file_name: str | None = None) -> bool:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Run the maker Quickstart. 0 when every step ran, 1 on a CRX error, 2 with a key missing."""
+    """Run the maker quickstart. Return zero only when the trade is open."""
     parser = argparse.ArgumentParser(
         prog="python -m crx.quickstart_maker",
-        description="Run the CRX maker Quickstart on Testnet: your test taker asks, "
-        "you quote, sign and open the trade.",
-        epilog=f"The maker key comes from {ENV_KEY}, the test taker key from {ENV_TAKER_KEY}. "
-        "Unset, the script asks for each and hides the input.",
+        description="Run a 100 USD maker test request on Ethereum mainnet.",
+        epilog=f"Set {ENV_KEY} or {ENV_KEY_FILE}, and CRX_RPC. A missing key is requested with hidden input.",
     )
     parser.parse_args(argv)
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(line_buffering=True)
-    for name, file_name in ((ENV_KEY, ENV_KEY_FILE), (ENV_TAKER_KEY, None)):
-        if not ask_key(name, file_name):
-            print(f"No key. Set {name}=0x… and run again.", file=sys.stderr)
-            return 2
+    if not ask_key(ENV_KEY, ENV_KEY_FILE):
+        print(f"Set {ENV_KEY} or {ENV_KEY_FILE}.", file=sys.stderr)
+        return 2
     try:
         steps()
     except crx.CrxError as e:

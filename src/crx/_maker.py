@@ -367,6 +367,17 @@ def send(c: "Client", r: Any, rate: Any, client_quote_id: str | None,
     """
     if not isinstance(r, Rfq):
         raise BadRequest("send_quote() takes an Rfq from rfqs() or rfq()")
+    if r.test_request:
+        from ._test_requests import validate
+
+        try:
+            validate(r.raw, c.chain_key, c._clock(), maker=True, event=r.status is None,
+                     require_reference=False)
+            if (r.pair != _slash(r.raw["pair"]) or r.notional != dec(r.raw["notional"])
+                    or r.side != "sell" or r.kind != "open"):
+                raise BadAnswer("the test request differs from its displayed terms")
+        except BadAnswer as e:
+            raise RefusedToSign(str(e)) from None
     rate = _rate(rate)
     own_terms(premium_bps, expiry)
     cqid = client_quote_id
