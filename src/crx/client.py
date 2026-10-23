@@ -757,7 +757,7 @@ class Client:
         Args:
             side: ``"buy"`` or ``"sell"`` the base currency.
             notional: Amount in the base currency, at most 6 decimals.
-            settles: ``"1H"`` to ``"23H"``, ``"1W"``, ``"1M"`` (default), ``"2M"``, a date, or a time with a timezone.
+            settles: Exact UTC time: an aware datetime, ISO 8601 with Z or an offset, or Unix seconds (int or float).
             expiry: Older form of ``settles``: a datetime, a timedelta from now, or unix ms.
             premium_bps: Upfront premium, -10000 to 10000 (default 0). Above 0 the taker pays.
             wait: Seconds to poll when the gateway answers before the quote window ends (default 30).
@@ -819,14 +819,14 @@ class Client:
             raise BelowMin(f"minimum notional on {slash} is {m.min_notional}", details={"min": str(m.min_notional)})
         if m.max_notional is not None and amount > m.max_notional:
             raise AboveMax(f"maximum notional on {slash} is {m.max_notional}", details={"max": str(m.max_notional)})
-        now, t0 = datetime.now(timezone.utc), self._clock()
+        now = datetime.now(timezone.utc)
         if settles is not None and expiry is not None:
             raise BadRequest("pass settles or expiry, not both", details={"field": "settles"})
         if expiry is None:
             if settles is None and _settle.fixing(m) is None:
                 expiry = _default_expiry(now)
             else:
-                expiry = _settle.settlement("1M" if settles is None else settles, m, now)
+                expiry = _settle.default(m, now) if settles is None else _settle.settlement(settles, m, now)
         if isinstance(expiry, timedelta):
             expiry = now + expiry
         if isinstance(expiry, datetime):
@@ -847,14 +847,8 @@ class Client:
             req["premium_bps"] = premium_bps
         if not wait:
             req["wait"] = False  # else the gateway answers only after the quote window
-        sent = []
 
         def send() -> Any:
-            # An hour tenor counts from the send, so a resend takes a new settlement time.
-            if sent and _settle.is_hours(settles):
-                at = now + timedelta(seconds=self._clock() - t0)
-                req["expiry"] = int(_settle.settlement(settles, m, at).timestamp() * 1000)
-            sent.append(True)
             return self._gw.request("POST", "/rfqs", body=req,
                                     timeout=max(self._gw._timeout, OPEN_TIMEOUT) if wait else None)
 

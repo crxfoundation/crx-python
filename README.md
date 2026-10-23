@@ -5,7 +5,7 @@ Trade FX forwards on CRX from Python.
 ## Install
 
 ```bash
-pip install "git+https://github.com/crxfoundation/crx-python@v0.3.15"
+pip install "git+https://github.com/crxfoundation/crx-python@v0.3.16"
 ```
 
 Python 3.10 or newer.
@@ -45,6 +45,8 @@ The script runs the API Quickstart on testnet: deposit, request a quote, accept,
 Each call signs, checks amounts and reads the status itself. A refusal raises a `crx.CrxError` with a `code` ([Errors](#errors)).
 
 ```python
+import time
+
 import crx
 
 c = crx.Client(network="mainnet", allow_mainnet=True)  # reads CRX_WALLET_PK and CRX_RPC
@@ -52,7 +54,8 @@ c = crx.Client(network="mainnet", allow_mainnet=True)  # reads CRX_WALLET_PK and
 d = c.deposit(100)                                 # USDC from the seat wallet
 print(d.status, c.balance().free)
 
-q = c.quote("USD/MXN", "buy", 100, settles="1M")   # best firm quote, nothing accepted
+week = int(time.time()) + 7 * 86_400              # Unix seconds, UTC
+q = c.quote("USD/MXN", "buy", 100, settles=week)   # best firm quote, nothing accepted
 print(q.pair, q.side, q.notional, q.rate, q.settles_at, q.closes_at)
 if q.rate <= 19.5:                                 # the most MXN to pay for 1 USD
     t = c.accept(q)                                # accept before q.closes_at
@@ -95,15 +98,15 @@ print(w.amount, w.status)
 |---|---|
 | `side` | `"buy"` or `"sell"`, the seat's side in the base currency. |
 | `notional` | Base currency amount, at most 6 decimals, from `Market.min_notional` to `Market.max_notional`. |
-| `settles` | When the trade settles, default `"1M"`. See the forms below. |
+| `settles` | The exact UTC time the trade settles. See the forms below. Default: the pair's fixing one month ahead, on the next day that settles. |
 | `expiry` | The older form of `settles`: a datetime, a timedelta or unix ms. Pass one of the two. |
 | `premium_bps` | Upfront premium, -10000 to 10000, default 0. Above 0 the taker pays. |
 | `collateral_wait` | Waits up to this many seconds, default 600, for a new deposit to count. |
 | `client_rfq_id` | A caller id for the RFQ, 1 to 128 printable ASCII characters. |
 
-- `"1H"` to `"23H"` settles that many hours plus 3 minutes from the request, rounded up to the minute. `"1H"` is the shortest settlement.
-- A tenor (`"1D"`, `"1W"`, `"1M"`, `"2M"`) or a date (`"2026-12-18"`) settles at the pair's fixing on that day (USD/MXN: 12:00 Mexico City). A tenor moves to the next day that settles. A date that does not settle raises `bad_request`.
-- A time with a timezone (`"2026-10-24T15:00Z"`) settles as given. A time that cannot settle raises `bad_request` with `details["next_time"]`.
+- `settles` takes an exact UTC time: a datetime with a timezone, an ISO 8601 time with `Z` or an offset (`"2026-10-24T15:00Z"`, `"2026-10-24T10:00-05:00"`), or a Unix time in seconds (`1792854000`, an int or a float).
+- The time is sent as given, never moved. A time less than the pair's shortest tenor away (`tenor.min_secs`, 1 h on mainnet), in the next long close or past the longest tenor raises `bad_request` with `details["next_time"]`.
+- Any other value raises `bad_request`: a tenor (`"1M"`), an hour tenor (`"1H"`), a date (`"2026-12-18"`), a time with no timezone, a bool, or a number in milliseconds.
 
 `Quote.settles_at` is the settlement time, `Quote.expires_at` the quote end, and `Quote.closes_at` the last time to accept (120 s after the request). `accept()` signs only a premium within the market's `max_premium_bps`.
 
