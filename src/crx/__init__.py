@@ -9,7 +9,6 @@ from .errors import (
     RefusedToSign, Rejected, RelayUnavailable, RfqCancelled, SeatCannotSign, SeatNotReady, SendUnknown, ServerError,
     ServiceUnavailable, TradeInFlight, TradeUnknown, TxFailed, UnknownOrEnded, WithdrawInProgress, WithdrawUnknown,
 )
-from ._solana import BindFailed, BindInProgress, SeatBoundOtherPayout, SeatStopped
 from .models import (
     Ask, Balance, Deposit, Drop, Event, MakerQuote, Market, Position, Quote, Rfq, Trade, Viewer, Withdraw,
 )
@@ -25,7 +24,6 @@ __all__ = [
     "InsufficientCollateral", "LegIdTaken", "LegLive", "MarketClosed", "MarketPaused", "NetworkError", "NoQuotes",
     "NotWhitelisted", "OwnRoundOpen", "QuoteDropped", "QuoteExpired", "QuoteFillsFull", "QuoteFormatOutdated",
     "QuoteLost", "QuoteNotYours", "QuoteRejected", "RateLimited", "RefusedToSign", "Rejected", "RfqCancelled",
-    "SeatCannotSign", "SeatNotReady", "SeatStopped", "SendUnknown", "ServerError", "ServiceUnavailable",
+    "SeatCannotSign", "SeatNotReady", "SendUnknown", "ServerError", "ServiceUnavailable",
     "TradeInFlight", "TradeUnknown", "TxFailed", "UnknownOrEnded", "WithdrawInProgress", "WithdrawUnknown",
-    "BindFailed", "BindInProgress", "SeatBoundOtherPayout",
 ]

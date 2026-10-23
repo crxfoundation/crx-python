@@ -18,9 +18,6 @@ DOMAIN_TYPEHASH = keccak(text="EIP712Domain(string name,string version,uint256 c
 DOMAIN_FIELDS = (
     ("name", "string"), ("version", "string"), ("chainId", "uint256"), ("verifyingContract", "address"),
 )
-# Solana domain: no chainId, and verifyingContract is the program alias. A chain id of None selects it.
-SOLANA_DOMAIN_TYPEHASH = keccak(text="EIP712Domain(string name,string version,address verifyingContract)")
-SOLANA_DOMAIN_FIELDS = (("name", "string"), ("version", "string"), ("verifyingContract", "address"))
 MAX_MATURITY = 253402300799  # 9999-12-31T23:59:59Z
 SUMMARY_MAX_LEN = 162
 SECP256K1_N = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
@@ -40,10 +37,6 @@ FAILOVER_CONSENT_FIELDS = (
     ("oldId", "bytes32"), ("closedOutSide", "bytes32"), ("remainingSide", "bytes32"), ("incomingSide", "bytes32"),
     ("incomingC", "bytes32"), ("nonce", "uint64"), ("openNonce", "uint64"), ("deadline", "uint64"),
     ("commitment", "bytes32"),
-)
-# Solana seat binding: authority and payout are Ed25519 keys. payout is the wallet, not its token account.
-BIND_SEAT_FIELDS = (
-    ("seat", "address"), ("authority", "bytes32"), ("payout", "bytes32"), ("nonce", "uint64"), ("deadline", "uint64"),
 )
 ALLOCATION_ACCEPTANCE_FIELDS = (
     ("oldId", "bytes32"), ("incomingSide", "bytes32"), ("incomingC", "bytes32"), ("nonce", "uint64"),
@@ -99,11 +92,6 @@ def structs() -> dict[str, list[tuple[str, str]]]:
     }
 
 
-def solana_structs() -> dict[str, list[tuple[str, str]]]:
-    """Return the structs signed only under the Solana domain."""
-    return {"BindSeat": list(BIND_SEAT_FIELDS)}
-
-
 def type_string(primary: str) -> str:
     """Return the EIP-712 type string of a known struct, such as ``Trade(string summary,...)``."""
     return primary + "(" + ",".join(f"{t} {n}" for n, t in fields_of(primary)) + ")"
@@ -115,8 +103,7 @@ def typehash(primary: str) -> bytes:
 
 def fields_of(primary: str) -> list[tuple[str, str]]:
     """Return (name, type) of each member of a known struct. Raise KeyError for an unknown one."""
-    s = structs()
-    return s[primary] if primary in s else solana_structs()[primary]
+    return structs()[primary]
 
 
 def hx(value: str) -> bytes:
@@ -143,18 +130,8 @@ def scaled6(value: Any) -> int:
     return int(d)
 
 
-def domain_fields(chain_id: int | None) -> tuple:
-    """Return the domain members, or the Solana ones when ``chain_id`` is None."""
-    return SOLANA_DOMAIN_FIELDS if chain_id is None else DOMAIN_FIELDS
-
-
-def domain_separator(chain_id: int | None, core: str) -> bytes:
-    """Return the domain separator of ``chain_id`` and ``core``, or the Solana one when ``chain_id`` is None."""
-    if chain_id is None:
-        return keccak(encode(
-            ["bytes32", "bytes32", "bytes32", "address"],
-            [SOLANA_DOMAIN_TYPEHASH, keccak(text="CRX"), keccak(text="rulebook-1.0"), to_checksum_address(core)],
-        ))
+def domain_separator(chain_id: int, core: str) -> bytes:
+    """Return the domain separator of ``chain_id`` and ``core``."""
     return keccak(
         encode(
             ["bytes32", "bytes32", "bytes32", "uint256", "address"],
@@ -384,18 +361,16 @@ def trade_summary(pair: str, side: int, notional_e6: int, rate_e6: int, premium_
             f"per {base}, matures {_date_text(maturity)}, upfront {up}")
 
 
-def domain_json(chain_id: int | None, core: str) -> dict:
-    """Return the CRX domain in JSON form, without ``chainId`` when ``chain_id`` is None."""
-    if chain_id is None:
-        return {"name": "CRX", "version": "rulebook-1.0", "verifyingContract": address(core)}
+def domain_json(chain_id: int, core: str) -> dict:
+    """Return the CRX domain in JSON form."""
     return {"name": "CRX", "version": "rulebook-1.0", "chainId": int(chain_id), "verifyingContract": address(core)}
 
 
-def typed_data(primary: str, chain_id: int | None, core: str, message: dict) -> dict:
+def typed_data(primary: str, chain_id: int, core: str, message: dict) -> dict:
     """Return the ``eth_signTypedData_v4`` object of one struct."""
     return {
         "types": {
-            "EIP712Domain": [{"name": n, "type": t} for n, t in domain_fields(chain_id)],
+            "EIP712Domain": [{"name": n, "type": t} for n, t in DOMAIN_FIELDS],
             primary: [{"name": n, "type": t} for n, t in fields_of(primary)],
         },
         "primaryType": primary,
@@ -455,21 +430,10 @@ def struct_hash(primary: str, message: dict) -> bytes:
 def typed_digest(td: dict) -> bytes:
     """Return the EIP-712 digest of a known typed-data object. Raise ValueError on any other shape."""
     primary = td.get("primaryType") if isinstance(td, dict) else None
-    known = primary in structs() or primary in solana_structs()
-    if not known or set(td) != {"types", "primaryType", "domain", "message"}:
+    if primary not in structs() or set(td) != {"types", "primaryType", "domain", "message"}:
         raise ValueError("not a typed-data object of a known struct")
     d = td["domain"]
-    if isinstance(d, dict) and set(d) == {n for n, _ in SOLANA_DOMAIN_FIELDS}:
-        sep = keccak(encode(
-            ["bytes32", "bytes32", "bytes32", "address"],
-            [SOLANA_DOMAIN_TYPEHASH, keccak(text=word_of("string", d["name"])),
-             keccak(text=word_of("string", d["version"])),
-             to_checksum_address(word_of("address", d["verifyingContract"]))],
-        ))
-        if td.get("types") != typed_data(primary, None, "0x" + "00" * 20, {})["types"]:
-            raise ValueError("the types are not this struct's")
-        return keccak(b"\x19\x01" + sep + struct_hash(primary, td["message"]))
-    if not isinstance(d, dict) or set(d) != {n for n, _ in DOMAIN_FIELDS} or primary not in structs():
+    if not isinstance(d, dict) or set(d) != {n for n, _ in DOMAIN_FIELDS}:
         raise ValueError("the domain does not have its members")
     sep = keccak(encode(
         ["bytes32", "bytes32", "bytes32", "uint256", "address"],
@@ -492,8 +456,7 @@ def typed_mismatch(served: Any, own: dict) -> str | None:
         return "primaryType"
     if served["types"] != own["types"]:
         return "types"
-    dom = SOLANA_DOMAIN_FIELDS if "chainId" not in own["domain"] else DOMAIN_FIELDS
-    parts = (("domain", dom), ("message", fields_of(own["primaryType"])))
+    parts = (("domain", DOMAIN_FIELDS), ("message", fields_of(own["primaryType"])))
     for part, fields in parts:
         s, o = served[part], own[part]
         if not isinstance(s, dict) or set(s) != set(o):

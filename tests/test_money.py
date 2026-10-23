@@ -19,7 +19,6 @@ import crx._chain
 from crx import _eip712 as e7
 
 from .conftest import BASE, CHAIN_ID, RPC, Clock, fixture
-from .test_solana import AUTH, SEED, sclient, solnet, solsession  # noqa: F401 (fixtures)
 
 TOKEN = "0xa52c60e6e14190dad2739f4b401aa3264ae68cb8"
 
@@ -124,14 +123,6 @@ def test_deposit_bad_wait_sends_nothing(make_client, session, health, account):
             make_client().deposit(1000, wait=wait)
         assert "wait" in str(e.value), wait
     assert chain.sent == [] and session.paths("POST") == []
-
-
-def test_solana_deposit_arguments_refuse_on_ethereum(make_client, session):
-    c = make_client()
-    for kw in (dict(unsigned=True), dict(keypair=list(SEED)), dict(authority=AUTH)):
-        with pytest.raises(crx.ConfigError):
-            c.deposit("100", **kw)
-    assert session.calls == [] and session.rpc_calls == []
 
 
 def test_deposit_before_health_names_the_base_token_is_not_ready(make_client, session, health, account):
@@ -351,16 +342,6 @@ def test_withdraw_refuses_an_answer_other_than_the_signed_item(make_client, sess
             make_client().withdraw(1000)
         assert words in str(e.value) and g.signer == account.address, kw
         assert polls(session, "/balance") == reads and session.paths("POST") == ["/withdraw"] * reads, kw
-
-
-def test_withdraw_on_solana_needs_a_bind(solnet, solsession, tmp_path, account):
-    c = sclient(solsession, tmp_path, account)
-    solsession.routes[("GET", "/balance")] = {"account": c.address, "free": "100.000000",
-                                              "withdraw": {"nonce": "4", "live": True}}
-    solsession.routes[("GET", "/bind")] = {"bound": False, "status": "unbound"}
-    with pytest.raises(crx.RefusedToSign):
-        c.withdraw("10")
-    assert solsession.paths("POST") == []
 
 
 SERVICE_DOWN = {"code": "service_unavailable", "outcome": "unavailable", "error": "service temporarily unavailable",

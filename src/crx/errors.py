@@ -231,7 +231,7 @@ class SendUnknown(CrxError):
 
     @property
     def tx(self) -> str | None:
-        """The transaction hash on Ethereum, or its signature on Solana."""
+        """The transaction hash."""
         v = self.details.get("tx")
         return v if isinstance(v, str) else None
 

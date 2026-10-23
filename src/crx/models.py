@@ -253,7 +253,7 @@ class Deposit:
     """The result of ``Client.deposit``.
 
     Attributes:
-        status: ``credited`` or ``pending``. An unsigned Solana deposit reads ``unsigned``.
+        status: ``credited`` or ``pending``.
         counted: True once the deposit is final and counts in free collateral. A ``credited`` deposit can still wait.
     """
 

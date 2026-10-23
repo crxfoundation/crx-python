@@ -4,16 +4,10 @@ import pytest
 
 import crx
 
-from .test_at_most_once import withdraw_posts
 from .test_quote_trade import QID, QID2, RFQ, accepts, clock, sent_nothing, signed_posts, venue  # noqa: F401 (fixtures)
-from .test_solana import BOUND, sclient, solnet, solsession  # noqa: F401 (fixtures)
 
 REJECTED = {"error": "rejected: rj_0011223344556677", "code": "rejected", "outcome": "trade_not_opened",
             "message": "Trade not opened. Ask for a new quote.", "details": {"reject_code": "rj_0011223344556677"}}
-# The gateway's 409 before it reads the latest settlement names the next request time.
-UNREAD = {"error": "conflict: the latest settlement is not read yet; retry shortly", "code": "conflict",
-          "outcome": "unavailable", "message": "Balances are updating. Next request after 17:05 UTC."}
-WAIT = {"Retry-After": "240"}
 
 
 def drops(venue, session, best_edit):
@@ -69,17 +63,3 @@ def test_a_dropped_quote_signs_nothing_for_the_best(make_client, venue, session,
     t = c.trade(e.best)
     assert (t.status, t.quote_id) == ("open", QID2)
     assert [b["quote_id"] for b in accepts(session)[before:]] == [QID, QID2] and sent_nothing(session)
-
-
-def test_a_solana_withdraw_409_is_posted_once(solnet, solsession, tmp_path, account):
-    c = sclient(solsession, tmp_path, account)
-    solsession.routes[("GET", "/bind")] = dict(BOUND)
-    solsession.routes[("GET", "/balance")] = {"account": c.address, "free": "100.000000",
-                                              "withdraw": {"nonce": "4", "live": True}}
-    solsession.routes[("POST", "/withdraw")] = (409, UNREAD, WAIT)
-    t0 = c._clock()
-    with pytest.raises(crx.CrxError) as ei:
-        c.withdraw("10", wait=0)
-    assert (ei.value.code, str(ei.value), ei.value.details["retry_after_secs"]) == (
-        "conflict", f"{UNREAD['message']} ({UNREAD['error']})", 240)
-    assert len(withdraw_posts(solsession)) == 1 and c._clock() == t0

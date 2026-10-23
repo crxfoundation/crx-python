@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import base64
-import binascii
 import logging
 import os
 import re
@@ -23,7 +21,6 @@ from . import _eip712 as e7
 from ._bind import Binder, read_later
 from ._chain import Rpc, TxLog, send_tx
 from . import _env
-from . import _solana as sol
 from ._http import Gateway
 from ._keys import load_account
 from . import _maker
@@ -69,26 +66,9 @@ NETWORKS = {
         "chain_id": 1,
         "core": MAINNET_CORE,
     },
-    # Needs allow_mainnet and an RPC URL. Without program_id, signing calls refuse and no wallet is read.
-    # For another cluster, add a copy of this row under a new name with that cluster's values.
-    "solana": {
-        "chain": "solana",
-        "family": "solana",
-        "base_url": f"https://{sol.HOST}/api",
-        "rpc_url": None,
-        "settle_wait": 90.0,
-        "default_wait": 900.0,
-        "check_minute": 5,
-        "genesis_hash": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
-        "cluster_tag": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
-        "program_id": "A32Z1LwBwyE6UB8SmcF1mwHKQfEhtVQ95s9jfpqDFvWE",
-        # A second RPC must also see no status before a deposit reads as not sent.
-        "check_rpc_url": "https://api.mainnet-beta.solana.com",
-        "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-    },
 }
 _ALIASES = {"fuji": "testnet"}
-TESTNET_CHAIN_IDS = {43113, 84532, 11142220}
+TESTNET_CHAIN_IDS = {43113}
 MAINNET_CHAIN_IDS = {1}
 DEFAULT_STATE_DIR = "~/.crx-quickstart"  # shared with the quickstart scripts: one nonce floor per seat
 WAITING = ("", "sending", "pending")  # statuses _settle polls past
@@ -379,9 +359,9 @@ class Client:
     Args:
         key: Seat wallet private key. When absent, read from ``key_file``, ``CRX_WALLET_PK`` or
             ``CRX_WALLET_PK_FILE``. Without a key, only ``health()``, ``markets()``, ``market()`` and ``next_check()`` work.
-        network: ``"testnet"`` (default), ``"mainnet"`` or ``"solana"``.
-        allow_mainnet: Required for mainnet and Solana, or set ``CRX_ALLOW_MAINNET=1``.
-        rpc_url: Chain RPC URL, or ``CRX_RPC``. Mainnet and Solana have no default.
+        network: ``"testnet"`` (default) or ``"mainnet"``.
+        allow_mainnet: Required for mainnet, or set ``CRX_ALLOW_MAINNET=1``.
+        rpc_url: Chain RPC URL, or ``CRX_RPC``. Mainnet has no default.
         signer: A custodian signer in place of the key (see ``crx.signer``). ``deposit``, ``send_quote``
             and ``confirm`` still need a local key.
         account: Another seat this key may read (see ``add_viewer``). Then only ``balance``, ``positions``
@@ -389,8 +369,6 @@ class Client:
         core: Core contract that replaces the network's pinned one. Pass only an address CRX publishes.
             Signing calls refuse when /health serves another core or domain.
         keepalive: Seconds between maker ``/trades`` reads that keep the seat live, 1 to 10 (default 5), or None.
-        keypair: Solana wallet, for ``network="solana"``.
-        check_rpc_url: Solana second RPC, or ``CRX_CHECK_RPC``, that must agree before a deposit reads as not sent.
     """
 
     def __init__(
@@ -401,7 +379,6 @@ class Client:
         network: str = "testnet",
         base_url: str | None = None,
         rpc_url: str | None = None,
-        check_rpc_url: str | None = None,
         state_dir: str | os.PathLike | None = None,
         timeout: float = 10.0,
         session: requests.Session | None = None,
@@ -409,7 +386,6 @@ class Client:
         allow_mainnet: bool = False,
         signer: Any = None,
         keepalive: float | None = _maker.KEEPALIVE_S,
-        keypair: Any = None,
         core: str | None = None,
     ) -> None:
         self._account = None
@@ -417,45 +393,33 @@ class Client:
         self._custody = None
         self._live: _maker.Keepalive | None = None
         if signer is not None and (key is not None or key_file is not None):
-            key = keypair = None
+            key = None
             raise ConfigError("set key, key_file or signer: one only")
         lo, hi = _maker.KEEPALIVE_RANGE
         if keepalive is not None and (isinstance(keepalive, bool) or not isinstance(keepalive, (int, float))
                                       or not lo <= keepalive <= hi):
-            key = keypair = None
+            key = None
             raise ConfigError(f"keepalive is None, or {lo:g} to {hi:g} s")
         self._keepalive_s = None if keepalive is None else float(keepalive)
         self._live_lock = threading.Lock()
         name = _ALIASES.get(network, network)
         net = NETWORKS.get(name)
         if net is None:
-            key = keypair = None
+            key = None
             raise ConfigError(f"unknown network {clean(network, 20)!r}; known: {', '.join(NETWORKS)}")
         self.network = name
         self._net = net
         pin_core = net.get("core")
         if core is not None:
-            if net.get("family") == "solana":
-                key = keypair = None
-                raise ConfigError("core= is for Ethereum networks; on Solana the SDK pins the program")
             try:
                 pin_core = _address(core, "core", ConfigError)
             except ConfigError:
-                key = keypair = None
+                key = None
                 raise
         try:
             self._pin_core = _address(pin_core, "core", ConfigError)
         except ConfigError:
             self._pin_core = None  # signing calls refuse later
-        self._keypair = None
-        seat = None
-        if keypair is not None:
-            if net.get("family") != "solana":
-                key = keypair = None
-                raise ConfigError("keypair= is for network='solana'")
-            if signer is not None or key is not None or key_file is not None:
-                key = keypair = None
-                raise ConfigError("set keypair (the Solana wallet) or key, key_file, signer: one only")
         self.chain_key = net["chain"]
         self._settle_wait = net["settle_wait"]
         self._default_wait = float(net.get("default_wait", DEFAULT_WAIT))
@@ -463,38 +427,26 @@ class Client:
         try:
             env = _env.load()
         except ConfigError:
-            key = keypair = None
+            key = None
             raise
         gw_url = base_url or env.get("CRX_BASE") or net["base_url"]
         rpc = rpc_url or env.get("CRX_RPC") or net["rpc_url"]
-        if name == "mainnet" or net.get("family") == "solana":
+        if name == "mainnet":
             refusal = None
             if not (allow_mainnet is True or env.get("CRX_ALLOW_MAINNET") == "1"):
                 refusal = "mainnet is off: pass allow_mainnet=True or set CRX_ALLOW_MAINNET=1"
             elif not rpc:
                 refusal = f"{name} has no default RPC: pass rpc_url= or set CRX_RPC"
             if refusal:
-                key = keypair = None
+                key = None
                 raise ConfigError(refusal)
-        if keypair is not None:
-            # Read the wallet only after the network checks pass, and drop the secret from locals at once.
-            try:
-                sol.need_pin(net)
-                self._keypair = sol.Keypair(keypair)
-            finally:
-                keypair = None
-            # load_account takes the seat key, so it never becomes a local here.
-            seat = load_account(sol.seat_secret(self._keypair))
         self._session = session or requests.Session()
         try:
-            gateway = sol.SeatGateway if net.get("family") == "solana" else Gateway
-            self._gw = gateway(gw_url, None, self._session, timeout)
+            self._gw = Gateway(gw_url, None, self._session, timeout)
         except ConfigError:
             key = None
             raise
         self._rpc = Rpc(rpc, self._session, max(timeout, 20.0))
-        check = check_rpc_url or env.get("CRX_CHECK_RPC") or net.get("check_rpc_url")
-        self._check_rpc = Rpc(check, self._session, max(timeout, 20.0)) if check and check != rpc else None
         try:
             custody = None if account is None else _address(account, "account", ConfigError)
         except ConfigError:
@@ -502,7 +454,7 @@ class Client:
             raise
         # Drop the key from locals once it loads, or fails to.
         try:
-            self._account = seat if seat is not None else (load_account(key, key_file, env.get) if signer is None else None)
+            self._account = load_account(key, key_file, env.get) if signer is None else None
         except ConfigError:
             key = None
             raise
@@ -602,10 +554,6 @@ class Client:
                   and (c.get("key") or c.get("chain")) == self.chain_key), None)
         if c is None:
             raise ConfigError(f"{self._gw.host} does not serve {self.chain_key}")
-        if self._net.get("family") == "solana":
-            c = sol.check_cluster(self._rpc, self._net, c)
-            self._chain, self._sep, self._rpc_checked = c, e7.domain_separator(None, c["core"]), True
-            return self._chain
         pin_id, pin_core = self._net.get("chain_id"), self._pin_core
         if type(pin_id) is not int or pin_core is None:
             raise ConfigError(f"network {self.network!r} pins no chain id or core; nothing signed. Pass core=")
@@ -644,8 +592,7 @@ class Client:
 
     def _binder(self) -> Binder:
         c = self._chain_ready()
-        binder = sol.SeatBinder if self._net.get("family") == "solana" else Binder
-        return binder(self._gw, self._signer, c, self._sep, self._state_dir, clock=self._clock)
+        return Binder(self._gw, self._signer, c, self._sep, self._state_dir, clock=self._clock)
 
     def health(self) -> dict:
         """Return the gateway's /health answer."""
@@ -654,7 +601,7 @@ class Client:
     def next_check(self) -> datetime:
         """Return the time of the next hourly check in UTC, without a network call.
 
-        The check runs at :05 past the hour on testnet and Solana, and at :35 on mainnet.
+        The check runs at :05 past the hour on testnet, and at :35 on mainnet.
         """
         now = datetime.fromtimestamp(self._clock(), timezone.utc)
         at = now.replace(minute=self._check_minute, second=0, microsecond=0)
@@ -892,8 +839,6 @@ class Client:
             raise BadRequest("expiry is a datetime, a timedelta or unix ms")
         if isinstance(premium_bps, bool) or not (isinstance(premium_bps, int) and -10_000 <= premium_bps <= 10_000):
             raise BadRequest("premium_bps is an integer from -10000 to 10000")
-        if self._net.get("family") == "solana":
-            sol.check_tenor(m.min_tenor_s, m.max_tenor_s, expiry_ms, now.timestamp())
         req = {
             "chain": self.chain_key, "pair": compact, "side": side, "notional": _plain(amount),
             "expiry": expiry_ms, "client_rfq_id": client_rfq_id or f"sdk-{uuid.uuid4().hex[:12]}",
@@ -909,8 +854,6 @@ class Client:
             if sent and _settle.is_hours(settles):
                 at = now + timedelta(seconds=self._clock() - t0)
                 req["expiry"] = int(_settle.settlement(settles, m, at).timestamp() * 1000)
-                if self._net.get("family") == "solana":
-                    sol.check_tenor(m.min_tenor_s, m.max_tenor_s, req["expiry"], at.timestamp())
             sent.append(True)
             return self._gw.request("POST", "/rfqs", body=req,
                                     timeout=max(self._gw._timeout, OPEN_TIMEOUT) if wait else None)
@@ -1193,8 +1136,7 @@ class Client:
                 return word, seen
             self._sleep(1.0)
 
-    def deposit(self, amount: Any, *, wait: float | None = None, mint: bool = True, keypair: Any = None,
-                unsigned: bool = False, authority: str | None = None) -> Deposit:
+    def deposit(self, amount: Any, *, wait: float | None = None, mint: bool = True) -> Deposit:
         """Deposit USDC from the seat wallet into collateral. The wallet pays the network fees.
 
         Args:
@@ -1202,13 +1144,10 @@ class Client:
             wait: Seconds to wait for the deposit to count in free collateral. Defaults to 30 minutes on
                 testnet and 15 minutes on mainnet.
             mint: On testnet, first mint the test USDC the wallet lacks. Defaults to True.
-            keypair: Solana only. The bound authority's keypair: a key file path, a list or bytes.
-            unsigned: Solana only. Return the checked transaction unsigned, base64 in ``txs``.
-            authority: Solana only, with ``unsigned=True``. The signing wallet. Defaults to the client's keypair.
 
         Returns:
             Status ``credited`` with ``counted`` True once free collateral includes the deposit. When ``wait``
-            ends first, ``counted`` is False. On Solana, ``counted`` is always False.
+            ends first, ``counted`` is False.
 
         Raises:
             TxFailed: The wallet holds too little USDC, or a transaction reverted.
@@ -1216,25 +1155,7 @@ class Client:
             DepositFailed: The deposit failed.
             RefusedToSign: The gateway served an unexpected transaction. Nothing was sent.
         """
-        try:
-            wait = self._wait_of(wait)
-        except BadRequest:
-            keypair = None
-            raise
-        if self._net.get("family") != "solana":
-            if keypair is not None or unsigned or authority is not None:
-                keypair = None
-                raise ConfigError("keypair=, unsigned= and authority= are for network='solana'")
-        else:
-            kp = None
-            if keypair is not None:
-                # Read no wallet without a pinned program, and drop the secret from this frame either way.
-                try:
-                    sol.need_pin(self._net)
-                    kp = sol.Keypair(keypair)
-                finally:
-                    keypair = None
-            return self._deposit_solana(amount, kp, unsigned, authority, wait)
+        wait = self._wait_of(wait)
         self._need_seat()
         self._need_local_key("deposit()")
         amount = _amount(amount)
@@ -1316,162 +1237,6 @@ class Client:
                                 "before you deposit again", details={"amount": _plain(amount), "txs": list(txs)})
         return Deposit(amount=amount, txs=txs, status=status, counted=counted)
 
-    def _need_solana(self, what: str) -> None:
-        if self._net.get("family") != "solana":
-            raise ConfigError(f"{what} is a Solana call; this client is on {self.network}")
-
-    def _bind_state(self) -> dict:
-        b = self._gw.request("GET", "/bind")
-        if not isinstance(b, dict):
-            raise BadAnswer("/bind sent an answer that is not an object")
-        return b
-
-    def bind_state(self) -> dict:
-        """Return this seat's Solana bind, as ``GET /bind`` reports it.
-
-        ``status`` is ``unbound``, ``pending``, ``failed`` or ``bound``. ``authority``, ``payout_wallet`` and
-        ``payout_ata`` are base58 keys, or None while unbound. ``bound`` does not name the keys. Compare the
-        three with the expected keys, or call ``bind()``.
-        """
-        self._need_seat()
-        self._need_solana("bind_state()")
-        return self._bind_state()
-
-    def _await_bind(self, filed: dict) -> dict:
-        last = sol.await_bind(self._bind_state, filed, self._clock, self._sleep)
-        log.info("bind %s -> bound", self.address)
-        return last
-
-    def bind(self, authority: str | None = None, payout_wallet: str | None = None) -> dict:
-        """Bind this seat to a Solana authority and payout wallet. Each seat binds once.
-
-        The seat signs the bind and CRX pays the network fee. The bind fixes the payout account for good. The
-        call waits up to 240 s for the bind to land. A seat already bound to these keys returns at once.
-
-        Args:
-            authority: Base58 key that signs deposits. Defaults to the client's keypair.
-            payout_wallet: Base58 wallet whose USDC account receives withdrawals. Defaults to ``authority``.
-
-        Returns:
-            The ``GET /bind`` answer that shows the seat bound to these keys.
-
-        Raises:
-            SeatBoundOtherPayout: The seat is bound to another payout wallet.
-            CrxError: Code ``seat_already_bound``. The seat is bound to another authority.
-            BindInProgress: The bind has not landed yet. Call ``bind()`` again to read its end.
-            BindFailed: The bind ended with the seat not bound.
-        """
-        self._need_seat()
-        self._need_solana("bind()")
-        authority = authority or (self._keypair.pubkey if self._keypair is not None else None)
-        if authority is None:
-            raise BadRequest("bind() needs the authority: pass it, or make the client with keypair=")
-        payout_wallet = payout_wallet or authority
-        try:
-            auth_b, pay_b = sol.key(authority), sol.key(payout_wallet)
-        except ValueError:
-            raise BadRequest("authority and payout_wallet are 32-byte base58 keys") from None
-        sol.need_pin(self._net)
-        filed = sol.bind_keys(authority, payout_wallet, self._net["mint"])
-        held = self._bind_state()
-        end = sol.bind_end(held, filed)
-        if end is not None:
-            return end
-        if held.get("status") == "pending":
-            # The gateway takes no other bind while one is in progress.
-            if not sol.same_keys(held, filed):
-                raise sol.BindInProgress(sol.BIND_LIVE_LINE, details={"filed": sol.shown_keys(held)})
-            return self._await_bind(filed)
-        c = self._chain_ready()
-        r = sol.post_bind(self._gw, {"authority": authority, "payout_wallet": payout_wallet}, filed)
-        if r is None:
-            return self._await_bind(filed)
-        now = int(self._clock())
-        try:
-            b = r["bind"]
-            nonce, deadline = int(b["nonce"]), int(b["deadline"])
-            same = (e7.address(b["seat"]) == self.address and b["authority"] == authority
-                    and b["payout"] == payout_wallet)
-            ata = str(r["payout_ata"])
-        except (KeyError, TypeError, ValueError):
-            raise RefusedToSign("/bind served a bind this SDK cannot read; nothing signed") from None
-        if not same or ata != sol.ata(payout_wallet, self._net["mint"]):
-            raise RefusedToSign("/bind served another seat, key or payout account; nothing signed")
-        if not now < deadline <= now + 24 * 3600:
-            raise RefusedToSign("/bind served a deadline out of range; nothing signed")
-        if not 0 <= nonce < 2**64:
-            raise RefusedToSign("/bind served a nonce out of range; nothing signed")
-        msg = {"seat": self.address, "authority": e7.h0x(auth_b), "payout": e7.h0x(pay_b), "nonce": str(nonce),
-               "deadline": str(deadline)}
-        td = e7.typed_data("BindSeat", None, c["core"], msg)
-        digest = e7.typed_digest(td)
-        if e7.typed_mismatch(r.get("typed_data"), td) is not None or _word(r.get("digest")) != e7.h0x(digest):
-            raise RefusedToSign("/bind served typed data other than the SDK's own; nothing signed")
-        sig = sign_typed(self._signer, td, digest, self.address)
-        sol.post_bind(self._gw, {"authority": authority, "payout_wallet": payout_wallet, "nonce": str(nonce),
-                                 "deadline": deadline, "sig": sig}, filed)
-        return self._await_bind(filed)
-
-    def _deposit_solana(self, amount: Any, kp: Any, unsigned: bool, authority: str | None, wait: float) -> Deposit:
-        self._need_seat()
-        if unsigned and kp is not None:
-            raise ConfigError("Solana deposit(): pass keypair= or unsigned=True, not both")
-        if not unsigned and kp is None and self._keypair is None:
-            raise ConfigError("Solana deposit(): pass keypair= (the bound authority) or unsigned=True")
-        if not unsigned and authority is not None:
-            raise ConfigError("Solana deposit(): authority= goes with unsigned=True; the keypair names its own")
-        amount = _amount(amount)
-        if unsigned:
-            wallet = authority if authority is not None else getattr(self._keypair, "pubkey", None)
-            if wallet is None:
-                raise ConfigError("Solana deposit(unsigned=True) needs authority= (the wallet that signs it)")
-            try:
-                sol.key(wallet)
-            except ValueError:
-                raise BadRequest("authority is a 32-byte base58 key") from None
-        else:
-            kp = kp if kp is not None else self._keypair
-            wallet = kp.pubkey
-        c = self._chain_ready()
-        if c.get("base_token") != self._net["mint"] or int(c.get("base_decimals", -1)) != 6:
-            raise RefusedToSign("/health names another token than this SDK pins; nothing signed")
-        raw = e7.scaled6(amount)
-        b = self._bind_state()
-        if b.get("bound") is not True or not isinstance(b.get("authority"), str):
-            raise RefusedToSign("this seat is not bound yet: call bind() first; nothing signed")
-        if b["authority"] != wallet:
-            raise ConfigError("the wallet is not this seat's bound authority; nothing signed")
-        r = self._gw.request("POST", "/deposit", body={"chain": self.chain_key, "amount": _plain(amount)})
-        try:
-            (t,) = r["transactions"]
-            ok = (t["family"], t["encoding"], t["version"]) == ("solana", "base64", "legacy")
-            rawtx = base64.b64decode(t["tx"], validate=True)
-            served_raw = int(r["amount_raw"])
-        except (KeyError, TypeError, ValueError, binascii.Error):
-            raise RefusedToSign("the gateway served a deposit this SDK cannot read; nothing sent") from None
-        if not ok or served_raw != raw:
-            raise RefusedToSign("the gateway served another deposit than asked; nothing sent")
-        parsed = sol.check_deposit(
-            rawtx, program_id=c["program_id"], authority=wallet, source=sol.ata(wallet, self._net["mint"]),
-            amount_raw=raw, row=None, seat20=bytes.fromhex(self.address[2:]))
-        if kp is None:
-            return Deposit(amount=amount, txs=[t["tx"]], status="unsigned")
-        before = _last(self.balance().raw, "deposit")
-        sig = sol.send_and_confirm(self._rpc, sol.signed_tx(parsed, kp), check_rpc=self._check_rpc,
-                                   sleep=self._sleep, clock=self._clock)
-
-        def credited() -> dict | None:
-            # The gateway can omit the tx. A new record of this amount is then this deposit.
-            last = _last(self.balance().raw, "deposit")
-            if last.get("tx") == sig:
-                return last
-            if last.get("tx") is None and last != before and str(last.get("amount")) == _plain(amount):
-                return last
-            return None
-
-        status, _ = self._settle(credited, wait=wait)
-        return self._deposited(amount, [sig], status)
-
     def withdraw(self, amount: Any = None, *, wait: float | None = None) -> Withdraw:
         """Withdraw USDC from free collateral to the seat's own wallet. CRX pays the network fee.
 
@@ -1498,11 +1263,6 @@ class Client:
         amount = None if amount is None else _amount(amount)
         wait = self._wait_of(wait)
         c = self._chain_ready()
-        if self._net.get("family") == "solana":
-            # The chain pays the account fixed at bind, so the intent names no payout.
-            b = self._bind_state()
-            if b.get("bound") is not True:
-                raise RefusedToSign("this seat is not bound yet: call bind() first; nothing signed")
         with self._withdraw_mx:
             held = self._held_withdraw
             end = self._clock() + wait

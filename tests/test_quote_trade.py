@@ -579,13 +579,9 @@ def test_health_that_moved_refuses_the_trade(make_client, venue, session, health
 
 
 CHAIN_PINS = [  # /health chain id, RPC chain id, call on make_client, words
-    (84532, hex(CHAIN_ID), lambda mk: mk()._chain_info(),
-     "^avax-fuji is chain 84532, not the pinned chain 43113; nothing signed$"),
     (1, hex(CHAIN_ID), lambda mk: mk()._chain_info(), "testnets only"),
     (CHAIN_ID, "0x1", lambda mk: mk().deposit(1000), "RPC"),
     (CHAIN_ID, hex(CHAIN_ID), lambda mk: mk(core=""), "core is not a wallet address"),
-    (CHAIN_ID, hex(CHAIN_ID), lambda mk: mk(network="solana", allow_mainnet=True, core=OTHER_CORE),
-     "^core= is for Ethereum networks"),
 ]
 
 

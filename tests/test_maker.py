@@ -321,7 +321,7 @@ def test_rfqs_yields_quotable_rfqs_once(maker, session, monkeypatch):
     other = frame(rfq_id=OTHER)
     pages = [
         tape([opened(frame(rfq_id=other_id(1), client_rfq_id="cid-1"), 1),      # own RFQ
-              opened(frame(rfq_id=other_id(2), chain="celo"), 2),                # another chain
+              opened(frame(rfq_id=other_id(2), chain="ethereum"), 2),            # another chain
               opened(frame(rfq_id=other_id(3), kind="close"), 3)], 3),           # a close RFQ
         tape([opened(frame(rfq_id=other_id(4), closes_at=T0 * 1000), 4),         # quote window closed
               opened(frame(rfq_id=other_id(5), closes_at=None, quote_expiry_max=T0), 5),  # quote end passed
@@ -421,7 +421,7 @@ REFUSALS = [
     ("quote_window_under_60_s", dict(quote_expiry_max=T0 + 59), crx.QuoteLost,
      "under 60 s of the RFQ's quote window is left; nothing signed"),
     ("quote_end_over_630_s_out", dict(quote_expiry_max=T0 + 631), crx.RefusedToSign, "more than 630 s ahead"),
-    ("wrong_chain", dict(chain="celo"), crx.BadRequest, "the RFQ is on celo; this client signs for avax-fuji"),
+    ("wrong_chain", dict(chain="ethereum"), crx.BadRequest, "the RFQ is on ethereum; this client signs for avax-fuji"),
     ("close_rfq", dict(kind="close"), crx.BadRequest, "a close RFQ takes a price-only quote"),
     ("own_rfq", dict(client_rfq_id="cid-1"), crx.BadRequest, "this is your own RFQ"),
     ("side_zero", dict(side=0), crx.RefusedToSign, "the RFQ names no side for this seat"),

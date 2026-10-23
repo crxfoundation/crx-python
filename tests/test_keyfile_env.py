@@ -16,7 +16,7 @@ from .conftest import BASE, RPC
 pytestmark = pytest.mark.skipif(os.name != "posix", reason="POSIX file modes")
 
 CRX_NAMES = ("CRX_WALLET_PK", "CRX_WALLET_PK_FILE", "CRX_BASE", "CRX_RPC", "CRX_STATE_DIR",
-             "CRX_ALLOW_MAINNET", "CRX_CHECK_RPC")
+             "CRX_ALLOW_MAINNET")
 
 
 @pytest.fixture

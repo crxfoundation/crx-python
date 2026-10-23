@@ -8,7 +8,7 @@ Trade FX forwards on CRX from Python.
 pip install "git+https://github.com/crxfoundation/crx-python@v0.3.15"
 ```
 
-Python 3.10 or newer. For Solana, see [Solana](#solana).
+Python 3.10 or newer.
 
 Set `CRX_WALLET_PK` to the private key of an onboarded seat wallet. To read the key from a file, pass `key_file="seat.key"` or set `CRX_WALLET_PK_FILE`. When other users can open the file and it is yours, the SDK sets it to owner-only (0600) and prints `set seat.key to owner-only (0600)`. It refuses a key file of another user, or one whose mode does not change. The SDK never prints or logs the key. On mainnet, the wallet needs ETH for the network fee of a deposit.
 
@@ -66,11 +66,11 @@ w = c.withdraw(50)                                 # c.withdraw() withdraws all 
 print(w.amount, w.status)
 ```
 
-`network` is `"testnet"` (default, Avalanche Fuji), `"mainnet"` (Ethereum) or `"solana"`. The wallet pays the network fee of a deposit, and CRX sends every other transaction and pays its fee. `unrealized_pnl` is in USDC, from the seat's side.
+`network` is `"testnet"` (default, Avalanche Fuji) or `"mainnet"` (Ethereum). The wallet pays the network fee of a deposit, and CRX sends every other transaction and pays its fee. `unrealized_pnl` is in USDC, from the seat's side.
 
 ## Calls
 
-`wait=` on `accept()`, `deposit()`, `withdraw()`, `confirm()` and `test_request()` caps how long the call waits for its result, in seconds. Default: 1800 on testnet, 900 on mainnet and Solana.
+`wait=` on `accept()`, `deposit()`, `withdraw()`, `confirm()` and `test_request()` caps how long the call waits for its result, in seconds. Default: 1800 on testnet, 900 on mainnet.
 
 | Call | Does |
 |---|---|
@@ -187,38 +187,9 @@ viewer = crx.Client(key_file="viewer.key", network="testnet", account=owner.addr
 print(viewer.balance().free)  # 900.000000
 ```
 
-## Solana
-
-Sign up first at portal.crxfx.com/sign-up with the same wallet. The sign-up runs in a browser wallet, so import a keypair file into a browser wallet first. Install version 0.3.15 with the extra:
-
-```bash
-pip install "crx-python[solana] @ git+https://github.com/crxfoundation/crx-python@v0.3.15"
-```
-
-```python
-import time
-
-c = crx.Client(network="solana", keypair="~/.config/solana/id.json", rpc_url="https://…", allow_mainnet=True)
-c.bind()               # binds the seat to this wallet once; signs nothing when bound to it already
-c.deposit("1000")      # the wallet signs one Solana transaction
-while not c.balance().free:
-    time.sleep(60)     # an hourly check credits the deposit
-q = c.quote("USD/MXN", "buy", 100)
-c.accept(q)
-c.withdraw("500")      # pays the wallet's USDC account fixed at bind
-```
-
-- The wallet signs one fixed text, and its keccak256 is the seat key. portal.crxfx.com makes the same key from the same wallet. Sign that text nowhere but portal.crxfx.com. The text stays the same when `base_url=` or `CRX_BASE` names another gateway.
-- The keypair file is the `solana-keygen` JSON array. It gets the owner-only rule of the Ethereum key file.
-- Before the first signature, the client checks the cluster (genesis hash), the program, the signing domain and the core and vault addresses. The program is `crx.NETWORKS["solana"]["program_id"]`. A mismatch signs nothing.
-- A seat opens for deposits after CRX lists it. A dealer quotes a size only when its free collateral covers it.
-- `bind()` fixes the seat's authority, payout wallet and payout USDC account for good. It waits up to 240 s for the bind to show on the seat. `bind_state()` reads the bind. Its `bound` does not name the keys, so compare `authority`, `payout_wallet` and `payout_ata` with the wallet's, or call `bind()`.
-- `deposit()` sends its transaction once. `check_rpc_url=` or `CRX_CHECK_RPC` names a second RPC that reads its status. `deposit(unsigned=True, authority="<wallet>")` returns the checked, unsigned transaction (base64) for the bound wallet to sign elsewhere.
-- `quote()` and `ask()` send no RFQ outside the pair's tenor band (`tenor.min_secs` and `tenor.max_secs` in `/markets`). The error is `bad_request` with `details["limit"]` `tenor`, and `details["earliest_expiry"]` or `details["latest_expiry"]` (unix ms) names the nearest time that settles.
-
 ## Errors
 
-Every error is a `crx.CrxError`. Branch on `.code`. Show `str(e)`: on a gateway refusal it is the gateway's `message`. When the gateway names a time to call again, `details["retry_after_secs"]` holds the wait in seconds and `details["time_utc"]` the UTC time (`17:05 UTC`). `except crx.NoQuotes` also catches `rfq_cancelled`, `except crx.Declined` catches `rate_out_of_band` and `mark_unavailable`, `except crx.ServerError` catches `service_unavailable`, and `except crx.NotWhitelisted` catches `seat_stopped`.
+Every error is a `crx.CrxError`. Branch on `.code`. Show `str(e)`: on a gateway refusal it is the gateway's `message`. When the gateway names a time to call again, `details["retry_after_secs"]` holds the wait in seconds and `details["time_utc"]` the UTC time (`17:05 UTC`). `except crx.NoQuotes` also catches `rfq_cancelled`, `except crx.Declined` catches `rate_out_of_band` and `mark_unavailable`, and `except crx.ServerError` catches `service_unavailable`.
 
 | Code | What to do |
 |---|---|
@@ -247,19 +218,14 @@ Every error is a `crx.CrxError`. Branch on `.code`. Show `str(e)`: on a gateway 
 | `withdraw_unknown` | Call `withdraw()` with the same amount to read it. |
 | `viewer_cap` | Remove one of the 5 viewers first. |
 | `refused_to_sign` | Read the message. The SDK signed nothing. |
-| `tx_failed` | Read the message. On Solana, `details["reason"]` `intake_full` means deposit again after the hourly check, and `expired` means not sent. |
-| `send_unknown` | The transaction can still land. Check `.tx` on the chain before a new send. Ethereum: no receipt after 300 s. |
-| `seat_stopped` | Solana: CRX removed the seat's access to trade. `deposit()` and `withdraw()` still work. |
-| `seat_bound_other_payout` | Solana: the seat is bound to another payout wallet for good. Contact CRX. |
-| `seat_already_bound` | Solana: compare `details["bound"]` with `details["filed"]`. |
-| `bind_in_progress` | Solana: call `bind()` again to read its end. |
-| `bind_failed` | Solana: read `details["error"]`. The seat is not bound. |
+| `tx_failed` | Read the message. |
+| `send_unknown` | The transaction can still land. Check `.tx` on the chain before a new send. No receipt after 300 s. |
 
 ## Safety
 
 - The SDK rebuilds every digest and transaction before it signs. A mismatch, or a signature that does not recover to the seat, raises `refused_to_sign`. Every signature leaves with low `s` and `v` 27 or 28.
 - A trade carries a readable `summary` line. The SDK builds its own `Trade` from the request and the quote's rate, and compares it with the served one member by member. It checks the domain, the quote end and the nonce, and signs its own.
-- Each Ethereum network pins its chain id and core contract. Testnet (Avalanche Fuji, chain 43113): `0x072000D0EB830F767DC5128ED28139bB731b1521`. Mainnet (chain 1): `0x0d716cA9Fc2BFD8c66D2AF2fB38b56D08809A8cc`. The signing domain is built from the pin.
+- Each network pins its chain id and core contract. Testnet (Avalanche Fuji, chain 43113): `0x072000D0EB830F767DC5128ED28139bB731b1521`. Mainnet (chain 1): `0x0d716cA9Fc2BFD8c66D2AF2fB38b56D08809A8cc`. The signing domain is built from the pin.
 - When `/health` names another chain id, core or domain, each signing call raises `refused_to_sign` or `config` and signs nothing. `core=` replaces the pinned core: pass only an address that CRX publishes.
 - Keep DEBUG logging off in production. At DEBUG, urllib3 logs request paths, and a path can hold an RPC key.
 
@@ -267,9 +233,9 @@ Every error is a `crx.CrxError`. Branch on `.code`. Show `str(e)`: on a gateway 
 
 | Argument | Environment | Default |
 |---|---|---|
-| `allow_mainnet=True` | `CRX_ALLOW_MAINNET=1` | Off. Mainnet and Solana need it. |
-| `rpc_url=` | `CRX_RPC` | A public RPC on testnet. Mainnet and Solana have none. |
-| `base_url=` | `CRX_BASE` | Testnet: `https://api.sandbox.crxfx.com`. Mainnet: `https://api.crxfx.com`. Solana: `https://portal.crxfx.com/api`. |
+| `allow_mainnet=True` | `CRX_ALLOW_MAINNET=1` | Off. Mainnet needs it. |
+| `rpc_url=` | `CRX_RPC` | A public RPC on testnet. Mainnet has none. |
+| `base_url=` | `CRX_BASE` | Testnet: `https://api.sandbox.crxfx.com`. Mainnet: `https://api.crxfx.com`. |
 | `state_dir=` | `CRX_STATE_DIR` | `~/.crx-quickstart/`, which holds the nonce floor and is shared with the quickstart scripts. |
 
 ## Tests

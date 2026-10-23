@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.16
+
+- The Solana network is removed: `network="solana"`, `Client(keypair=, check_rpc_url=)`, `CRX_CHECK_RPC`, `bind()`, `bind_state()`, `deposit(keypair=, unsigned=, authority=)`, the errors `SeatStopped`, `SeatBoundOtherPayout`, `BindInProgress` and `BindFailed`, and the `crx-python[solana]` extra. `network="solana"` raises `ConfigError` (unknown network); a removed argument raises `TypeError`. Testnet and mainnet are unchanged.
+- On testnet, a `/health` chain id other than 43113 raises `ConfigError` ("not a testnet"). Nothing is signed, as before.
+
 ## 0.3.15
 
 - A key file (`key_file=`, `CRX_WALLET_PK_FILE`, a Solana keypair file) that group or other users can open is set to owner-only (0600) when the current user owns it. One line goes to stderr: `set <path> to owner-only (0600)`. A key file of another user, a symlink to one, or a file whose mode does not change is refused as before. The mode check and the read use one open file; the key is read after the check.
