@@ -6,6 +6,7 @@ import pytest
 import requests
 
 import crx
+from .conftest import WEEK  # noqa: F401
 
 from .conftest import RFQ2, Clock, other_rfq
 from .test_money import LANDED, Chain, balance_body, gate, item_row
@@ -49,7 +50,7 @@ def test_trade_retry_after_a_fault_signs_and_posts_nothing(make_client, venue, s
         faulty_accept(venue, session, fault)
         before = len(accepts(session))
         c = make_client(clock=clock)
-        q = c.quote("USD/MXN", "buy", 25_000)
+        q = c.quote("USD/MXN", "buy", 25_000, settles=WEEK)
         if err is None:
             assert c.trade(q, wait=30).status == "sending"
         else:
@@ -74,7 +75,7 @@ def test_no_second_quote_while_the_first_has_no_final_answer(make_client, venue,
         venue.reset()
         venue.script = [("sending", None)]
         c = make_client(clock=clock)
-        q = c.quote("USD/MXN", "buy", 25_000)
+        q = c.quote("USD/MXN", "buy", 25_000, settles=WEEK)
         c.trade(q, wait=30)
         second = len(accepts_on(session, RFQ2))
         with pytest.raises(crx.TradeUnknown) as ei:

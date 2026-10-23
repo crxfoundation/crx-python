@@ -98,15 +98,15 @@ print(w.amount, w.status)
 |---|---|
 | `side` | `"buy"` or `"sell"`, the seat's side in the base currency. |
 | `notional` | Base currency amount, at most 6 decimals, from `Market.min_notional` to `Market.max_notional`. |
-| `settles` | The exact UTC time the trade settles. See the forms below. Default: the pair's fixing one month ahead, on the next day that settles. |
+| `settles` | The exact UTC time the trade settles. See the forms below. No default. |
 | `expiry` | The older form of `settles`: a datetime, a timedelta or unix ms. Pass one of the two. |
 | `premium_bps` | Upfront premium, -10000 to 10000, default 0. Above 0 the taker pays. |
 | `collateral_wait` | Waits up to this many seconds, default 600, for a new deposit to count. |
 | `client_rfq_id` | A caller id for the RFQ, 1 to 128 printable ASCII characters. |
 
-- `settles` takes an exact UTC time: a datetime with a timezone, an ISO 8601 time with `Z` or an offset (`"2026-10-24T15:00Z"`, `"2026-10-24T10:00-05:00"`), or a Unix time in seconds (`1792854000`, an int or a float).
-- The time is sent as given, never moved. A time less than the pair's shortest tenor away (`tenor.min_secs`, 1 h on mainnet), in the next long close or past the longest tenor raises `bad_request` with `details["next_time"]`.
-- Any other value raises `bad_request`: a tenor (`"1M"`), an hour tenor (`"1H"`), a date (`"2026-12-18"`), a time with no timezone, a bool, or a number in milliseconds.
+- `settles` takes an exact UTC time: a datetime with a timezone, an ISO 8601 time with `Z` or an offset (`"2026-10-24T15:00Z"`, `"2026-10-24T10:00-05:00"`), or a Unix time in seconds (`1792854000`; an int, a numpy integer or a float).
+- The time is sent as given, never moved. It must be at least the pair's shortest tenor (`tenor.min_secs`, 1 h on mainnet) plus 3 minutes from now, outside the next long close and within the longest tenor. Else `bad_request` names the next time that settles in `details["next_time"]`. A request sent again after a collateral refusal is checked again.
+- A missing `settles` (with no `expiry`) raises `bad_request`. So does any other value: a tenor (`"1M"`), an hour tenor (`"1H"`), a date (`"2026-12-18"`), a time with no timezone, a bool, or a number in milliseconds.
 
 `Quote.settles_at` is the settlement time, `Quote.expires_at` the quote end, and `Quote.closes_at` the last time to accept (120 s after the request). `accept()` signs only a premium within the market's `max_premium_bps`.
 

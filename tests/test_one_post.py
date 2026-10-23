@@ -3,6 +3,7 @@
 import pytest
 
 import crx
+from .conftest import WEEK  # noqa: F401
 
 from .test_quote_trade import QID, QID2, RFQ, accepts, clock, sent_nothing, signed_posts, venue  # noqa: F401 (fixtures)
 
@@ -28,7 +29,7 @@ def drops(venue, session, best_edit):
 def test_a_409_rejected_accept_is_posted_once(make_client, venue, session, clock):
     session.routes[("POST", f"/rfqs/{RFQ}/accept")] = (409, REJECTED)
     c = make_client(clock=clock)
-    q = c.quote("USD/MXN", "buy", 25_000, wait=3)
+    q = c.quote("USD/MXN", "buy", 25_000, wait=3, settles=WEEK)
     t0 = clock()
     with pytest.raises(crx.QuoteExpired) as ei:
         c.trade(q)
@@ -47,14 +48,14 @@ def test_a_dropped_quote_signs_nothing_for_the_best(make_client, venue, session,
         before = len(accepts(session))
         c = make_client(clock=clock)
         with pytest.raises(crx.QuoteDropped) as ei:
-            c.trade(c.quote("USD/MXN", "buy", 25_000))
+            c.trade(c.quote("USD/MXN", "buy", 25_000, settles=WEEK))
         assert ei.value.best is None and len(accepts(session)) == before + 1 and sent_nothing(session), best_edit
     before = len(accepts(session))
     # Even a better best quote gets no signature from the SDK.
     venue.reset()
     drops(venue, session, {"quote_id": QID2, "rate": "18.650000"})
     c = make_client(clock=clock)
-    q = c.quote("USD/MXN", "buy", 25_000)
+    q = c.quote("USD/MXN", "buy", 25_000, settles=WEEK)
     with pytest.raises(crx.QuoteDropped) as ei:
         c.trade(q)
     e = ei.value

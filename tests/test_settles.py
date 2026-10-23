@@ -1,6 +1,8 @@
 """The settles= argument: an exact UTC time (aware datetime, ISO 8601 with Z or an offset, Unix seconds)."""
 
 import copy
+import numbers
+import time
 from datetime import date, datetime, timedelta, timezone
 
 import pytest
@@ -15,6 +17,19 @@ from .test_quote_trade import Venue, clock, venue  # noqa: F401  (fixtures)
 UTC = timezone.utc
 FIXING = {"city": "Mexico City", "time": "12:00", "zone": "America/Mexico_City", "next_at": 0}
 FORMS = "settles is an exact UTC time: a datetime with a timezone, an ISO 8601 time with Z or an offset"
+
+
+class Int64:
+    """An integer type that is not int, as numpy.int64."""
+
+    def __init__(self, v):
+        self.v = v
+
+    def __index__(self):
+        return self.v
+
+
+numbers.Integral.register(Int64)
 
 
 def market(lc=None, min_secs=3600, max_secs=7_776_000, fixing=FIXING):
@@ -34,14 +49,14 @@ def noon_mx(y, m, d):
     return datetime(y, m, d, 18, 0, tzinfo=UTC)  # 12:00 Mexico City
 
 
-CLOSE_23 = (noon_mx(2026, 11, 23) - timedelta(hours=1), noon_mx(2026, 11, 23) + timedelta(minutes=15))
 WEEKEND = (datetime(2026, 10, 23, 21, 0, tzinfo=UTC), datetime(2026, 10, 25, 22, 15, tzinfo=UTC))
 
 SETTLES = [  # settles, market, settlement time
     ("2026-10-24T15:00Z", market(), datetime(2026, 10, 24, 15, 0, tzinfo=UTC)),  # a Saturday: never moved
     (" 2026-10-24T10:00-05:00 ", market(), datetime(2026, 10, 24, 15, 0, tzinfo=UTC)),
     ("2026-10-25T22:15Z", market(lc=WEEKEND), WEEKEND[1]),
-    ("2026-10-22T20:40Z", market(), NOW + timedelta(hours=1)),  # at the minimum
+    ("2026-10-22T20:43Z", market(), NOW + timedelta(hours=1, minutes=3)),  # the minimum plus the 3 min to open
+    (Int64(1792854000), market(), datetime(2026, 10, 24, 15, 0, tzinfo=UTC)),
     (datetime(2026, 10, 24, 17, 0, tzinfo=timezone(timedelta(hours=2))), market(),
      datetime(2026, 10, 24, 15, 0, tzinfo=UTC)),
     (datetime(2026, 11, 3, 9, 30, tzinfo=timezone(timedelta(hours=-5))), market(),
@@ -69,7 +84,7 @@ def test_a_unix_time_in_seconds_is_the_same_instant_as_its_iso_form():
 
 
 REMOVED = ["1H", "23H", "24H", "1D", "2D", "1W", "1M", "1m", " 1M ", "2M", "3M", "2026-12-18", "2026-10-22",
-           date(2026, 12, 18), timedelta(days=30), True, False, "30", "", None]
+           date(2026, 12, 18), timedelta(days=30), True, False, "30", ""]
 
 
 def test_a_tenor_hour_tenor_date_or_other_form_raises_naming_the_forms():
@@ -79,16 +94,36 @@ def test_a_tenor_hour_tenor_date_or_other_form_raises_naming_the_forms():
         assert str(e.value).startswith(FORMS) and e.value.details == {"field": "settles"}, settles
 
 
+def test_a_missing_settles_raises_naming_the_forms():
+    with pytest.raises(crx.BadRequest) as e:
+        _settle.settlement(None, market(), NOW)
+    assert str(e.value) == "settles is required. " + _settle.FORMS and e.value.details == {"field": "settles"}
+
+
+def test_a_numpy_integer_is_seconds():
+    np = pytest.importorskip("numpy")
+    for settles in (np.int64(1792854000), np.uint32(1792854000), np.float64(1792854000.0)):
+        assert _settle.settlement(settles, market(), NOW) == datetime(2026, 10, 24, 15, 0, tzinfo=UTC), settles
+    with pytest.raises(crx.BadRequest, match="settles is an exact UTC time"):
+        _settle.settlement(np.bool_(True), market(), NOW)
+
+
+SOON = ("is less than 63 minutes from now: the shortest trade is 60 minutes, plus 3 minutes to open the request; "
+        "the next time that settles is 2026-10-22 20:43 UTC")
+
 REFUSALS = [  # settles, market, words, details
     ("2026-10-24T25:00Z", market(), FORMS, {}),
-    (30, market(), "1970-01-01 00:00:30 UTC is less than 60 minutes from now", {}),
+    (30, market(), "1970-01-01 00:00:30 UTC is less than 63 minutes from now", {}),
+    ("2026-10-22T20:42:59Z", market(), "2026-10-22 20:42:59 UTC " + SOON, {"next_time": "2026-10-22T20:43:00Z"}),
+    (int(NOW.timestamp()) + 3600, market(), "2026-10-22 20:40 UTC " + SOON, {"next_time": "2026-10-22T20:43:00Z"}),
+    (Int64(int(NOW.timestamp()) + 3779), market(), "2026-10-22 20:42:59 UTC " + SOON, {}),
     (1792854000000, market(), "settles as a number is a Unix time in seconds, UTC", {"field": "settles"}),
     (1792854000000.0, market(), "settles as a number is a Unix time in seconds, UTC", {}),
     (float("nan"), market(), "settles as a number is a Unix time in seconds, UTC", {}),
-    ("2026-10-22T20:10Z", market(), "2026-10-22 20:10 UTC is less than 60 minutes from now; the next time that "
-     "settles is 2026-10-22 20:43 UTC", {"next_time": "2026-10-22T20:43:00Z", "min_secs": 3600}),
-    (int(NOW.timestamp()) + 1800, market(), "2026-10-22 20:10 UTC is less than 60 minutes from now; the next "
-     "time that settles is 2026-10-22 20:43 UTC", {"next_time": "2026-10-22T20:43:00Z", "min_secs": 3600}),
+    ("2026-10-22T20:10Z", market(), "2026-10-22 20:10 UTC " + SOON,
+     {"next_time": "2026-10-22T20:43:00Z", "min_secs": 3600}),
+    (int(NOW.timestamp()) + 1800, market(), "2026-10-22 20:10 UTC " + SOON,
+     {"next_time": "2026-10-22T20:43:00Z", "min_secs": 3600}),
     (1792854000, market(lc=WEEKEND), "USD/MXN takes no settlement from 2026-10-23 21:00 UTC",
      {"next_time": "2026-10-25T22:15:00Z"}),
     (1803924000, market(), "2027-03-01 18:00 UTC is past the longest trade", {"next_time": None}),
@@ -107,11 +142,11 @@ def test_a_settles_that_does_not_settle_raises():
         assert words in str(e.value) and {k: e.value.details[k] for k in details} == details, settles
 
 
-def test_the_default_is_the_fixing_one_month_ahead_on_a_day_that_settles():
-    assert _settle.default(market(), NOW) == noon_mx(2026, 11, 23)  # Sunday 11-22 moves to Monday
-    assert _settle.default(market(lc=CLOSE_23), NOW) == noon_mx(2026, 11, 24)  # the long close moves it a day
-    with pytest.raises(crx.BadRequest, match="past the longest trade"):
-        _settle.default(market(max_secs=86_400), NOW)
+def test_the_next_time_of_a_too_soon_time_settles():
+    with pytest.raises(crx.BadRequest) as e:
+        _settle.settlement(NOW, market(), NOW)
+    nxt = datetime.fromisoformat(e.value.details["next_time"].replace("Z", "+00:00"))
+    assert _settle.settlement(nxt, market(), NOW) == nxt
 
 
 def a_weekday(days):
@@ -150,11 +185,15 @@ def test_quote_sends_an_iso_time_and_names_it_settles_at(make_client, fixing_ven
     assert q.settles_at != q.expires_at
 
 
-@pytest.mark.parametrize("settles", ["1M", "1H", "2026-12-18"])
-def test_quote_and_ask_refuse_a_removed_form_before_any_post(make_client, fixing_venue, session, clock, settles):
+@pytest.mark.parametrize("settles", ["1M", "1H", "2026-12-18", None])
+def test_quote_and_ask_refuse_a_missing_or_removed_form_before_any_post(make_client, fixing_venue, session, clock,
+                                                                        settles):
     for call in ("quote", "ask"):
-        with pytest.raises(crx.BadRequest, match="settles is an exact UTC time"):
+        with pytest.raises(crx.BadRequest, match="settles is an exact UTC time") as e:
             getattr(make_client(clock=clock), call)("USD/MXN", "buy", 25_000, settles=settles)
+        assert str(e.value).startswith("settles is required. ") == (settles is None)
+    with pytest.raises(crx.BadRequest, match="settles is required"):
+        make_client(clock=clock).quote("USD/MXN", "buy", 25_000)
     assert not [x for x in session.calls if x["method"] == "POST"]
 
 
@@ -177,7 +216,7 @@ def test_quote_and_ask_send_a_unix_time_as_given(make_client, fixing_venue, cloc
 
 def test_a_unix_time_under_the_minimum_raises_before_any_post(make_client, fixing_venue, session, clock):
     soon = int(datetime.now(UTC).timestamp()) + 1800
-    with pytest.raises(crx.BadRequest, match="less than 60 minutes from now; the next time that settles is") as e:
+    with pytest.raises(crx.BadRequest, match="less than 63 minutes from now: the shortest trade is 60 minutes") as e:
         make_client(clock=clock).quote("USD/MXN", "buy", 25_000, settles=soon)
     assert e.value.details["next_time"].endswith(":00Z")
     assert not [x for x in session.calls if x["method"] == "POST"]
@@ -185,7 +224,7 @@ def test_a_unix_time_under_the_minimum_raises_before_any_post(make_client, fixin
 
 def test_an_exact_time_under_the_minimum_raises_before_any_post(make_client, fixing_venue, session, clock):
     soon = datetime.now(UTC) + timedelta(minutes=30)
-    with pytest.raises(crx.BadRequest, match="less than 60 minutes from now; the next time that settles is") as e:
+    with pytest.raises(crx.BadRequest, match="less than 63 minutes from now: the shortest trade is 60 minutes") as e:
         make_client(clock=clock).ask("USD/MXN", "buy", 25_000, settles=soon)
     assert e.value.details["next_time"].endswith(":00Z")
     assert not [x for x in session.calls if x["method"] == "POST"]
@@ -218,3 +257,15 @@ def test_an_exact_time_sent_again_after_a_collateral_refusal_keeps_its_end(make_
     assert len(posts) == 6 and clock() == start + 75
     assert all(p == posts[0] for p in posts) and posts[0]["expiry"] == end * 1000
     assert q.settles_at == datetime.fromtimestamp(end, UTC)
+
+
+def test_a_resend_that_no_longer_clears_the_minimum_raises_with_the_next_time(make_client, fixing_venue, session,
+                                                                              clock, account):
+    session.routes[("POST", "/rfqs")] = [SCREEN_422] * 5 + [fixing_venue.open_rfq]
+    session.routes[("GET", "/balance")] = free_of(account, "100.000000")
+    end = int(time.time()) + 3600 + 180 + 22  # clears the minimum for the first two sends, 15 s apart
+    with pytest.raises(crx.BadRequest, match="less than 63 minutes from now") as e:
+        make_client(clock=clock).quote("USD/MXN", "buy", 25_000, settles=end)
+    assert e.value.details["next_time"].endswith(":00Z")
+    posts = [x for x in session.calls if x["method"] == "POST" and x["path"] == "/rfqs"]
+    assert len(posts) == 2 and posts[0]["body"]["expiry"] == posts[1]["body"]["expiry"] == end * 1000

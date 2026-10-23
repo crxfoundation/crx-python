@@ -15,7 +15,6 @@ dependencies = [
     "eth-account>=0.13.5",  # LocalAccount.sign_typed_data
     "eth-abi>=5",
     "eth-utils>=4",
-    "tzdata; sys_platform == 'win32'",  # zoneinfo data for settles= on Windows
 ]
 classifiers = [
     "License :: Other/Proprietary License",

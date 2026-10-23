@@ -341,14 +341,6 @@ def _refused(e: CrxError) -> dict:
     return out
 
 
-def _default_expiry(now: datetime) -> datetime:
-    """Return one month out, a weekend rolled to Monday."""
-    t = now + timedelta(days=30)
-    while t.weekday() >= 5:
-        t += timedelta(days=1)
-    return t
-
-
 class Client:
     """One seat on one CRX network.
 
@@ -757,8 +749,8 @@ class Client:
         Args:
             side: ``"buy"`` or ``"sell"`` the base currency.
             notional: Amount in the base currency, at most 6 decimals.
-            settles: Exact UTC time: an aware datetime, ISO 8601 with Z or an offset, or Unix seconds (int or float).
-            expiry: Older form of ``settles``: a datetime, a timedelta from now, or unix ms.
+            settles: Exact UTC time: an aware datetime, ISO 8601 with Z or an offset, or Unix seconds. No default.
+            expiry: Older form of ``settles``: a datetime, a timedelta from now, or unix ms. Pass one of the two.
             premium_bps: Upfront premium, -10000 to 10000 (default 0). Above 0 the taker pays.
             wait: Seconds to poll when the gateway answers before the quote window ends (default 30).
             client_rfq_id: 1 to 128 printable ASCII characters.
@@ -819,14 +811,11 @@ class Client:
             raise BelowMin(f"minimum notional on {slash} is {m.min_notional}", details={"min": str(m.min_notional)})
         if m.max_notional is not None and amount > m.max_notional:
             raise AboveMax(f"maximum notional on {slash} is {m.max_notional}", details={"max": str(m.max_notional)})
-        now = datetime.now(timezone.utc)
+        now, t0 = datetime.now(timezone.utc), self._clock()
         if settles is not None and expiry is not None:
             raise BadRequest("pass settles or expiry, not both", details={"field": "settles"})
         if expiry is None:
-            if settles is None and _settle.fixing(m) is None:
-                expiry = _default_expiry(now)
-            else:
-                expiry = _settle.default(m, now) if settles is None else _settle.settlement(settles, m, now)
+            expiry = _settle.settlement(settles, m, now)  # raises when settles is missing
         if isinstance(expiry, timedelta):
             expiry = now + expiry
         if isinstance(expiry, datetime):
@@ -847,8 +836,13 @@ class Client:
             req["premium_bps"] = premium_bps
         if not wait:
             req["wait"] = False  # else the gateway answers only after the quote window
+        sent = []
 
         def send() -> Any:
+            # A resend keeps the settlement time; it must still clear the shortest tenor and the open margin.
+            if sent and settles is not None:
+                _settle.settlement(settles, m, now + timedelta(seconds=self._clock() - t0))
+            sent.append(True)
             return self._gw.request("POST", "/rfqs", body=req,
                                     timeout=max(self._gw._timeout, OPEN_TIMEOUT) if wait else None)
 

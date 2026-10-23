@@ -6,6 +6,7 @@ import copy
 import dataclasses
 import json
 import os
+import time
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
@@ -14,6 +15,8 @@ from eth_account import Account
 from requests.structures import CaseInsensitiveDict
 
 import crx
+
+WEEK = int(time.time()) + 7 * 86_400  # settles= for quote() and ask(): one week out, Unix seconds
 
 FIX = Path(__file__).parent / "fixtures"
 BASE = "https://gateway.test"

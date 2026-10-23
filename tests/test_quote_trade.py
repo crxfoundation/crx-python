@@ -14,6 +14,7 @@ from eth_account.messages import encode_defunct, encode_typed_data
 from eth_utils import keccak
 
 import crx
+from .conftest import WEEK  # noqa: F401
 from crx import _eip712 as e7
 from crx._http import rest_message
 
@@ -201,7 +202,7 @@ def venue(session, health, markets, clock):
 
 def test_quote_then_trade_signs_one_trade(make_client, venue, session, clock, account):
     c = make_client(clock=clock)
-    q = c.quote("USD/MXN", "buy", 25_000)
+    q = c.quote("USD/MXN", "buy", 25_000, settles=WEEK)
     assert (q.rfq_id, q.quote_id, q.rate, q.side, q.pair, q.notional) == (
         RFQ, QID, Decimal("18.700000"), "buy", "USD/MXN", Decimal("25000"))
     assert q.raw["trade_template"] == venue.draft
@@ -221,7 +222,7 @@ def test_quote_then_trade_signs_one_trade(make_client, venue, session, clock, ac
 
 def test_reject_sends_nothing_and_a_later_accept_signs_nothing(make_client, venue, session, clock, monkeypatch):
     c = make_client(clock=clock)
-    q = c.quote("USD/MXN", "buy", 25_000)
+    q = c.quote("USD/MXN", "buy", 25_000, settles=WEEK)
     calls = len(session.calls)
     assert c.reject(q) is None
     assert len(session.calls) == calls
@@ -246,7 +247,7 @@ def test_trade_refuses_a_maker_quote(session, health, tmp_path):
 
 def test_reject_after_an_accept_raises_and_the_accept_stands(make_client, venue, session, clock):
     c = make_client(clock=clock)
-    q = c.quote("USD/MXN", "buy", 25_000)
+    q = c.quote("USD/MXN", "buy", 25_000, settles=WEEK)
     assert c.accept(q).status == "open"
     with pytest.raises(crx.BadRequest, match="the accept stands"):
         c.reject(q)
@@ -255,12 +256,12 @@ def test_reject_after_an_accept_raises_and_the_accept_stands(make_client, venue,
 
 def test_nonce_floor_refuses_replay(make_client, venue, session, clock, account):
     c = make_client(clock=clock)
-    c.trade(c.quote("USD/MXN", "buy", 25_000))
+    c.trade(c.quote("USD/MXN", "buy", 25_000, settles=WEEK))
     floor = venue.template["typed_data"]["message"]["ownNonce"]
     venue.reset()
     venue.msg_edit = {"ownNonce": floor}  # the gateway keeps serving the nonce this seat signed
     c = make_client(clock=clock)  # a fresh client on the reused RFQ id
-    q = c.quote("USD/MXN", "buy", 25_000)
+    q = c.quote("USD/MXN", "buy", 25_000, settles=WEEK)
     before = len(accepts(session))
     with pytest.raises(crx.RefusedToSign, match="^refused to sign: ownNonce is not above the last one this seat signed$"):
         c.trade(q)
@@ -278,7 +279,7 @@ def test_the_accept_deadline_is_the_rfqs_closes_at_not_the_quote_end(make_client
     posted = []
     venue.on_stale = lambda: posted.append(clock()) or clock.sleep(15)
     c = make_client(clock=clock)
-    q = c.quote("USD/MXN", "buy", 25_000)
+    q = c.quote("USD/MXN", "buy", 25_000, settles=WEEK)
     closes = venue.open_edit["closes_at"] / 1000
     assert q.closes_at == datetime.fromtimestamp(closes, timezone.utc) and q.expires_at > q.closes_at
     with pytest.raises(crx.QuoteExpired) as ei:
@@ -301,7 +302,7 @@ def test_an_answer_to_the_unsigned_ask_signs_nothing(make_client, venue, session
         session.routes[("POST", f"/rfqs/{RFQ}/accept")] = answer or venue.accept
         before = len(accepts(session))
         c = make_client(clock=clock)
-        q = c.quote("USD/MXN", "buy", 25_000, wait=1)
+        q = c.quote("USD/MXN", "buy", 25_000, wait=1, settles=WEEK)
         with pytest.raises(err, match=words):
             c.trade(q)
         assert accepts(session)[before:] == [{"quote_id": QID}], err
@@ -322,7 +323,7 @@ def test_refusal_after_the_trade_is_signed(make_client, venue, session, clock):
         before = len(accepts(session))
         c = make_client(clock=clock)
         with pytest.raises(err) as ei:
-            c.trade(c.quote("USD/MXN", "buy", 25_000))
+            c.trade(c.quote("USD/MXN", "buy", 25_000, settles=WEEK))
         if err is crx.TradeUnknown:
             assert "may still open" in str(ei.value) and ei.value.details == {"rfq_id": RFQ}, code
         assert len(accepts(session)) == before + 1 and sent_nothing(session), code
@@ -382,7 +383,7 @@ def test_served_typed_data_must_equal_own(make_client, venue, session, clock, ac
         c = make_client(clock=clock)
         with pytest.raises(crx.RefusedToSign,
                            match=f"^refused to sign: the served typed_data differs at {re.escape(at)}$"):
-            c.trade(c.quote("USD/MXN", "buy", 25_000))
+            c.trade(c.quote("USD/MXN", "buy", 25_000, settles=WEEK))
         assert refused_unsigned(session, c, account), at
 
 
@@ -398,7 +399,7 @@ def test_template_holds_exactly_a_readable_typed_data(make_client, venue, sessio
         setattr(venue, member, edit)
         c = make_client(clock=clock)
         with pytest.raises(crx.RefusedToSign, match=words):
-            c.trade(c.quote("USD/MXN", "buy", 25_000))
+            c.trade(c.quote("USD/MXN", "buy", 25_000, settles=WEEK))
         assert refused_unsigned(session, c, account), member
         setattr(venue, member, None)
 
@@ -415,7 +416,7 @@ def test_quote_end_is_ahead_by_at_most_630_s(make_client, venue, session, clock,
         venue.qe_ahead = ahead
         c = make_client(clock=clock)
         with pytest.raises(err, match=words) as ei:
-            c.trade(c.quote("USD/MXN", "buy", 25_000))
+            c.trade(c.quote("USD/MXN", "buy", 25_000, settles=WEEK))
         assert not isinstance(ei.value, crx.TradeUnknown), ahead
         assert refused_unsigned(session, c, account), ahead
 
@@ -444,7 +445,7 @@ def test_premium_beyond_the_served_cap_is_refused(make_client, venue, session, m
         venue.reset()
         session.routes[("GET", "/markets")] = with_cap(markets, cap)
         c = make_client(clock=clock)
-        q = c.quote("USD/MXN", "buy", 25_000, premium_bps=premium)
+        q = c.quote("USD/MXN", "buy", 25_000, premium_bps=premium, settles=WEEK)
         with pytest.raises(crx.RefusedToSign, match=words):
             c.trade(q)
         assert refused_unsigned(session, c, account), premium
@@ -469,7 +470,7 @@ def test_a_market_row_paused_true_is_market_paused(make_client, venue, session, 
     c = make_client(clock=clock)
     assert c.market("USD/MXN").paused is True
     with pytest.raises(crx.MarketPaused, match="^USD/MXN is paused$") as ei:
-        c.quote("USD/MXN", "buy", 25_000)
+        c.quote("USD/MXN", "buy", 25_000, settles=WEEK)
     assert ei.value.details == {"pair": "USD/MXN"} and session.paths("POST") == []
 
 
@@ -484,7 +485,7 @@ def test_market_on_another_chain_only_is_not_offered(make_client, session, marke
     with pytest.raises(crx.MarketPaused, match="^USD/MXN is not offered on avax-fuji$"):
         c.market("usdmxn")
     with pytest.raises(crx.MarketPaused):
-        c.quote("USD/MXN", "buy", 25_000)
+        c.quote("USD/MXN", "buy", 25_000, settles=WEEK)
     assert session.paths("POST") == []
 
 
@@ -493,14 +494,14 @@ def test_no_quotes(make_client, venue, session, clock):
     session.routes[("GET", f"/rfqs/{RFQ}")] = {"quote": None, "quotes": []}
     c = make_client(clock=clock)
     with pytest.raises(crx.NoQuotes):
-        c.quote("USD/MXN", "buy", 25_000, wait=5)
+        c.quote("USD/MXN", "buy", 25_000, wait=5, settles=WEEK)
 
 
 def test_open_answer_without_its_leg_is_bad_answer(make_client, venue, session, clock):
     venue.open_edit = {"quote_expiry_max": None}
     c = make_client(clock=clock)
     with pytest.raises(crx.BadAnswer, match="^/rfqs sent an answer this SDK cannot read$"):
-        c.quote("USD/MXN", "buy", 25_000)
+        c.quote("USD/MXN", "buy", 25_000, settles=WEEK)
     assert accepts(session) == [] and trade_polls(session) == []
 
 
@@ -573,7 +574,7 @@ def test_health_that_moved_refuses_the_trade(make_client, venue, session, health
         session.routes[("GET", "/health")] = served(health)
         c = make_client(clock=clock)
         with pytest.raises(crx.RefusedToSign, match=words) as ei:
-            c.trade(c.quote("USD/MXN", "buy", 25_000))
+            c.trade(c.quote("USD/MXN", "buy", 25_000, settles=WEEK))
         assert details is None or ei.value.details == details, words
         assert accepts(session) == [] and sent_nothing(session), words
 
@@ -717,5 +718,5 @@ def test_custodian_bad_signature_or_local_key_call_is_not_sent(venue, session, c
         c.deposit(1000)
     assert session.calls == []
     with pytest.raises(crx.RefusedToSign, match="no usable signature"):
-        c.trade(c.quote("USD/MXN", "buy", 25_000))
+        c.trade(c.quote("USD/MXN", "buy", 25_000, settles=WEEK))
     assert signed_posts(session) == []

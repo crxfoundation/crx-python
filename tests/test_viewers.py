@@ -9,6 +9,7 @@ import crx
 from crx._http import rest_message
 
 from .test_money import balance_body
+from .conftest import WEEK  # noqa: F401
 
 EMPTY_BODY = "Body: 0x" + keccak(b"").hex()
 
@@ -45,7 +46,7 @@ def test_viewer_client_refuses_seat_calls(make_client, session):
     with pytest.raises(crx.ConfigError):
         make_client(account="0x12")
     c = make_client(account=Account.create().address)
-    for call in (lambda: c.quote("USD/MXN", "buy", 25_000), lambda: c.deposit(1), lambda: c.withdraw(1),
+    for call in (lambda: c.quote("USD/MXN", "buy", 25_000, settles=WEEK), lambda: c.deposit(1), lambda: c.withdraw(1),
                  lambda: c.add_viewer(Account.create().address), lambda: c.viewers()):
         with pytest.raises(crx.ConfigError, match="viewer"):
             call()

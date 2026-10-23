@@ -4,6 +4,7 @@ from crx import client as cl
 
 from .conftest import fixture
 from .test_quote_trade import RFQ, TXH, clock, trade_polls, venue  # noqa: F401 (fixtures)
+from .conftest import WEEK  # noqa: F401
 
 FIX = fixture("trade-finality.json")
 
@@ -33,7 +34,7 @@ def test_a_provisional_open_reads_final_once_marked(make_client, venue, session,
     extra = {"trade_provisional": True, "trade_final": False}
     served(venue, session, extra)
     c = make_client(clock=clock)
-    q = c.quote("USD/MXN", "buy", 25_000)
+    q = c.quote("USD/MXN", "buy", 25_000, settles=WEEK)
     t = c.trade(q, wait=30)
     assert (t.provisional, t.final) == (True, False)
     extra.clear()
