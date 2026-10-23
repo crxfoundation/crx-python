@@ -768,3 +768,45 @@ def test_amount_parsing():
             with pytest.raises(crx.BadRequest) as e:
                 crx.client._amount(value)
             assert out in str(e.value), value
+
+
+DROP = object()  # removes the key
+
+
+def one_chain(markets, **row_edit):
+    """Return /markets in the one-chain shape, each row carrying its chain's ``max_premium_bps``.
+
+    ``row_edit`` maps a pair to the keys to set on its row. ``DROP`` removes a key, or the whole row.
+    """
+    m = copy.deepcopy(markets)
+    m.pop("as_of", None)
+    for row in m["markets"]:
+        row["max_premium_bps"] = row.pop("chains")[0]["max_premium_bps"]
+        row["session"].pop("venue", None)
+        row["session"].pop("label", None)
+    for pair, edit in row_edit.items():
+        row = next(r for r in m["markets"] if r["pair"] == pair.replace("_", "/"))
+        if edit is DROP:
+            m["markets"].remove(row)
+            continue
+        row.update(edit)
+        for k in [k for k, v in row.items() if v is DROP]:
+            del row[k]
+    return m
+
+
+@pytest.mark.parametrize("cap,read", [(150, 150), (0, 0), (None, None), (DROP, None), (-1, None), ("200", None),
+                                      (True, None)], ids=["150", "0", "null", "missing", "negative", "text", "bool"])
+def test_a_one_chain_row_reads_its_premium_cap(make_client, session, markets, cap, read):
+    session.routes[("GET", "/markets")] = one_chain(markets, USD_MXN={"max_premium_bps": cap})
+    ms = {m.pair: m for m in make_client(key=False).markets()}
+    assert ms["USD/MXN"].max_premium_bps == read and ms["USD/MXN"].paused is False
+    assert ms["USD/BRL"].max_premium_bps == ms["USD/PHP"].max_premium_bps == 200
+
+
+def test_deposit_poll_rides_out_gateway_errors(make_client, session, health, account):
+    chain = Chain(session, held=10**12)
+    deposit_route(session, health, account, 1000 * 10**6)
+    done = balance_body(account, deposit={"tx": "0x" + f"{2:064x}", "status": "credited", **COUNTED})
+    session.routes[("GET", "/balance")] = [(503, {"code": "upstream", "error": "down"}), "not json", done]
+    assert make_client(clock=Clock(time.time())).deposit(1000).status == "credited"

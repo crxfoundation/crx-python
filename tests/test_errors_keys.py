@@ -103,3 +103,33 @@ def test_non_utf8_key_file_has_no_context(tmp_path):
     with pytest.raises(crx.ConfigError) as ei:
         crx.Client(key_file=f)
     assert ei.value.__context__ is None
+
+
+def _frames_text(exc):
+    """Return the error text and the SDK frames of its traceback, with their locals."""
+    import traceback
+    tb = exc.__traceback__
+    while tb is not None and tb.tb_frame.f_code.co_filename == __file__:
+        tb = tb.tb_next
+    assert tb is not None, "the error did not come from the SDK"
+    text = "".join(traceback.format_list(traceback.StackSummary.extract(traceback.walk_tb(tb), capture_locals=True)))
+    return text + repr(exc.args) + str(exc)
+
+
+INIT_REFUSALS = [  # Client() argument, words of the refusal
+    (dict(network="nowhere"), "unknown network"),
+    (dict(signer=object()), "one only"),
+    (dict(network="mainnet"), "mainnet is off"),
+    (dict(account="0x12"), "account is not a wallet address"),
+] + [(dict(keepalive=bad), "keepalive is None, or 1 to 10 s") for bad in (0.5, 11, True, "5")]
+
+
+def test_client_init_refusals_hold_no_key(session, tmp_path, account, monkeypatch):
+    """Each Client() refusal raises ConfigError, and no SDK frame, local or error text holds the key."""
+    monkeypatch.delenv("CRX_ALLOW_MAINNET", raising=False)
+    monkeypatch.chdir(tmp_path)
+    key = account.key.hex()
+    for kw, words in INIT_REFUSALS:
+        with pytest.raises(crx.ConfigError, match=words) as ei:
+            crx.Client(key=key, base_url=BASE, rpc_url=RPC, session=session, state_dir=tmp_path / "s", **kw)
+        assert key.removeprefix("0x") not in _frames_text(ei.value), kw

@@ -1,14 +1,23 @@
 """One post per signed body: a refusal goes back to the caller."""
 
+import time
+
 import pytest
 
 import crx
 from .conftest import WEEK  # noqa: F401
 
+from .conftest import Clock
+from .test_at_most_once import withdraw_posts
+from .test_money import Chain, balance_body, gate
 from .test_quote_trade import QID, QID2, RFQ, accepts, clock, sent_nothing, signed_posts, venue  # noqa: F401 (fixtures)
 
 REJECTED = {"error": "rejected: rj_0011223344556677", "code": "rejected", "outcome": "trade_not_opened",
             "message": "Trade not opened. Ask for a new quote.", "details": {"reject_code": "rj_0011223344556677"}}
+# The gateway's 409 before it reads the latest settlement names the next request time.
+UNREAD = {"error": "conflict: the latest settlement is not read yet; retry shortly", "code": "conflict",
+          "outcome": "unavailable", "message": "Balances are updating. Next request after 17:05 UTC."}
+WAIT = {"Retry-After": "240"}
 
 
 def drops(venue, session, best_edit):
@@ -64,3 +73,24 @@ def test_a_dropped_quote_signs_nothing_for_the_best(make_client, venue, session,
     t = c.trade(e.best)
     assert (t.status, t.quote_id) == ("open", QID2)
     assert [b["quote_id"] for b in accepts(session)[before:]] == [QID, QID2] and sent_nothing(session)
+
+
+def test_a_withdraw_409_is_posted_once_with_its_time(make_client, session, health, account):
+    # wait=0 leaves no time to post the same intent again.
+    Chain(session)
+    g = gate(session, health, account)
+    session.routes[("POST", "/withdraw")] = (409, UNREAD, WAIT)
+    session.routes[("GET", "/balance")] = balance_body(account)
+    clock = Clock(time.time())
+    c = make_client(clock=clock)
+    t0 = clock()
+    with pytest.raises(crx.CrxError) as ei:
+        c.withdraw(1000, wait=0)
+    e = ei.value
+    assert (e.code, e.status, str(e)) == ("conflict", 409, f"{UNREAD['message']} ({UNREAD['error']})")
+    assert (e.details["retry_after_secs"], e.details["time_utc"], e.details["error"]) == (240, "17:05 UTC",
+                                                                                          UNREAD["error"])
+    assert len(withdraw_posts(session)) == 1 and clock() == t0 and c._held_withdraw is None
+    session.routes[("POST", "/withdraw")] = g.answer
+    session.routes[("GET", "/balance")] = [balance_body(account), g.view("accepted")]
+    assert c.withdraw(1000).status == "accepted" and len(withdraw_posts(session)) == 2

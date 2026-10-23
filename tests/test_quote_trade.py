@@ -5,7 +5,7 @@ import dataclasses
 import os
 import re
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -720,3 +720,41 @@ def test_custodian_bad_signature_or_local_key_call_is_not_sent(venue, session, c
     with pytest.raises(crx.RefusedToSign, match="no usable signature"):
         c.trade(c.quote("USD/MXN", "buy", 25_000, settles=WEEK))
     assert signed_posts(session) == []
+
+
+BAND = {"min_secs": 7800, "max_secs": 7_776_000}
+
+
+def rfqs_sent(session):
+    return [x["body"] for x in session.calls if (x["method"], x["path"]) == ("POST", "/rfqs")]
+
+
+def tenor_answer(**details):
+    """Return the gateway's refusal of an RFQ outside its tenor band."""
+    return (400, {"error": "bad request: tenor 7790s is below the minimum 7800s (expiry 1); see GET /markets",
+                  "code": "bad_request", "outcome": "outside_limits",
+                  "message": "Fixing date too soon. Earliest is 2025-10-09.", "details": dict(details, limit="tenor")})
+
+
+def test_an_ethereum_client_makes_no_tenor_check_and_keeps_the_gateways_error(make_client, session, markets):
+    """The client checks no tenor band: it sends the RFQ and raises the gateway's own tenor message."""
+    m = copy.deepcopy(markets)
+    for row in m["markets"]:
+        row["tenor"] = dict(BAND)
+    session.routes[("GET", "/markets")] = m
+    answer = tenor_answer(tenor_secs=59, min_secs=7800)
+    session.routes[("POST", "/rfqs")] = answer
+    c = make_client()
+    assert c.market("USD/MXN").min_tenor_s == 7800
+    for call in (c.ask, c.quote):
+        with pytest.raises(crx.BadRequest) as ei:
+            call("USD/MXN", "buy", 25_000, expiry=timedelta(seconds=60))
+        e = ei.value
+        assert str(e) == f"{answer[1]['message']} ({answer[1]['error']})" and e.status == 400
+        assert e.details == dict(answer[1]["details"], error=answer[1]["error"])
+    assert len(rfqs_sent(session)) == 2
+
+def test_health_on_another_chain_id_refuses(make_client, session, health, monkeypatch):
+    monkeypatch.setitem(crx.NETWORKS["testnet"], "chain_id", 1)
+    with pytest.raises(crx.ConfigError, match="^avax-fuji is chain 43113, not the pinned chain 1; nothing signed$"):
+        make_client()._chain_info()

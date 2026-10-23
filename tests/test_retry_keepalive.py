@@ -106,3 +106,22 @@ def test_maker_call_starts_keepalive(make_client, session, account):
         c.close()
     c._live.thread.join(3)
     assert not c._live.thread.is_alive()
+
+
+@pytest.mark.keepalive
+def test_a_read_that_fails_does_not_end_the_keepalive(make_client, session):
+    """A GET /trades with no answer is logged, and the keepalive reads again."""
+    c = make_client(keepalive=1.0)
+    tape = Tape(session)
+
+    def no_answer(req):
+        tape(req)
+        down(req)
+    session.routes[("GET", "/trades")] = no_answer
+    try:
+        start(c)
+        assert tape.wait_beats(2) and c._live.thread.is_alive()
+    finally:
+        c.close()
+    c._live.thread.join(3)
+    assert not c._live.thread.is_alive()

@@ -95,3 +95,10 @@ def test_login_signature_from_a_custodian_is_normalized():
     sig = sign_login(HighS(a), msg)
     assert int(sig[66:130], 16) <= e7.SECP256K1_N // 2 and sig[-2:] in ("1b", "1c")
     assert Account.recover_message(encode_defunct(text=msg), signature=sig) == a.address
+
+
+def test_typed_digest_refuses_a_domain_without_its_members():
+    td = e7.typed_data("Terms", 1, "0x" + "44" * 20, {})
+    del td["domain"]["chainId"]
+    with pytest.raises(ValueError, match="the domain does not have its members"):
+        e7.typed_digest(td)
