@@ -348,7 +348,6 @@ def test_gateway_codes_map_to_their_own_errors():
         assert (e.code, e.status, e.gateway_code) == (body["code"], status, body["code"]), err
         assert err.__name__ in crx.__all__, err
     assert type(crx.errors.from_gateway(503, dict(DOWN_BODY, code="upstream"))) is crx.ServerError
-    assert crx.RelayUnavailable is crx.ServiceUnavailable and "RelayUnavailable" not in crx.__all__
 
 
 def put(path, value):

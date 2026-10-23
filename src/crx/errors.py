@@ -206,10 +206,6 @@ class ServiceUnavailable(ServerError):
     code = "service_unavailable"
 
 
-# Former name of ServiceUnavailable.
-RelayUnavailable = ServiceUnavailable
-
-
 class SeatCannotSign(CrxError):
     """The address is a smart-contract wallet and cannot sign trades. Use an EOA or MPC address."""
     code = "seat_cannot_sign"
@@ -357,8 +353,6 @@ _BY_GATEWAY_CODE: dict[str, type[CrxError]] = {
     "viewer_is_maker": BadRequest,
     "viewers_unavailable": ServerError,
     "service_unavailable": ServiceUnavailable,
-    # Older gateways send this code.
-    "relay_unavailable": ServiceUnavailable,
     "seat_cannot_sign": SeatCannotSign,
     "trade_in_flight": TradeInFlight,
     "withdraw_in_progress": WithdrawInProgress,
