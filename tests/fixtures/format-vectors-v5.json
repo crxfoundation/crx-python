@@ -1,0 +1,1101 @@
+{
+ "about": "Readable taker terms: format vectors, v5 (Quote, Terms id, AllocationConsent, AllocationAcceptance, FailoverConsent, WithdrawIntent, hidden-word commitments). Spec: SPEC-v5.md. Every integer is a JSON decimal string, except domain.chainId. Computed by eth_account 0.14 + eth_abi 6 (Python) and viem 2.57.2 (Node), byte-equal; signatures and hidden-word commitments also equal under cast 1.5.1. Keys are publicly known anvil private keys: never fund them.",
+ "switches": {
+  "drop_quote_expiry": true,
+  "drop_withdraw_recipient": true,
+  "derive_maker_nonce": true
+ },
+ "types": {
+  "Trade": {
+   "type_string": "Trade(string summary,string pair,string side,uint256 notionalE6,uint64 rateE6,int16 premiumBps,uint40 maturity,bytes32 pairC,bytes32 ownLegId,uint64 ownNonce,bytes32 ownSalt)",
+   "typehash": "0x2a4f432dd51178481baaacab72453a149e29560e5d366c2ebb93bb767fab4630"
+  },
+  "Quote": {
+   "type_string": "Quote(address seat,bytes32 legId,bytes32 pair,int8 side,uint256 notional,uint64 rate,int16 premiumBps,uint40 expiry,uint64 nonce,bytes32 salt,bytes32 takerRef)",
+   "typehash": "0x00fc8b1401eebfc809c01d3a7351526ef07cfd5902793c3d279de280c0aec2cb"
+  },
+  "Terms": {
+   "type_string": "Terms(bytes32 takerSide,bytes32 makerSide,uint256 notional,int16 premiumBps,uint64 nonce,bytes32 pair,int8 side,uint40 settlement,uint64 rate)",
+   "typehash": "0xa5d56fb3daa45b30008eca264550485b872be3e5ec8a8d447e65e725b7ffbf38"
+  },
+  "AllocationConsent": {
+   "type_string": "AllocationConsent(bytes32 oldId,bytes32 exitingSide,bytes32 remainingSide,bytes32 incomingSide,uint64 nonce,uint64 deadline,bytes32 commitment,bytes32 salt)",
+   "typehash": "0xb7c4f96848e3e755733e1d13468b55a65b1aaf8ce88b2023d5e8b4ef0724de98"
+  },
+  "FailoverConsent": {
+   "type_string": "FailoverConsent(bytes32 oldId,bytes32 closedOutSide,bytes32 remainingSide,bytes32 incomingSide,bytes32 incomingC,uint64 nonce,uint64 openNonce,uint64 deadline,bytes32 commitment)",
+   "typehash": "0x626b4a1b55e8f5008a783076e0317a0d7c1701768dbbc0174d400fabdc9ce953"
+  },
+  "AllocationAcceptance": {
+   "type_string": "AllocationAcceptance(bytes32 oldId,bytes32 incomingSide,bytes32 incomingC,uint64 nonce,uint64 deadline,bytes32 commitment)",
+   "typehash": "0xef872ebc8b4b5c0d181da0edfee04ad46437dbefba1cd2949f186fac7234bfac"
+  },
+  "WithdrawIntent": {
+   "type_string": "WithdrawIntent(address account,uint256 amount,uint64 nonce,uint64 deadline)",
+   "typehash": "0x6d6660a4177525b8aa40e367254ba01df50e9008478aaac94ed5b400cd55b3a9"
+  }
+ },
+ "domain": {
+  "name": "CRX",
+  "version": "rulebook-1.0",
+  "chainId": 43113,
+  "verifyingContract": "0xd757933e2a5600c6f00f83fd282b33aa7cb409c0"
+ },
+ "domain_separator": "0x38bfb6b828498b78403a209f336f3d5fa6335d23f7e50d1859e12f213c3fe59b",
+ "keys": {
+  "taker": {
+   "private_key": "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+   "address": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+   "label": "anvil test key 0"
+  },
+  "other": {
+   "private_key": "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d",
+   "address": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+   "label": "anvil test key 1"
+  }
+ },
+ "hidden_words": {
+  "leg": [
+   "seat",
+   "legId",
+   "pair",
+   "side",
+   "notional",
+   "rate",
+   "premiumBps",
+   "expiry",
+   "nonce"
+  ],
+  "allocation_item": [
+   "oldId",
+   "exitingSide",
+   "remainingSide",
+   "incoming",
+   "incomingSide",
+   "closeRate",
+   "spread",
+   "nonce",
+   "deadline",
+   "pairId",
+   "side",
+   "notional",
+   "settlement"
+  ],
+  "closeout_item": [
+   "oldId",
+   "closedOutSide",
+   "remainingSide",
+   "incoming",
+   "incomingSide",
+   "feedId",
+   "closeTime",
+   "spread",
+   "nonce",
+   "deadline",
+   "openNonce",
+   "subsidyMaxUsd"
+  ]
+ },
+ "quotes": [
+  {
+   "id": "QV1",
+   "maker_leg": {
+    "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+    "leg_id": "0x555555555555555555555555555555555555555555555555000000006ab13dd8",
+    "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+    "side": "-1",
+    "notional": "5000000000000",
+    "rate": "5410000",
+    "premium_bps": "0",
+    "expiry": "1798732800",
+    "nonce": "6148914691236517205"
+   },
+   "maker_salt": "0x6161616161616161616161616161616161616161616161616161616161616161",
+   "quote_expiry": "1790000600",
+   "c_maker": "0xf6853840d51d2c6267dbb33046e7cf14479f82a04f87cf31dbb30dbcc63fc434",
+   "taker_ref": {
+    "taker_seat": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+    "taker_leg_id": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+    "value": "0x4f412fb92304015b744b7a32155b5879b48aa8cbb0076b8234640f8891c53b0b"
+   },
+   "typed_data": {
+    "types": {
+     "EIP712Domain": [
+      {
+       "name": "name",
+       "type": "string"
+      },
+      {
+       "name": "version",
+       "type": "string"
+      },
+      {
+       "name": "chainId",
+       "type": "uint256"
+      },
+      {
+       "name": "verifyingContract",
+       "type": "address"
+      }
+     ],
+     "Quote": [
+      {
+       "name": "seat",
+       "type": "address"
+      },
+      {
+       "name": "legId",
+       "type": "bytes32"
+      },
+      {
+       "name": "pair",
+       "type": "bytes32"
+      },
+      {
+       "name": "side",
+       "type": "int8"
+      },
+      {
+       "name": "notional",
+       "type": "uint256"
+      },
+      {
+       "name": "rate",
+       "type": "uint64"
+      },
+      {
+       "name": "premiumBps",
+       "type": "int16"
+      },
+      {
+       "name": "expiry",
+       "type": "uint40"
+      },
+      {
+       "name": "nonce",
+       "type": "uint64"
+      },
+      {
+       "name": "salt",
+       "type": "bytes32"
+      },
+      {
+       "name": "takerRef",
+       "type": "bytes32"
+      }
+     ]
+    },
+    "primaryType": "Quote",
+    "domain": {
+     "name": "CRX",
+     "version": "rulebook-1.0",
+     "chainId": 43113,
+     "verifyingContract": "0xd757933e2a5600c6f00f83fd282b33aa7cb409c0"
+    },
+    "message": {
+     "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "legId": "0x555555555555555555555555555555555555555555555555000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "-1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premiumBps": "0",
+     "expiry": "1798732800",
+     "nonce": "6148914691236517205",
+     "salt": "0x6161616161616161616161616161616161616161616161616161616161616161",
+     "takerRef": "0x4f412fb92304015b744b7a32155b5879b48aa8cbb0076b8234640f8891c53b0b"
+    }
+   },
+   "struct_hash": "0xfc12020df46e5a207618f5dd4b960ca5dfb75bc5f279d0b168355b5402cbd089",
+   "digest": "0x464a510bfcf6b0f971abf3f38552b195fcd671d746f2927732827573676bdde9",
+   "signature": "0x83ed331b02642b3397e9719a0a87621bb4b8f8ae6e78387df0479db77ac4c47e528aad238961e426678aa37273a665cd2088017a68ac3db33cd59d0990f69e781c"
+  },
+  {
+   "id": "QV2",
+   "maker_leg": {
+    "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+    "leg_id": "0x565656565656565656565656565656565656565656565656000000006ab14738",
+    "pair": "0x69f1670ccd0386df6e79b445190cb08f07e9d85ef8bb6ef820417312ea39752f",
+    "side": "1",
+    "notional": "50000000000000",
+    "rate": "18234500",
+    "premium_bps": "1",
+    "expiry": "1800025200",
+    "nonce": "6221254864074593878"
+   },
+   "maker_salt": "0x6262626262626262626262626262626262626262626262626262626262626262",
+   "quote_expiry": "1790003000",
+   "c_maker": "0x812d3e5752aa6b14ddced3adb9ec3187e7d013ff1b30b3a073333182613aa2f6",
+   "taker_ref": {
+    "taker_seat": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+    "taker_leg_id": "0x121212121212121212121212121212121212121212121212000000006ab14738",
+    "value": "0x2ca8aecae5704f4ee991ec517fba78385ae14d8f5fa6a4dc26e6309d8331e3f8"
+   },
+   "typed_data": {
+    "types": {
+     "EIP712Domain": [
+      {
+       "name": "name",
+       "type": "string"
+      },
+      {
+       "name": "version",
+       "type": "string"
+      },
+      {
+       "name": "chainId",
+       "type": "uint256"
+      },
+      {
+       "name": "verifyingContract",
+       "type": "address"
+      }
+     ],
+     "Quote": [
+      {
+       "name": "seat",
+       "type": "address"
+      },
+      {
+       "name": "legId",
+       "type": "bytes32"
+      },
+      {
+       "name": "pair",
+       "type": "bytes32"
+      },
+      {
+       "name": "side",
+       "type": "int8"
+      },
+      {
+       "name": "notional",
+       "type": "uint256"
+      },
+      {
+       "name": "rate",
+       "type": "uint64"
+      },
+      {
+       "name": "premiumBps",
+       "type": "int16"
+      },
+      {
+       "name": "expiry",
+       "type": "uint40"
+      },
+      {
+       "name": "nonce",
+       "type": "uint64"
+      },
+      {
+       "name": "salt",
+       "type": "bytes32"
+      },
+      {
+       "name": "takerRef",
+       "type": "bytes32"
+      }
+     ]
+    },
+    "primaryType": "Quote",
+    "domain": {
+     "name": "CRX",
+     "version": "rulebook-1.0",
+     "chainId": 43113,
+     "verifyingContract": "0xd757933e2a5600c6f00f83fd282b33aa7cb409c0"
+    },
+    "message": {
+     "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "legId": "0x565656565656565656565656565656565656565656565656000000006ab14738",
+     "pair": "0x69f1670ccd0386df6e79b445190cb08f07e9d85ef8bb6ef820417312ea39752f",
+     "side": "1",
+     "notional": "50000000000000",
+     "rate": "18234500",
+     "premiumBps": "1",
+     "expiry": "1800025200",
+     "nonce": "6221254864074593878",
+     "salt": "0x6262626262626262626262626262626262626262626262626262626262626262",
+     "takerRef": "0x2ca8aecae5704f4ee991ec517fba78385ae14d8f5fa6a4dc26e6309d8331e3f8"
+    }
+   },
+   "struct_hash": "0xeb44877780d05ed2c04bf8ae7bbd933759e96fd5605ee892b9bfae619e7046e2",
+   "digest": "0xdf3ccd499335f801e9cda0292175615544a867de17fa99367ad820670717f17a",
+   "signature": "0x1974fd114976ed1281d7bfe91956d6da82a7c6c205d3ef2d5abb6b6f102ae7f8228d2c87b34fce8868c1651bc52535b6984af9c2fa996ac93ce5be96bc797c721b"
+  },
+  {
+   "id": "QV3",
+   "maker_leg": {
+    "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+    "leg_id": "0x575757575757575757575757575757575757575757575757000000006ab152f0",
+    "pair": "0x2164f56f53011ab46946e3a774e7726fcb52461efd4ef137e9bba7509b336eaf",
+    "side": "-1",
+    "notional": "10000500000",
+    "rate": "58000001",
+    "premium_bps": "-1",
+    "expiry": "1793671200",
+    "nonce": "6293595036912670551"
+   },
+   "maker_salt": "0x6363636363636363636363636363636363636363636363636363636363636363",
+   "quote_expiry": "1790006000",
+   "c_maker": "0x5c4c86091bb23eb16139f738e091fb4808815d0e151d147f679502405af24d96",
+   "taker_ref": {
+    "taker_seat": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+    "taker_leg_id": "0x131313131313131313131313131313131313131313131313000000006ab152f0",
+    "value": "0xabb60f639126f149eb10483a9516fbf955a4e08906bb8a04ccf6a8d1afe547fa"
+   },
+   "typed_data": {
+    "types": {
+     "EIP712Domain": [
+      {
+       "name": "name",
+       "type": "string"
+      },
+      {
+       "name": "version",
+       "type": "string"
+      },
+      {
+       "name": "chainId",
+       "type": "uint256"
+      },
+      {
+       "name": "verifyingContract",
+       "type": "address"
+      }
+     ],
+     "Quote": [
+      {
+       "name": "seat",
+       "type": "address"
+      },
+      {
+       "name": "legId",
+       "type": "bytes32"
+      },
+      {
+       "name": "pair",
+       "type": "bytes32"
+      },
+      {
+       "name": "side",
+       "type": "int8"
+      },
+      {
+       "name": "notional",
+       "type": "uint256"
+      },
+      {
+       "name": "rate",
+       "type": "uint64"
+      },
+      {
+       "name": "premiumBps",
+       "type": "int16"
+      },
+      {
+       "name": "expiry",
+       "type": "uint40"
+      },
+      {
+       "name": "nonce",
+       "type": "uint64"
+      },
+      {
+       "name": "salt",
+       "type": "bytes32"
+      },
+      {
+       "name": "takerRef",
+       "type": "bytes32"
+      }
+     ]
+    },
+    "primaryType": "Quote",
+    "domain": {
+     "name": "CRX",
+     "version": "rulebook-1.0",
+     "chainId": 43113,
+     "verifyingContract": "0xd757933e2a5600c6f00f83fd282b33aa7cb409c0"
+    },
+    "message": {
+     "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "legId": "0x575757575757575757575757575757575757575757575757000000006ab152f0",
+     "pair": "0x2164f56f53011ab46946e3a774e7726fcb52461efd4ef137e9bba7509b336eaf",
+     "side": "-1",
+     "notional": "10000500000",
+     "rate": "58000001",
+     "premiumBps": "-1",
+     "expiry": "1793671200",
+     "nonce": "6293595036912670551",
+     "salt": "0x6363636363636363636363636363636363636363636363636363636363636363",
+     "takerRef": "0xabb60f639126f149eb10483a9516fbf955a4e08906bb8a04ccf6a8d1afe547fa"
+    }
+   },
+   "struct_hash": "0xeb61abaeecd4537698e393a8e070315a39763a258b76dc86b440757decf8cc60",
+   "digest": "0x9581b8e0a0c55d1cfe80f30f1312d7243fd86cdd815e80f693d394607c32fb6b",
+   "signature": "0x1f08501b7fcc313c816a41427c5fbe098c77e2a4eca6ebbe0d45a0b01ecea6861b609e55bca2f3044924bcbffe3772dc68f7a1eb7be93ce3ff3b3bd8240fed591b"
+  },
+  {
+   "id": "QV4",
+   "maker_leg": {
+    "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+    "leg_id": "0x585858585858585858585858585858585858585858585858000000006ab15ea8",
+    "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+    "side": "1",
+    "notional": "1000000000000000000",
+    "rate": "6123456",
+    "premium_bps": "-25",
+    "expiry": "4102444800",
+    "nonce": "6365935209750747224"
+   },
+   "maker_salt": "0x6464646464646464646464646464646464646464646464646464646464646464",
+   "quote_expiry": "1790009000",
+   "c_maker": "0x07e08f86f1dc163561d060225c65bd5a85b932b7e3e0eaea54fd05537f9b27ce",
+   "taker_ref": {
+    "taker_seat": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+    "taker_leg_id": "0x141414141414141414141414141414141414141414141414000000006ab15ea8",
+    "value": "0xe810b31d756e8e110fddcff1624c68031b85fbb2fe393213872cad4cca78b085"
+   },
+   "typed_data": {
+    "types": {
+     "EIP712Domain": [
+      {
+       "name": "name",
+       "type": "string"
+      },
+      {
+       "name": "version",
+       "type": "string"
+      },
+      {
+       "name": "chainId",
+       "type": "uint256"
+      },
+      {
+       "name": "verifyingContract",
+       "type": "address"
+      }
+     ],
+     "Quote": [
+      {
+       "name": "seat",
+       "type": "address"
+      },
+      {
+       "name": "legId",
+       "type": "bytes32"
+      },
+      {
+       "name": "pair",
+       "type": "bytes32"
+      },
+      {
+       "name": "side",
+       "type": "int8"
+      },
+      {
+       "name": "notional",
+       "type": "uint256"
+      },
+      {
+       "name": "rate",
+       "type": "uint64"
+      },
+      {
+       "name": "premiumBps",
+       "type": "int16"
+      },
+      {
+       "name": "expiry",
+       "type": "uint40"
+      },
+      {
+       "name": "nonce",
+       "type": "uint64"
+      },
+      {
+       "name": "salt",
+       "type": "bytes32"
+      },
+      {
+       "name": "takerRef",
+       "type": "bytes32"
+      }
+     ]
+    },
+    "primaryType": "Quote",
+    "domain": {
+     "name": "CRX",
+     "version": "rulebook-1.0",
+     "chainId": 43113,
+     "verifyingContract": "0xd757933e2a5600c6f00f83fd282b33aa7cb409c0"
+    },
+    "message": {
+     "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "legId": "0x585858585858585858585858585858585858585858585858000000006ab15ea8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "1",
+     "notional": "1000000000000000000",
+     "rate": "6123456",
+     "premiumBps": "-25",
+     "expiry": "4102444800",
+     "nonce": "6365935209750747224",
+     "salt": "0x6464646464646464646464646464646464646464646464646464646464646464",
+     "takerRef": "0xe810b31d756e8e110fddcff1624c68031b85fbb2fe393213872cad4cca78b085"
+    }
+   },
+   "struct_hash": "0xdbb228103aec1ae4199b935624fae7faac94f74073513c9aac9b873d3f5aabb6",
+   "digest": "0x93a8e609957a372f360892a771eed0ae2534156e4fb56526aa7fa2a95df98342",
+   "signature": "0x5d60e0b69a858b889ac02f35c1eb984ff723cb2dd4a0764a5e3d7eb9e2472575188ff733835971e08a525d9253b8ae63fa071be528ef77db4d5fa349754d7edf1c"
+  },
+  {
+   "id": "QV5",
+   "maker_leg": {
+    "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+    "leg_id": "0x595959595959595959595959595959595959595959595959000000006ab16a60",
+    "pair": "0x69f1670ccd0386df6e79b445190cb08f07e9d85ef8bb6ef820417312ea39752f",
+    "side": "1",
+    "notional": "340282366920938463463374607431768211455",
+    "rate": "18446744073709551615",
+    "premium_bps": "-32768",
+    "expiry": "253402300799",
+    "nonce": "6438275382588823897"
+   },
+   "maker_salt": "0x6565656565656565656565656565656565656565656565656565656565656565",
+   "quote_expiry": "1790012000",
+   "c_maker": "0xfb7dbfb63df15eae4c6946d28208a233e3f4e9d532d1ddb1817b01f9f2e3a5eb",
+   "taker_ref": {
+    "taker_seat": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+    "taker_leg_id": "0x151515151515151515151515151515151515151515151515000000006ab16a60",
+    "value": "0x4bcf4f83c44ce64a028b63db0ef7715be9c90b57953d740d898db73155076816"
+   },
+   "typed_data": {
+    "types": {
+     "EIP712Domain": [
+      {
+       "name": "name",
+       "type": "string"
+      },
+      {
+       "name": "version",
+       "type": "string"
+      },
+      {
+       "name": "chainId",
+       "type": "uint256"
+      },
+      {
+       "name": "verifyingContract",
+       "type": "address"
+      }
+     ],
+     "Quote": [
+      {
+       "name": "seat",
+       "type": "address"
+      },
+      {
+       "name": "legId",
+       "type": "bytes32"
+      },
+      {
+       "name": "pair",
+       "type": "bytes32"
+      },
+      {
+       "name": "side",
+       "type": "int8"
+      },
+      {
+       "name": "notional",
+       "type": "uint256"
+      },
+      {
+       "name": "rate",
+       "type": "uint64"
+      },
+      {
+       "name": "premiumBps",
+       "type": "int16"
+      },
+      {
+       "name": "expiry",
+       "type": "uint40"
+      },
+      {
+       "name": "nonce",
+       "type": "uint64"
+      },
+      {
+       "name": "salt",
+       "type": "bytes32"
+      },
+      {
+       "name": "takerRef",
+       "type": "bytes32"
+      }
+     ]
+    },
+    "primaryType": "Quote",
+    "domain": {
+     "name": "CRX",
+     "version": "rulebook-1.0",
+     "chainId": 43113,
+     "verifyingContract": "0xd757933e2a5600c6f00f83fd282b33aa7cb409c0"
+    },
+    "message": {
+     "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "legId": "0x595959595959595959595959595959595959595959595959000000006ab16a60",
+     "pair": "0x69f1670ccd0386df6e79b445190cb08f07e9d85ef8bb6ef820417312ea39752f",
+     "side": "1",
+     "notional": "340282366920938463463374607431768211455",
+     "rate": "18446744073709551615",
+     "premiumBps": "-32768",
+     "expiry": "253402300799",
+     "nonce": "6438275382588823897",
+     "salt": "0x6565656565656565656565656565656565656565656565656565656565656565",
+     "takerRef": "0x4bcf4f83c44ce64a028b63db0ef7715be9c90b57953d740d898db73155076816"
+    }
+   },
+   "struct_hash": "0xd0a21aa5b1350dbfe46d926a3896dd0f9505f3518f6d02bb90717edaf575b2d1",
+   "digest": "0x2f203f8770e9181a8ca3695684f75d264e1572fbaa27386772f7af4879dff38a",
+   "signature": "0xb62c162efa92ecc4da2db6bf4b0019205413da9a8527669cbfae2b5b5148489d3fca8d63aa0df27dc45222ed958259e8a62124609eddc66943470060226782c01c"
+  }
+ ],
+ "terms": [
+  {
+   "id": "T1",
+   "note": "int16 floor premium",
+   "inputs": {
+    "takerSide": "0x000000000000000000000000000000000000000000000000000000000000000a",
+    "makerSide": "0x000000000000000000000000000000000000000000000000000000000000000b",
+    "notional": "100000000000",
+    "premiumBps": "-32768",
+    "nonce": "1",
+    "pair": "0x0730076c3c0f5da594eb635c5d5a22116233bdb2a9c2977279cc348b8b8ce917",
+    "side": "1",
+    "settlement": "1100000",
+    "rate": "1084250"
+   },
+   "terms_id": "0xaafe0c24c370b24c3499ad914bade7e0d137db0d51ea73b0d1a302022a1afc3b"
+  },
+  {
+   "id": "T2",
+   "note": "ordinary negative premium",
+   "inputs": {
+    "takerSide": "0x000000000000000000000000000000000000000000000000000000000000000a",
+    "makerSide": "0x000000000000000000000000000000000000000000000000000000000000000b",
+    "notional": "100000000000",
+    "premiumBps": "-250",
+    "nonce": "1",
+    "pair": "0x0730076c3c0f5da594eb635c5d5a22116233bdb2a9c2977279cc348b8b8ce917",
+    "side": "1",
+    "settlement": "1100000",
+    "rate": "1084250"
+   },
+   "terms_id": "0x3fb4002f856d94a882a07ca4e1f783f58be7a5f79a0f3159d2be1d284b27b720"
+  },
+  {
+   "id": "T3",
+   "note": "side -1",
+   "inputs": {
+    "takerSide": "0x000000000000000000000000000000000000000000000000000000000000000a",
+    "makerSide": "0x000000000000000000000000000000000000000000000000000000000000000b",
+    "notional": "100000000000",
+    "premiumBps": "-250",
+    "nonce": "1",
+    "pair": "0x0730076c3c0f5da594eb635c5d5a22116233bdb2a9c2977279cc348b8b8ce917",
+    "side": "-1",
+    "settlement": "1100000",
+    "rate": "1084250"
+   },
+   "terms_id": "0xc79928b08c23d7bf9023151ed6b4dcdd94c5f3575490d5fd74a2911712972a5c"
+  }
+ ],
+ "maker_nonce": {
+  "rule": "nonce = u64 big endian of leg_id bytes 16..24",
+  "cases": [
+   {
+    "id": "D0",
+    "note": "distinct bytes: nonce = u64 big endian of leg_id bytes 16..24",
+    "leg_id": "0xa0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a00102030405060708000000006ab13dd8",
+    "nonce": "72623859790382856"
+   },
+   {
+    "id": "D1",
+    "leg_id": "0x555555555555555555555555555555555555555555555555000000006ab13dd8",
+    "nonce": "6148914691236517205"
+   },
+   {
+    "id": "D2",
+    "leg_id": "0x565656565656565656565656565656565656565656565656000000006ab14738",
+    "nonce": "6221254864074593878"
+   },
+   {
+    "id": "D3",
+    "leg_id": "0x575757575757575757575757575757575757575757575757000000006ab152f0",
+    "nonce": "6293595036912670551"
+   },
+   {
+    "id": "D4",
+    "leg_id": "0x585858585858585858585858585858585858585858585858000000006ab15ea8",
+    "nonce": "6365935209750747224"
+   },
+   {
+    "id": "D5",
+    "leg_id": "0x595959595959595959595959595959595959595959595959000000006ab16a60",
+    "nonce": "6438275382588823897"
+   }
+  ],
+  "negative": {
+   "id": "ND1",
+   "note": "a maker signs its Quote over nonce = derived + 1: under the Quote the gateway builds (derived nonce) the signature recovers another address; refused",
+   "leg_id": "0x555555555555555555555555555555555555555555555555000000006ab13dd8",
+   "derived_nonce": "6148914691236517205",
+   "signed_nonce": "6148914691236517206",
+   "signed_digest": "0x8da604e5ac90a1e0f89a09c42b5cf340e65410cc019dbfb1d42329806930fc1b",
+   "signature": "0x2a6787bf6c438736a8e9be635daa08255b29dd2b7161d5edb49899ad65a916ee797dce826d2644631b52b55f80ef3585607189e2cb3d785f82ee89206924da1b1b",
+   "gateway_digest": "0x464a510bfcf6b0f971abf3f38552b195fcd671d746f2927732827573676bdde9",
+   "recovered_from_gateway_digest": "0xbf1088a3006291773f54686c26b62b8fc47a954b",
+   "maker_seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+   "expect": "refused"
+  }
+ },
+ "allocation": {
+  "id": "A1",
+  "note": "novation: exiting party = taker key, incoming party = key other",
+  "item": {
+   "oldId": "0x0101010101010101010101010101010101010101010101010101010101010101",
+   "exitingSide": "0x0202020202020202020202020202020202020202020202020202020202020202",
+   "remainingSide": "0x0303030303030303030303030303030303030303030303030303030303030303",
+   "incoming": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+   "incomingSide": "0x0404040404040404040404040404040404040404040404040404040404040404",
+   "closeRate": "5410000",
+   "spread": "1000000",
+   "nonce": "3",
+   "deadline": "1790000900",
+   "pairId": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+   "side": "-1",
+   "notional": "5000000000000",
+   "settlement": "1798732800"
+  },
+  "salt": "0x0505050505050505050505050505050505050505050505050505050505050505",
+  "incoming_c": "0x0606060606060606060606060606060606060606060606060606060606060606",
+  "commitment": "0x6c389ec66dc66f5c04a66e7cd65dcdea88d3d651e16202d6b559de33f1280735",
+  "consent": {
+   "signer": "taker",
+   "typed_data": {
+    "types": {
+     "EIP712Domain": [
+      {
+       "name": "name",
+       "type": "string"
+      },
+      {
+       "name": "version",
+       "type": "string"
+      },
+      {
+       "name": "chainId",
+       "type": "uint256"
+      },
+      {
+       "name": "verifyingContract",
+       "type": "address"
+      }
+     ],
+     "AllocationConsent": [
+      {
+       "name": "oldId",
+       "type": "bytes32"
+      },
+      {
+       "name": "exitingSide",
+       "type": "bytes32"
+      },
+      {
+       "name": "remainingSide",
+       "type": "bytes32"
+      },
+      {
+       "name": "incomingSide",
+       "type": "bytes32"
+      },
+      {
+       "name": "nonce",
+       "type": "uint64"
+      },
+      {
+       "name": "deadline",
+       "type": "uint64"
+      },
+      {
+       "name": "commitment",
+       "type": "bytes32"
+      },
+      {
+       "name": "salt",
+       "type": "bytes32"
+      }
+     ]
+    },
+    "primaryType": "AllocationConsent",
+    "domain": {
+     "name": "CRX",
+     "version": "rulebook-1.0",
+     "chainId": 43113,
+     "verifyingContract": "0xd757933e2a5600c6f00f83fd282b33aa7cb409c0"
+    },
+    "message": {
+     "oldId": "0x0101010101010101010101010101010101010101010101010101010101010101",
+     "exitingSide": "0x0202020202020202020202020202020202020202020202020202020202020202",
+     "remainingSide": "0x0303030303030303030303030303030303030303030303030303030303030303",
+     "incomingSide": "0x0404040404040404040404040404040404040404040404040404040404040404",
+     "nonce": "3",
+     "deadline": "1790000900",
+     "commitment": "0x6c389ec66dc66f5c04a66e7cd65dcdea88d3d651e16202d6b559de33f1280735",
+     "salt": "0x0505050505050505050505050505050505050505050505050505050505050505"
+    }
+   },
+   "struct_hash": "0xba661d95f123b4593985ff799e86835be8ae59a38d1e5f128fff47ce4fb2ccc9",
+   "digest": "0xd5294d1e8f10999eae1c4b51f3d3c8561cec8c3a6f7c2ff8bc1307f7f6f545fa",
+   "signature": "0xe1edb22a3c38c26910405dcfffae57b8d9b7cbb5c237031b09861614972dc06327967e750bd4e190f54fbf2d6a44cb10906f7fba1b4e117bf8b0e4f4f721084c1b"
+  },
+  "acceptance": {
+   "signer": "other",
+   "typed_data": {
+    "types": {
+     "EIP712Domain": [
+      {
+       "name": "name",
+       "type": "string"
+      },
+      {
+       "name": "version",
+       "type": "string"
+      },
+      {
+       "name": "chainId",
+       "type": "uint256"
+      },
+      {
+       "name": "verifyingContract",
+       "type": "address"
+      }
+     ],
+     "AllocationAcceptance": [
+      {
+       "name": "oldId",
+       "type": "bytes32"
+      },
+      {
+       "name": "incomingSide",
+       "type": "bytes32"
+      },
+      {
+       "name": "incomingC",
+       "type": "bytes32"
+      },
+      {
+       "name": "nonce",
+       "type": "uint64"
+      },
+      {
+       "name": "deadline",
+       "type": "uint64"
+      },
+      {
+       "name": "commitment",
+       "type": "bytes32"
+      }
+     ]
+    },
+    "primaryType": "AllocationAcceptance",
+    "domain": {
+     "name": "CRX",
+     "version": "rulebook-1.0",
+     "chainId": 43113,
+     "verifyingContract": "0xd757933e2a5600c6f00f83fd282b33aa7cb409c0"
+    },
+    "message": {
+     "oldId": "0x0101010101010101010101010101010101010101010101010101010101010101",
+     "incomingSide": "0x0404040404040404040404040404040404040404040404040404040404040404",
+     "incomingC": "0x0606060606060606060606060606060606060606060606060606060606060606",
+     "nonce": "3",
+     "deadline": "1790000900",
+     "commitment": "0x6c389ec66dc66f5c04a66e7cd65dcdea88d3d651e16202d6b559de33f1280735"
+    }
+   },
+   "struct_hash": "0x9ce8f2cebc66b36d8de842ca0c20de819506b396796e27fe1340e9157e677883",
+   "digest": "0xa26235be5c4c66d1f0dd02473af64336159854a93ffc7aedd975f64eda48899d",
+   "signature": "0x67392afe55ab9dd0591fa9bc945d99560d12e0d27c14f82755105be44bcca49706b2e694f5b60b454fa2fe05c3633d7263a8f0b48bcf5dd035889c5377d7913a1c"
+  }
+ },
+ "closeout": {
+  "id": "C1",
+  "note": "pushed close-out: incoming party = key other",
+  "item": {
+   "oldId": "0x0707070707070707070707070707070707070707070707070707070707070707",
+   "closedOutSide": "0x0808080808080808080808080808080808080808080808080808080808080808",
+   "remainingSide": "0x0909090909090909090909090909090909090909090909090909090909090909",
+   "incoming": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+   "incomingSide": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+   "feedId": "0x0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+   "closeTime": "1790001000",
+   "spread": "2000000",
+   "nonce": "4",
+   "deadline": "1790001600",
+   "openNonce": "5",
+   "subsidyMaxUsd": "500000"
+  },
+  "salt": "0x0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c",
+  "incoming_c": "0x0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d",
+  "commitment": "0x8ebabc1ea413e1d61cb2c2701a4cb4764eb23e00fbd6c76fc735ae6c99de4258",
+  "failover_consent": {
+   "signer": "other",
+   "typed_data": {
+    "types": {
+     "EIP712Domain": [
+      {
+       "name": "name",
+       "type": "string"
+      },
+      {
+       "name": "version",
+       "type": "string"
+      },
+      {
+       "name": "chainId",
+       "type": "uint256"
+      },
+      {
+       "name": "verifyingContract",
+       "type": "address"
+      }
+     ],
+     "FailoverConsent": [
+      {
+       "name": "oldId",
+       "type": "bytes32"
+      },
+      {
+       "name": "closedOutSide",
+       "type": "bytes32"
+      },
+      {
+       "name": "remainingSide",
+       "type": "bytes32"
+      },
+      {
+       "name": "incomingSide",
+       "type": "bytes32"
+      },
+      {
+       "name": "incomingC",
+       "type": "bytes32"
+      },
+      {
+       "name": "nonce",
+       "type": "uint64"
+      },
+      {
+       "name": "openNonce",
+       "type": "uint64"
+      },
+      {
+       "name": "deadline",
+       "type": "uint64"
+      },
+      {
+       "name": "commitment",
+       "type": "bytes32"
+      }
+     ]
+    },
+    "primaryType": "FailoverConsent",
+    "domain": {
+     "name": "CRX",
+     "version": "rulebook-1.0",
+     "chainId": 43113,
+     "verifyingContract": "0xd757933e2a5600c6f00f83fd282b33aa7cb409c0"
+    },
+    "message": {
+     "oldId": "0x0707070707070707070707070707070707070707070707070707070707070707",
+     "closedOutSide": "0x0808080808080808080808080808080808080808080808080808080808080808",
+     "remainingSide": "0x0909090909090909090909090909090909090909090909090909090909090909",
+     "incomingSide": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "incomingC": "0x0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d",
+     "nonce": "4",
+     "openNonce": "5",
+     "deadline": "1790001600",
+     "commitment": "0x8ebabc1ea413e1d61cb2c2701a4cb4764eb23e00fbd6c76fc735ae6c99de4258"
+    }
+   },
+   "struct_hash": "0x51e7649b80461435c24db9c24e5c158b989585f92a6cf6e3350a75f9c2880dd6",
+   "digest": "0x538a7070dc86294c0534d85f41719e3a0b32a850d9a6d201e8e5aec11a1eb23f",
+   "signature": "0x89285cb790b087034a1d0c97cba1329abc0634daac212a3c6cc2c9c1a7f4c1500adf807706a93b9fdf70112ae5c2aafcb44ffbed35914ff4362411cae00ddb781c"
+  }
+ },
+ "withdraw": {
+  "id": "W1",
+  "note": "the account withdraws 1 000 USD to itself",
+  "signer": "taker",
+  "typed_data": {
+   "types": {
+    "EIP712Domain": [
+     {
+      "name": "name",
+      "type": "string"
+     },
+     {
+      "name": "version",
+      "type": "string"
+     },
+     {
+      "name": "chainId",
+      "type": "uint256"
+     },
+     {
+      "name": "verifyingContract",
+      "type": "address"
+     }
+    ],
+    "WithdrawIntent": [
+     {
+      "name": "account",
+      "type": "address"
+     },
+     {
+      "name": "amount",
+      "type": "uint256"
+     },
+     {
+      "name": "nonce",
+      "type": "uint64"
+     },
+     {
+      "name": "deadline",
+      "type": "uint64"
+     }
+    ]
+   },
+   "primaryType": "WithdrawIntent",
+   "domain": {
+    "name": "CRX",
+    "version": "rulebook-1.0",
+    "chainId": 43113,
+    "verifyingContract": "0xd757933e2a5600c6f00f83fd282b33aa7cb409c0"
+   },
+   "message": {
+    "account": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+    "amount": "1000000000",
+    "nonce": "0",
+    "deadline": "1790000900"
+   }
+  },
+  "struct_hash": "0x6ae4cfaa0f89fbb97581cf1435bf714582ce4497a06aa7b487afaaac1ae5e4d0",
+  "digest": "0xd81f1e577ef29653d7abae064e1b14e2d4386fe63f89d090e696cce7b0e5f704",
+  "signature": "0x39d3c26a7d5b7739c8bb2f9382c57dadc2c0c39f7bfcefebc9340255ac0389893be81645df51e86c32979b98c3adbc8482950d6d58dcd18b281a39ad59e77d201c"
+ }
+}

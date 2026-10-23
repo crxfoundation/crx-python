@@ -1,0 +1,3679 @@
+{
+ "about": "Readable taker terms: Trade vectors, v5. Spec: SPEC-v5.md. Every integer is a JSON decimal string, except domain.chainId, check, summary_len and signed_what.chainId / signed_what.v (JSON numbers). Computed by eth_account 0.14 + eth_abi 6 (Python) and viem 2.57.2 (Node), byte-equal; signatures and hidden-word commitments also equal under cast 1.5.1. Keys are publicly known anvil private keys: never fund them.",
+ "switches": {
+  "drop_quote_expiry": true,
+  "drop_withdraw_recipient": true,
+  "derive_maker_nonce": true
+ },
+ "type_string": "Trade(string summary,string pair,string side,uint256 notionalE6,uint64 rateE6,int16 premiumBps,uint40 maturity,bytes32 pairC,bytes32 ownLegId,uint64 ownNonce,bytes32 ownSalt)",
+ "typehash": "0x2a4f432dd51178481baaacab72453a149e29560e5d366c2ebb93bb767fab4630",
+ "constants": {
+  "keccak_buy": "0x6ed88e868af0a1983e3886d5f3e95a2fafbd6c3450bc229e27342283dc429ccc",
+  "keccak_sell": "0xf3b277728b3fee749481eb3e0b3b48980dbbab78658fc419025cb16eee346775",
+  "max_maturity": "253402300799",
+  "summary_max_len": "162"
+ },
+ "domain": {
+  "name": "CRX",
+  "version": "rulebook-1.0",
+  "chainId": 43113,
+  "verifyingContract": "0xd757933e2a5600c6f00f83fd282b33aa7cb409c0"
+ },
+ "domain_separator": "0x38bfb6b828498b78403a209f336f3d5fa6335d23f7e50d1859e12f213c3fe59b",
+ "keys": {
+  "taker": {
+   "private_key": "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+   "address": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+   "label": "anvil test key 0"
+  },
+  "other": {
+   "private_key": "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d",
+   "address": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+   "label": "anvil test key 1"
+  }
+ },
+ "positive": [
+  {
+   "id": "V1",
+   "note": "normal USD/BRL taker buy",
+   "inputs": {
+    "pair_text": "USD/BRL",
+    "quote_expiry": "1790000600",
+    "rfq_quote_expiry_max": "1790000600",
+    "taker_leg": {
+     "seat": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+     "leg_id": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "1790000000123"
+    },
+    "taker_salt": "0x3131313131313131313131313131313131313131313131313131313131313131",
+    "maker_leg": {
+     "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "leg_id": "0x555555555555555555555555555555555555555555555555000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "-1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "6148914691236517205"
+    },
+    "maker_salt": "0x6161616161616161616161616161616161616161616161616161616161616161"
+   },
+   "derived": {
+    "pair_id": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+    "c_taker": "0xabd5b1567f704f8eeeacf4165f4c2d52a70ce326b4fdbba5b38b56c04ed39558",
+    "c_maker": "0xf6853840d51d2c6267dbb33046e7cf14479f82a04f87cf31dbb30dbcc63fc434",
+    "pair_c": "0x3bb28decf99b625916b2a3c41517a2035273e731a71df7b0e9d5c115ce899795"
+   },
+   "summary": "buy 5 000 000 USD vs BRL at 5.41 BRL per USD, matures 2026-12-31T16:00:00Z, upfront none",
+   "summary_len": 88,
+   "typed_data": {
+    "types": {
+     "EIP712Domain": [
+      {
+       "name": "name",
+       "type": "string"
+      },
+      {
+       "name": "version",
+       "type": "string"
+      },
+      {
+       "name": "chainId",
+       "type": "uint256"
+      },
+      {
+       "name": "verifyingContract",
+       "type": "address"
+      }
+     ],
+     "Trade": [
+      {
+       "name": "summary",
+       "type": "string"
+      },
+      {
+       "name": "pair",
+       "type": "string"
+      },
+      {
+       "name": "side",
+       "type": "string"
+      },
+      {
+       "name": "notionalE6",
+       "type": "uint256"
+      },
+      {
+       "name": "rateE6",
+       "type": "uint64"
+      },
+      {
+       "name": "premiumBps",
+       "type": "int16"
+      },
+      {
+       "name": "maturity",
+       "type": "uint40"
+      },
+      {
+       "name": "pairC",
+       "type": "bytes32"
+      },
+      {
+       "name": "ownLegId",
+       "type": "bytes32"
+      },
+      {
+       "name": "ownNonce",
+       "type": "uint64"
+      },
+      {
+       "name": "ownSalt",
+       "type": "bytes32"
+      }
+     ]
+    },
+    "primaryType": "Trade",
+    "domain": {
+     "name": "CRX",
+     "version": "rulebook-1.0",
+     "chainId": 43113,
+     "verifyingContract": "0xd757933e2a5600c6f00f83fd282b33aa7cb409c0"
+    },
+    "message": {
+     "summary": "buy 5 000 000 USD vs BRL at 5.41 BRL per USD, matures 2026-12-31T16:00:00Z, upfront none",
+     "pair": "USD/BRL",
+     "side": "buy",
+     "notionalE6": "5000000000000",
+     "rateE6": "5410000",
+     "premiumBps": "0",
+     "maturity": "1798732800",
+     "pairC": "0x3bb28decf99b625916b2a3c41517a2035273e731a71df7b0e9d5c115ce899795",
+     "ownLegId": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+     "ownNonce": "1790000000123",
+     "ownSalt": "0x3131313131313131313131313131313131313131313131313131313131313131"
+    }
+   },
+   "struct_hash": "0xf95dff1c52d40e2936e714ebdc64a5ea035190b10fc29ebf22141d3df7fc359e",
+   "digest": "0xebe1b52ad8e02ea30076f2c86073c185fa3061048a063860b1be9cd51297ab20",
+   "signature": "0x8c78580ddcab008d8a4750927356cc5c5324fbdb8555c19c4c805257cc18e6b22479d5d363a1bcdebc13dc64cb4789f78d9e49e92e1df3506c36915fe2a4a7111c"
+  },
+  {
+   "id": "V2",
+   "note": "taker sell on USD/MXN, taker pays premium",
+   "inputs": {
+    "pair_text": "USD/MXN",
+    "quote_expiry": "1790003000",
+    "rfq_quote_expiry_max": "1790003000",
+    "taker_leg": {
+     "seat": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+     "leg_id": "0x121212121212121212121212121212121212121212121212000000006ab14738",
+     "pair": "0x69f1670ccd0386df6e79b445190cb08f07e9d85ef8bb6ef820417312ea39752f",
+     "side": "-1",
+     "notional": "50000000000000",
+     "rate": "18234500",
+     "premium_bps": "1",
+     "expiry": "1800025200",
+     "nonce": "1790000000789"
+    },
+    "taker_salt": "0x3232323232323232323232323232323232323232323232323232323232323232",
+    "maker_leg": {
+     "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "leg_id": "0x565656565656565656565656565656565656565656565656000000006ab14738",
+     "pair": "0x69f1670ccd0386df6e79b445190cb08f07e9d85ef8bb6ef820417312ea39752f",
+     "side": "1",
+     "notional": "50000000000000",
+     "rate": "18234500",
+     "premium_bps": "1",
+     "expiry": "1800025200",
+     "nonce": "6221254864074593878"
+    },
+    "maker_salt": "0x6262626262626262626262626262626262626262626262626262626262626262"
+   },
+   "derived": {
+    "pair_id": "0x69f1670ccd0386df6e79b445190cb08f07e9d85ef8bb6ef820417312ea39752f",
+    "c_taker": "0x8d351c0febbda3f7d44b683269e02369a089738b5856a02404dbe1724eae6153",
+    "c_maker": "0x812d3e5752aa6b14ddced3adb9ec3187e7d013ff1b30b3a073333182613aa2f6",
+    "pair_c": "0x56370915b7b5cd95af5a43da76ce0098cdcf250d98bd40926afcbc7c636459f7"
+   },
+   "summary": "sell 50 000 000 USD vs MXN at 18.2345 MXN per USD, matures 2027-01-15T15:00:00Z, upfront taker pays 0.01 %",
+   "summary_len": 106,
+   "typed_data": {
+    "types": {
+     "EIP712Domain": [
+      {
+       "name": "name",
+       "type": "string"
+      },
+      {
+       "name": "version",
+       "type": "string"
+      },
+      {
+       "name": "chainId",
+       "type": "uint256"
+      },
+      {
+       "name": "verifyingContract",
+       "type": "address"
+      }
+     ],
+     "Trade": [
+      {
+       "name": "summary",
+       "type": "string"
+      },
+      {
+       "name": "pair",
+       "type": "string"
+      },
+      {
+       "name": "side",
+       "type": "string"
+      },
+      {
+       "name": "notionalE6",
+       "type": "uint256"
+      },
+      {
+       "name": "rateE6",
+       "type": "uint64"
+      },
+      {
+       "name": "premiumBps",
+       "type": "int16"
+      },
+      {
+       "name": "maturity",
+       "type": "uint40"
+      },
+      {
+       "name": "pairC",
+       "type": "bytes32"
+      },
+      {
+       "name": "ownLegId",
+       "type": "bytes32"
+      },
+      {
+       "name": "ownNonce",
+       "type": "uint64"
+      },
+      {
+       "name": "ownSalt",
+       "type": "bytes32"
+      }
+     ]
+    },
+    "primaryType": "Trade",
+    "domain": {
+     "name": "CRX",
+     "version": "rulebook-1.0",
+     "chainId": 43113,
+     "verifyingContract": "0xd757933e2a5600c6f00f83fd282b33aa7cb409c0"
+    },
+    "message": {
+     "summary": "sell 50 000 000 USD vs MXN at 18.2345 MXN per USD, matures 2027-01-15T15:00:00Z, upfront taker pays 0.01 %",
+     "pair": "USD/MXN",
+     "side": "sell",
+     "notionalE6": "50000000000000",
+     "rateE6": "18234500",
+     "premiumBps": "1",
+     "maturity": "1800025200",
+     "pairC": "0x56370915b7b5cd95af5a43da76ce0098cdcf250d98bd40926afcbc7c636459f7",
+     "ownLegId": "0x121212121212121212121212121212121212121212121212000000006ab14738",
+     "ownNonce": "1790000000789",
+     "ownSalt": "0x3232323232323232323232323232323232323232323232323232323232323232"
+    }
+   },
+   "struct_hash": "0xec03b59d5618d91bdb3241741f0cf17e5363c341766c8afd8f9cb442592f0da1",
+   "digest": "0xa14d3bd5bd097dc1d0b5ba73ab5996de07ca4c9dceb0c99e9ef16039d96a7034",
+   "signature": "0xe8cc4a9b5a7edc6a73ecdaee49c0f0c2a7d2bc02d5d1178660b9d608df9a24251cb63d5025a8e449fad3e75b18e8d6ffef1fd8a158eedc02ec121a4896ad8f681c"
+  },
+  {
+   "id": "V3",
+   "note": "USD/PHP fractional size, maker pays premium",
+   "inputs": {
+    "pair_text": "USD/PHP",
+    "quote_expiry": "1790006000",
+    "rfq_quote_expiry_max": "1790006000",
+    "taker_leg": {
+     "seat": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+     "leg_id": "0x131313131313131313131313131313131313131313131313000000006ab152f0",
+     "pair": "0x2164f56f53011ab46946e3a774e7726fcb52461efd4ef137e9bba7509b336eaf",
+     "side": "1",
+     "notional": "10000500000",
+     "rate": "58000001",
+     "premium_bps": "-1",
+     "expiry": "1793671200",
+     "nonce": "1790000001001"
+    },
+    "taker_salt": "0x3333333333333333333333333333333333333333333333333333333333333333",
+    "maker_leg": {
+     "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "leg_id": "0x575757575757575757575757575757575757575757575757000000006ab152f0",
+     "pair": "0x2164f56f53011ab46946e3a774e7726fcb52461efd4ef137e9bba7509b336eaf",
+     "side": "-1",
+     "notional": "10000500000",
+     "rate": "58000001",
+     "premium_bps": "-1",
+     "expiry": "1793671200",
+     "nonce": "6293595036912670551"
+    },
+    "maker_salt": "0x6363636363636363636363636363636363636363636363636363636363636363"
+   },
+   "derived": {
+    "pair_id": "0x2164f56f53011ab46946e3a774e7726fcb52461efd4ef137e9bba7509b336eaf",
+    "c_taker": "0x0a77961fa9ce6553f2e45015cbfd6f263d512a35d417aa8dc2c5924d1eb67296",
+    "c_maker": "0x5c4c86091bb23eb16139f738e091fb4808815d0e151d147f679502405af24d96",
+    "pair_c": "0x2379bf9cb8a7527c68a823b81e86e409a326718360ba1b3c4ee493cb13b01043"
+   },
+   "summary": "buy 10 000.5 USD vs PHP at 58.000001 PHP per USD, matures 2026-11-03T02:00:00Z, upfront maker pays 0.01 %",
+   "summary_len": 105,
+   "typed_data": {
+    "types": {
+     "EIP712Domain": [
+      {
+       "name": "name",
+       "type": "string"
+      },
+      {
+       "name": "version",
+       "type": "string"
+      },
+      {
+       "name": "chainId",
+       "type": "uint256"
+      },
+      {
+       "name": "verifyingContract",
+       "type": "address"
+      }
+     ],
+     "Trade": [
+      {
+       "name": "summary",
+       "type": "string"
+      },
+      {
+       "name": "pair",
+       "type": "string"
+      },
+      {
+       "name": "side",
+       "type": "string"
+      },
+      {
+       "name": "notionalE6",
+       "type": "uint256"
+      },
+      {
+       "name": "rateE6",
+       "type": "uint64"
+      },
+      {
+       "name": "premiumBps",
+       "type": "int16"
+      },
+      {
+       "name": "maturity",
+       "type": "uint40"
+      },
+      {
+       "name": "pairC",
+       "type": "bytes32"
+      },
+      {
+       "name": "ownLegId",
+       "type": "bytes32"
+      },
+      {
+       "name": "ownNonce",
+       "type": "uint64"
+      },
+      {
+       "name": "ownSalt",
+       "type": "bytes32"
+      }
+     ]
+    },
+    "primaryType": "Trade",
+    "domain": {
+     "name": "CRX",
+     "version": "rulebook-1.0",
+     "chainId": 43113,
+     "verifyingContract": "0xd757933e2a5600c6f00f83fd282b33aa7cb409c0"
+    },
+    "message": {
+     "summary": "buy 10 000.5 USD vs PHP at 58.000001 PHP per USD, matures 2026-11-03T02:00:00Z, upfront maker pays 0.01 %",
+     "pair": "USD/PHP",
+     "side": "buy",
+     "notionalE6": "10000500000",
+     "rateE6": "58000001",
+     "premiumBps": "-1",
+     "maturity": "1793671200",
+     "pairC": "0x2379bf9cb8a7527c68a823b81e86e409a326718360ba1b3c4ee493cb13b01043",
+     "ownLegId": "0x131313131313131313131313131313131313131313131313000000006ab152f0",
+     "ownNonce": "1790000001001",
+     "ownSalt": "0x3333333333333333333333333333333333333333333333333333333333333333"
+    }
+   },
+   "struct_hash": "0xff7dd20653e193acc3f0be4526254505b119806d167262ca1c6d1aa8acdcedd0",
+   "digest": "0xf3d200357b400f5dea9788a840b06ddc40feabe43d4cae55a7b2ce393a0a6a57",
+   "signature": "0x6a9ea86691d41c37a2024761e54422e95b22c1cd8ae78fa73e7ad513dd7558f448f946a6c3f918a95e29cd34f7cfda4282c049e63d6d83d1235e229050371b141c"
+  },
+  {
+   "id": "V4",
+   "note": "edge: large notional (1 trillion USD), long maturity (2100), maker pays 0.25 %",
+   "inputs": {
+    "pair_text": "USD/BRL",
+    "quote_expiry": "1790009000",
+    "rfq_quote_expiry_max": "1790009000",
+    "taker_leg": {
+     "seat": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+     "leg_id": "0x141414141414141414141414141414141414141414141414000000006ab15ea8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "-1",
+     "notional": "1000000000000000000",
+     "rate": "6123456",
+     "premium_bps": "-25",
+     "expiry": "4102444800",
+     "nonce": "1790000002001"
+    },
+    "taker_salt": "0x3434343434343434343434343434343434343434343434343434343434343434",
+    "maker_leg": {
+     "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "leg_id": "0x585858585858585858585858585858585858585858585858000000006ab15ea8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "1",
+     "notional": "1000000000000000000",
+     "rate": "6123456",
+     "premium_bps": "-25",
+     "expiry": "4102444800",
+     "nonce": "6365935209750747224"
+    },
+    "maker_salt": "0x6464646464646464646464646464646464646464646464646464646464646464"
+   },
+   "derived": {
+    "pair_id": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+    "c_taker": "0xe6abe7c85b1df867b6e53c421eec6e0ba782734a12e35621bd63a6daebc5cf86",
+    "c_maker": "0x07e08f86f1dc163561d060225c65bd5a85b932b7e3e0eaea54fd05537f9b27ce",
+    "pair_c": "0xda894d00387f2638f4dd4c8c02816a77312cc4297688b7f78ec2e91716e6151f"
+   },
+   "summary": "sell 1 000 000 000 000 USD vs BRL at 6.123456 BRL per USD, matures 2100-01-01T00:00:00Z, upfront maker pays 0.25 %",
+   "summary_len": 114,
+   "typed_data": {
+    "types": {
+     "EIP712Domain": [
+      {
+       "name": "name",
+       "type": "string"
+      },
+      {
+       "name": "version",
+       "type": "string"
+      },
+      {
+       "name": "chainId",
+       "type": "uint256"
+      },
+      {
+       "name": "verifyingContract",
+       "type": "address"
+      }
+     ],
+     "Trade": [
+      {
+       "name": "summary",
+       "type": "string"
+      },
+      {
+       "name": "pair",
+       "type": "string"
+      },
+      {
+       "name": "side",
+       "type": "string"
+      },
+      {
+       "name": "notionalE6",
+       "type": "uint256"
+      },
+      {
+       "name": "rateE6",
+       "type": "uint64"
+      },
+      {
+       "name": "premiumBps",
+       "type": "int16"
+      },
+      {
+       "name": "maturity",
+       "type": "uint40"
+      },
+      {
+       "name": "pairC",
+       "type": "bytes32"
+      },
+      {
+       "name": "ownLegId",
+       "type": "bytes32"
+      },
+      {
+       "name": "ownNonce",
+       "type": "uint64"
+      },
+      {
+       "name": "ownSalt",
+       "type": "bytes32"
+      }
+     ]
+    },
+    "primaryType": "Trade",
+    "domain": {
+     "name": "CRX",
+     "version": "rulebook-1.0",
+     "chainId": 43113,
+     "verifyingContract": "0xd757933e2a5600c6f00f83fd282b33aa7cb409c0"
+    },
+    "message": {
+     "summary": "sell 1 000 000 000 000 USD vs BRL at 6.123456 BRL per USD, matures 2100-01-01T00:00:00Z, upfront maker pays 0.25 %",
+     "pair": "USD/BRL",
+     "side": "sell",
+     "notionalE6": "1000000000000000000",
+     "rateE6": "6123456",
+     "premiumBps": "-25",
+     "maturity": "4102444800",
+     "pairC": "0xda894d00387f2638f4dd4c8c02816a77312cc4297688b7f78ec2e91716e6151f",
+     "ownLegId": "0x141414141414141414141414141414141414141414141414000000006ab15ea8",
+     "ownNonce": "1790000002001",
+     "ownSalt": "0x3434343434343434343434343434343434343434343434343434343434343434"
+    }
+   },
+   "struct_hash": "0x3e570fca0a8325a22996065d330696bfb48a777fad7e4c0f110ccb80f657d035",
+   "digest": "0xfd0738a8606b61d1e3d74f77cdbf2afab97b78cbb43c8f844d439f06c1b6776b",
+   "signature": "0xeb96720f2d4f11c4439b5834c51eb4f23284f7e82cd79e2e3d816024c67c49074b2026c6b1916403510d81d797f1d133d99c482c0502e6c0a872bc05f78a25421c"
+  },
+  {
+   "id": "V5",
+   "note": "edge: worst-case summary length (u128::MAX size, u64::MAX rate, i16::MIN premium, last allowed second)",
+   "inputs": {
+    "pair_text": "USD/MXN",
+    "quote_expiry": "1790012000",
+    "rfq_quote_expiry_max": "1790012000",
+    "taker_leg": {
+     "seat": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+     "leg_id": "0x151515151515151515151515151515151515151515151515000000006ab16a60",
+     "pair": "0x69f1670ccd0386df6e79b445190cb08f07e9d85ef8bb6ef820417312ea39752f",
+     "side": "-1",
+     "notional": "340282366920938463463374607431768211455",
+     "rate": "18446744073709551615",
+     "premium_bps": "-32768",
+     "expiry": "253402300799",
+     "nonce": "18446744073709551615"
+    },
+    "taker_salt": "0x3535353535353535353535353535353535353535353535353535353535353535",
+    "maker_leg": {
+     "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "leg_id": "0x595959595959595959595959595959595959595959595959000000006ab16a60",
+     "pair": "0x69f1670ccd0386df6e79b445190cb08f07e9d85ef8bb6ef820417312ea39752f",
+     "side": "1",
+     "notional": "340282366920938463463374607431768211455",
+     "rate": "18446744073709551615",
+     "premium_bps": "-32768",
+     "expiry": "253402300799",
+     "nonce": "6438275382588823897"
+    },
+    "maker_salt": "0x6565656565656565656565656565656565656565656565656565656565656565"
+   },
+   "derived": {
+    "pair_id": "0x69f1670ccd0386df6e79b445190cb08f07e9d85ef8bb6ef820417312ea39752f",
+    "c_taker": "0x5d92fce2643b4d5c5be29fad7e911bf9e86a7f829f25e8de2e8bed6d914e2f93",
+    "c_maker": "0xfb7dbfb63df15eae4c6946d28208a233e3f4e9d532d1ddb1817b01f9f2e3a5eb",
+    "pair_c": "0x9b07a9db696b2b7bff0d50dd4dbae3e227216cbf378a847b1b12e85c245bba7e"
+   },
+   "summary": "sell 340 282 366 920 938 463 463 374 607 431 768.211455 USD vs MXN at 18446744073709.551615 MXN per USD, matures 9999-12-31T23:59:59Z, upfront maker pays 327.68 %",
+   "summary_len": 162,
+   "typed_data": {
+    "types": {
+     "EIP712Domain": [
+      {
+       "name": "name",
+       "type": "string"
+      },
+      {
+       "name": "version",
+       "type": "string"
+      },
+      {
+       "name": "chainId",
+       "type": "uint256"
+      },
+      {
+       "name": "verifyingContract",
+       "type": "address"
+      }
+     ],
+     "Trade": [
+      {
+       "name": "summary",
+       "type": "string"
+      },
+      {
+       "name": "pair",
+       "type": "string"
+      },
+      {
+       "name": "side",
+       "type": "string"
+      },
+      {
+       "name": "notionalE6",
+       "type": "uint256"
+      },
+      {
+       "name": "rateE6",
+       "type": "uint64"
+      },
+      {
+       "name": "premiumBps",
+       "type": "int16"
+      },
+      {
+       "name": "maturity",
+       "type": "uint40"
+      },
+      {
+       "name": "pairC",
+       "type": "bytes32"
+      },
+      {
+       "name": "ownLegId",
+       "type": "bytes32"
+      },
+      {
+       "name": "ownNonce",
+       "type": "uint64"
+      },
+      {
+       "name": "ownSalt",
+       "type": "bytes32"
+      }
+     ]
+    },
+    "primaryType": "Trade",
+    "domain": {
+     "name": "CRX",
+     "version": "rulebook-1.0",
+     "chainId": 43113,
+     "verifyingContract": "0xd757933e2a5600c6f00f83fd282b33aa7cb409c0"
+    },
+    "message": {
+     "summary": "sell 340 282 366 920 938 463 463 374 607 431 768.211455 USD vs MXN at 18446744073709.551615 MXN per USD, matures 9999-12-31T23:59:59Z, upfront maker pays 327.68 %",
+     "pair": "USD/MXN",
+     "side": "sell",
+     "notionalE6": "340282366920938463463374607431768211455",
+     "rateE6": "18446744073709551615",
+     "premiumBps": "-32768",
+     "maturity": "253402300799",
+     "pairC": "0x9b07a9db696b2b7bff0d50dd4dbae3e227216cbf378a847b1b12e85c245bba7e",
+     "ownLegId": "0x151515151515151515151515151515151515151515151515000000006ab16a60",
+     "ownNonce": "18446744073709551615",
+     "ownSalt": "0x3535353535353535353535353535353535353535353535353535353535353535"
+    }
+   },
+   "struct_hash": "0x9998c715eb65845687aac8efc4bbcdef7b9a91f699862dfcb47896095f14f75a",
+   "digest": "0xf6631c090e5d12c799c0df2530ac502510d1c5284b170ec9795f137eb5846b2d",
+   "signature": "0x4d775fca97f8fe7480574e96e3e21f21073c7b380d21d2974c54b808498bec281ef4b46350e6c2889663b9a7aa0ebf7de7e0af67ba963c681f21c2bd51eb76641b"
+  }
+ ],
+ "format_edges": [
+  {
+   "id": "E01",
+   "note": "notional 0 (refused later: DEGENERATE, apply.rs zero-notional check)",
+   "inputs": {
+    "pair_text": "USD/BRL",
+    "quote_expiry": "1790000600",
+    "rfq_quote_expiry_max": "1790000600",
+    "taker_leg": {
+     "seat": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+     "leg_id": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "1",
+     "notional": "0",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "1790000000123"
+    },
+    "taker_salt": "0x3131313131313131313131313131313131313131313131313131313131313131",
+    "maker_leg": {
+     "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "leg_id": "0x555555555555555555555555555555555555555555555555000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "-1",
+     "notional": "0",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "6148914691236517205"
+    },
+    "maker_salt": "0x6161616161616161616161616161616161616161616161616161616161616161"
+   },
+   "derived": {
+    "pair_id": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+    "c_taker": "0xc02de407242edb855e5d0521a55ae74574f27ed87be99e9acceaf8a9d3fae31f",
+    "c_maker": "0x845293f1fc39dd56bc473ba956b85ac8de79481e814d9bb1aebff9caec178270",
+    "pair_c": "0x27e6b8c5cc5833d6a43affc5535fb58b1266e3cc49dec0769e195bed26ba0aa9"
+   },
+   "summary": "buy 0 USD vs BRL at 5.41 BRL per USD, matures 2026-12-31T16:00:00Z, upfront none",
+   "summary_len": 80,
+   "typed_data": {
+    "types": {
+     "EIP712Domain": [
+      {
+       "name": "name",
+       "type": "string"
+      },
+      {
+       "name": "version",
+       "type": "string"
+      },
+      {
+       "name": "chainId",
+       "type": "uint256"
+      },
+      {
+       "name": "verifyingContract",
+       "type": "address"
+      }
+     ],
+     "Trade": [
+      {
+       "name": "summary",
+       "type": "string"
+      },
+      {
+       "name": "pair",
+       "type": "string"
+      },
+      {
+       "name": "side",
+       "type": "string"
+      },
+      {
+       "name": "notionalE6",
+       "type": "uint256"
+      },
+      {
+       "name": "rateE6",
+       "type": "uint64"
+      },
+      {
+       "name": "premiumBps",
+       "type": "int16"
+      },
+      {
+       "name": "maturity",
+       "type": "uint40"
+      },
+      {
+       "name": "pairC",
+       "type": "bytes32"
+      },
+      {
+       "name": "ownLegId",
+       "type": "bytes32"
+      },
+      {
+       "name": "ownNonce",
+       "type": "uint64"
+      },
+      {
+       "name": "ownSalt",
+       "type": "bytes32"
+      }
+     ]
+    },
+    "primaryType": "Trade",
+    "domain": {
+     "name": "CRX",
+     "version": "rulebook-1.0",
+     "chainId": 43113,
+     "verifyingContract": "0xd757933e2a5600c6f00f83fd282b33aa7cb409c0"
+    },
+    "message": {
+     "summary": "buy 0 USD vs BRL at 5.41 BRL per USD, matures 2026-12-31T16:00:00Z, upfront none",
+     "pair": "USD/BRL",
+     "side": "buy",
+     "notionalE6": "0",
+     "rateE6": "5410000",
+     "premiumBps": "0",
+     "maturity": "1798732800",
+     "pairC": "0x27e6b8c5cc5833d6a43affc5535fb58b1266e3cc49dec0769e195bed26ba0aa9",
+     "ownLegId": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+     "ownNonce": "1790000000123",
+     "ownSalt": "0x3131313131313131313131313131313131313131313131313131313131313131"
+    }
+   },
+   "struct_hash": "0x00eb44abe2542c1e63faa9c7955056726c97e6a06ae489948fd548f6f7e54a7c",
+   "digest": "0x116a1e61161808f0d160f1ad7129f3a65f8dcc134acb096d6942e6007df02810",
+   "signature": "0x0444bf59880afdae558418aea8af642abeb5396636e5c3c16866a19c969dfd192bd5c4faaafafe42104c1ddd9014f7f66a85d08b00bd7c161ea5d005c2a2cc3e1c",
+   "base": "V1",
+   "set": {
+    "notional": "0"
+   }
+  },
+  {
+   "id": "E02",
+   "note": "notional u128::MAX",
+   "inputs": {
+    "pair_text": "USD/BRL",
+    "quote_expiry": "1790000600",
+    "rfq_quote_expiry_max": "1790000600",
+    "taker_leg": {
+     "seat": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+     "leg_id": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "1",
+     "notional": "340282366920938463463374607431768211455",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "1790000000123"
+    },
+    "taker_salt": "0x3131313131313131313131313131313131313131313131313131313131313131",
+    "maker_leg": {
+     "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "leg_id": "0x555555555555555555555555555555555555555555555555000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "-1",
+     "notional": "340282366920938463463374607431768211455",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "6148914691236517205"
+    },
+    "maker_salt": "0x6161616161616161616161616161616161616161616161616161616161616161"
+   },
+   "derived": {
+    "pair_id": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+    "c_taker": "0xbc61f26b13fdb2cc1b424201edd765f9ae8a86733c61433a21e7382eff69eb80",
+    "c_maker": "0x3dc2d166526e4349ffa5d3c40167d4d76d7a062d902b77222854b2cc81537e9c",
+    "pair_c": "0x3863f65a1035499d383c4a6a2cc0144472688eebd33ff1e6798b045400001e9c"
+   },
+   "summary": "buy 340 282 366 920 938 463 463 374 607 431 768.211455 USD vs BRL at 5.41 BRL per USD, matures 2026-12-31T16:00:00Z, upfront none",
+   "summary_len": 129,
+   "typed_data": {
+    "types": {
+     "EIP712Domain": [
+      {
+       "name": "name",
+       "type": "string"
+      },
+      {
+       "name": "version",
+       "type": "string"
+      },
+      {
+       "name": "chainId",
+       "type": "uint256"
+      },
+      {
+       "name": "verifyingContract",
+       "type": "address"
+      }
+     ],
+     "Trade": [
+      {
+       "name": "summary",
+       "type": "string"
+      },
+      {
+       "name": "pair",
+       "type": "string"
+      },
+      {
+       "name": "side",
+       "type": "string"
+      },
+      {
+       "name": "notionalE6",
+       "type": "uint256"
+      },
+      {
+       "name": "rateE6",
+       "type": "uint64"
+      },
+      {
+       "name": "premiumBps",
+       "type": "int16"
+      },
+      {
+       "name": "maturity",
+       "type": "uint40"
+      },
+      {
+       "name": "pairC",
+       "type": "bytes32"
+      },
+      {
+       "name": "ownLegId",
+       "type": "bytes32"
+      },
+      {
+       "name": "ownNonce",
+       "type": "uint64"
+      },
+      {
+       "name": "ownSalt",
+       "type": "bytes32"
+      }
+     ]
+    },
+    "primaryType": "Trade",
+    "domain": {
+     "name": "CRX",
+     "version": "rulebook-1.0",
+     "chainId": 43113,
+     "verifyingContract": "0xd757933e2a5600c6f00f83fd282b33aa7cb409c0"
+    },
+    "message": {
+     "summary": "buy 340 282 366 920 938 463 463 374 607 431 768.211455 USD vs BRL at 5.41 BRL per USD, matures 2026-12-31T16:00:00Z, upfront none",
+     "pair": "USD/BRL",
+     "side": "buy",
+     "notionalE6": "340282366920938463463374607431768211455",
+     "rateE6": "5410000",
+     "premiumBps": "0",
+     "maturity": "1798732800",
+     "pairC": "0x3863f65a1035499d383c4a6a2cc0144472688eebd33ff1e6798b045400001e9c",
+     "ownLegId": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+     "ownNonce": "1790000000123",
+     "ownSalt": "0x3131313131313131313131313131313131313131313131313131313131313131"
+    }
+   },
+   "struct_hash": "0x8bbb5f5320f4ed1202e62465ce98df3521f20b8082b627995280d0334ae6f148",
+   "digest": "0xa623de8faa3084bfb1957c8761358b524870204acf2726c76901e49cd8f1a924",
+   "signature": "0xf1ff163dd06fa7a5e4c3fb959ee70c4d743fafe75b154bf0f4276240ddc80aa9671cd4cd0469c8bdb8f49cacb60c6d5efa2e8bc9226559e84965b30959e7a3ca1c",
+   "base": "V1",
+   "set": {
+    "notional": "340282366920938463463374607431768211455"
+   }
+  },
+  {
+   "id": "E03",
+   "note": "notional 0.999999: no integer digits",
+   "inputs": {
+    "pair_text": "USD/BRL",
+    "quote_expiry": "1790000600",
+    "rfq_quote_expiry_max": "1790000600",
+    "taker_leg": {
+     "seat": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+     "leg_id": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "1",
+     "notional": "999999",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "1790000000123"
+    },
+    "taker_salt": "0x3131313131313131313131313131313131313131313131313131313131313131",
+    "maker_leg": {
+     "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "leg_id": "0x555555555555555555555555555555555555555555555555000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "-1",
+     "notional": "999999",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "6148914691236517205"
+    },
+    "maker_salt": "0x6161616161616161616161616161616161616161616161616161616161616161"
+   },
+   "derived": {
+    "pair_id": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+    "c_taker": "0xf4868cafa87a2f6cc545fd3af2af2c327aa0a96bd5838992103b0a063f79e94c",
+    "c_maker": "0x68768de6845535132cc8a2d0379b3cb9fb8f164f54eaaeb62514cc5eea665557",
+    "pair_c": "0x4149f946595cf033fb716791f18998afd5da19c4c9eab762d301db34bc3d8c66"
+   },
+   "summary": "buy 0.999999 USD vs BRL at 5.41 BRL per USD, matures 2026-12-31T16:00:00Z, upfront none",
+   "summary_len": 87,
+   "typed_data": {
+    "types": {
+     "EIP712Domain": [
+      {
+       "name": "name",
+       "type": "string"
+      },
+      {
+       "name": "version",
+       "type": "string"
+      },
+      {
+       "name": "chainId",
+       "type": "uint256"
+      },
+      {
+       "name": "verifyingContract",
+       "type": "address"
+      }
+     ],
+     "Trade": [
+      {
+       "name": "summary",
+       "type": "string"
+      },
+      {
+       "name": "pair",
+       "type": "string"
+      },
+      {
+       "name": "side",
+       "type": "string"
+      },
+      {
+       "name": "notionalE6",
+       "type": "uint256"
+      },
+      {
+       "name": "rateE6",
+       "type": "uint64"
+      },
+      {
+       "name": "premiumBps",
+       "type": "int16"
+      },
+      {
+       "name": "maturity",
+       "type": "uint40"
+      },
+      {
+       "name": "pairC",
+       "type": "bytes32"
+      },
+      {
+       "name": "ownLegId",
+       "type": "bytes32"
+      },
+      {
+       "name": "ownNonce",
+       "type": "uint64"
+      },
+      {
+       "name": "ownSalt",
+       "type": "bytes32"
+      }
+     ]
+    },
+    "primaryType": "Trade",
+    "domain": {
+     "name": "CRX",
+     "version": "rulebook-1.0",
+     "chainId": 43113,
+     "verifyingContract": "0xd757933e2a5600c6f00f83fd282b33aa7cb409c0"
+    },
+    "message": {
+     "summary": "buy 0.999999 USD vs BRL at 5.41 BRL per USD, matures 2026-12-31T16:00:00Z, upfront none",
+     "pair": "USD/BRL",
+     "side": "buy",
+     "notionalE6": "999999",
+     "rateE6": "5410000",
+     "premiumBps": "0",
+     "maturity": "1798732800",
+     "pairC": "0x4149f946595cf033fb716791f18998afd5da19c4c9eab762d301db34bc3d8c66",
+     "ownLegId": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+     "ownNonce": "1790000000123",
+     "ownSalt": "0x3131313131313131313131313131313131313131313131313131313131313131"
+    }
+   },
+   "struct_hash": "0x7662831e056638e82bc59c347ccbdae59730c4c5284cd54b3f49cc1e04c6f520",
+   "digest": "0x88d524b0bed262f81eb992b1ed9177a71cb2373d3f00ecf021bc372c29c73c1d",
+   "signature": "0x4b916c402f0ee64c66892bdae77d3e6e59e9ee9f2b9ff46ca73ed75d606994c428be90044dcaa3ea75c6442c0686143dd0c37dfdf2cc2adec916bbeb88d7be591b",
+   "base": "V1",
+   "set": {
+    "notional": "999999"
+   }
+  },
+  {
+   "id": "E04",
+   "note": "notional 999.999999: no group",
+   "inputs": {
+    "pair_text": "USD/BRL",
+    "quote_expiry": "1790000600",
+    "rfq_quote_expiry_max": "1790000600",
+    "taker_leg": {
+     "seat": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+     "leg_id": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "1",
+     "notional": "999999999",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "1790000000123"
+    },
+    "taker_salt": "0x3131313131313131313131313131313131313131313131313131313131313131",
+    "maker_leg": {
+     "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "leg_id": "0x555555555555555555555555555555555555555555555555000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "-1",
+     "notional": "999999999",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "6148914691236517205"
+    },
+    "maker_salt": "0x6161616161616161616161616161616161616161616161616161616161616161"
+   },
+   "derived": {
+    "pair_id": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+    "c_taker": "0xe07aa1ef46f3cc97c8c1bc43bff1b3b99e8706bc563ebe6557c4baab1288c46c",
+    "c_maker": "0xbbda649c27ec72243edb04cb81c71dce9e7f7859da14d73d1f92acfe29c5e0ca",
+    "pair_c": "0x897f10cddf7a192a8ec3693dc438426169186dccc10adcdd53b6a4f37f84e98c"
+   },
+   "summary": "buy 999.999999 USD vs BRL at 5.41 BRL per USD, matures 2026-12-31T16:00:00Z, upfront none",
+   "summary_len": 89,
+   "typed_data": {
+    "types": {
+     "EIP712Domain": [
+      {
+       "name": "name",
+       "type": "string"
+      },
+      {
+       "name": "version",
+       "type": "string"
+      },
+      {
+       "name": "chainId",
+       "type": "uint256"
+      },
+      {
+       "name": "verifyingContract",
+       "type": "address"
+      }
+     ],
+     "Trade": [
+      {
+       "name": "summary",
+       "type": "string"
+      },
+      {
+       "name": "pair",
+       "type": "string"
+      },
+      {
+       "name": "side",
+       "type": "string"
+      },
+      {
+       "name": "notionalE6",
+       "type": "uint256"
+      },
+      {
+       "name": "rateE6",
+       "type": "uint64"
+      },
+      {
+       "name": "premiumBps",
+       "type": "int16"
+      },
+      {
+       "name": "maturity",
+       "type": "uint40"
+      },
+      {
+       "name": "pairC",
+       "type": "bytes32"
+      },
+      {
+       "name": "ownLegId",
+       "type": "bytes32"
+      },
+      {
+       "name": "ownNonce",
+       "type": "uint64"
+      },
+      {
+       "name": "ownSalt",
+       "type": "bytes32"
+      }
+     ]
+    },
+    "primaryType": "Trade",
+    "domain": {
+     "name": "CRX",
+     "version": "rulebook-1.0",
+     "chainId": 43113,
+     "verifyingContract": "0xd757933e2a5600c6f00f83fd282b33aa7cb409c0"
+    },
+    "message": {
+     "summary": "buy 999.999999 USD vs BRL at 5.41 BRL per USD, matures 2026-12-31T16:00:00Z, upfront none",
+     "pair": "USD/BRL",
+     "side": "buy",
+     "notionalE6": "999999999",
+     "rateE6": "5410000",
+     "premiumBps": "0",
+     "maturity": "1798732800",
+     "pairC": "0x897f10cddf7a192a8ec3693dc438426169186dccc10adcdd53b6a4f37f84e98c",
+     "ownLegId": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+     "ownNonce": "1790000000123",
+     "ownSalt": "0x3131313131313131313131313131313131313131313131313131313131313131"
+    }
+   },
+   "struct_hash": "0x5f2fe5d22d84d2d62b318260c985441287d88de796a52fe982d8dca13bdde1a2",
+   "digest": "0xace894b7d017b0d19100b6a32392e589587f2291a313bf5599a3e334a3a8b916",
+   "signature": "0x8ee656a67e855b5be6feed13933057e51667747ebc6a52d7b5e339a574ff1edf6b36f41b35346e3dc588e345efbaf2679a0bfa900dba91da97fd3262bdb8b2321c",
+   "base": "V1",
+   "set": {
+    "notional": "999999999"
+   }
+  },
+  {
+   "id": "E05",
+   "note": "notional 1 000: first group",
+   "inputs": {
+    "pair_text": "USD/BRL",
+    "quote_expiry": "1790000600",
+    "rfq_quote_expiry_max": "1790000600",
+    "taker_leg": {
+     "seat": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+     "leg_id": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "1",
+     "notional": "1000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "1790000000123"
+    },
+    "taker_salt": "0x3131313131313131313131313131313131313131313131313131313131313131",
+    "maker_leg": {
+     "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "leg_id": "0x555555555555555555555555555555555555555555555555000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "-1",
+     "notional": "1000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "6148914691236517205"
+    },
+    "maker_salt": "0x6161616161616161616161616161616161616161616161616161616161616161"
+   },
+   "derived": {
+    "pair_id": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+    "c_taker": "0x0cd1d3bf085cd1be959befa1cabf91011f0414bd26d5b59cd077c30dd91d5e8d",
+    "c_maker": "0xb9aebc33ebd0d84e69760856f19dc80561eb93376ad90992f04470e36eaa703b",
+    "pair_c": "0xbe33b3b0eac1ba1a33c991805ae7756deb527655ee6e62ec43a5051ff23f9bd6"
+   },
+   "summary": "buy 1 000 USD vs BRL at 5.41 BRL per USD, matures 2026-12-31T16:00:00Z, upfront none",
+   "summary_len": 84,
+   "typed_data": {
+    "types": {
+     "EIP712Domain": [
+      {
+       "name": "name",
+       "type": "string"
+      },
+      {
+       "name": "version",
+       "type": "string"
+      },
+      {
+       "name": "chainId",
+       "type": "uint256"
+      },
+      {
+       "name": "verifyingContract",
+       "type": "address"
+      }
+     ],
+     "Trade": [
+      {
+       "name": "summary",
+       "type": "string"
+      },
+      {
+       "name": "pair",
+       "type": "string"
+      },
+      {
+       "name": "side",
+       "type": "string"
+      },
+      {
+       "name": "notionalE6",
+       "type": "uint256"
+      },
+      {
+       "name": "rateE6",
+       "type": "uint64"
+      },
+      {
+       "name": "premiumBps",
+       "type": "int16"
+      },
+      {
+       "name": "maturity",
+       "type": "uint40"
+      },
+      {
+       "name": "pairC",
+       "type": "bytes32"
+      },
+      {
+       "name": "ownLegId",
+       "type": "bytes32"
+      },
+      {
+       "name": "ownNonce",
+       "type": "uint64"
+      },
+      {
+       "name": "ownSalt",
+       "type": "bytes32"
+      }
+     ]
+    },
+    "primaryType": "Trade",
+    "domain": {
+     "name": "CRX",
+     "version": "rulebook-1.0",
+     "chainId": 43113,
+     "verifyingContract": "0xd757933e2a5600c6f00f83fd282b33aa7cb409c0"
+    },
+    "message": {
+     "summary": "buy 1 000 USD vs BRL at 5.41 BRL per USD, matures 2026-12-31T16:00:00Z, upfront none",
+     "pair": "USD/BRL",
+     "side": "buy",
+     "notionalE6": "1000000000",
+     "rateE6": "5410000",
+     "premiumBps": "0",
+     "maturity": "1798732800",
+     "pairC": "0xbe33b3b0eac1ba1a33c991805ae7756deb527655ee6e62ec43a5051ff23f9bd6",
+     "ownLegId": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+     "ownNonce": "1790000000123",
+     "ownSalt": "0x3131313131313131313131313131313131313131313131313131313131313131"
+    }
+   },
+   "struct_hash": "0x4c1e6ac907c128ad8eab4b187bd00af0d677d95310005fae412791d1ec5deae7",
+   "digest": "0x330f246b3b1fcacf2d59cfee36f860b2739fb091109e006bfeb5cfeec7d70838",
+   "signature": "0xf212f9ae6360a7bc90425d8d873a5b9c23902085f72c620e14a22e648e9f3f61520e71a468fc19f46242e36888204bf4fc07e698723afe92e359ece654ebd3e11c",
+   "base": "V1",
+   "set": {
+    "notional": "1000000000"
+   }
+  },
+  {
+   "id": "E06",
+   "note": "rate 0",
+   "inputs": {
+    "pair_text": "USD/BRL",
+    "quote_expiry": "1790000600",
+    "rfq_quote_expiry_max": "1790000600",
+    "taker_leg": {
+     "seat": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+     "leg_id": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "1",
+     "notional": "5000000000000",
+     "rate": "0",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "1790000000123"
+    },
+    "taker_salt": "0x3131313131313131313131313131313131313131313131313131313131313131",
+    "maker_leg": {
+     "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "leg_id": "0x555555555555555555555555555555555555555555555555000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "-1",
+     "notional": "5000000000000",
+     "rate": "0",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "6148914691236517205"
+    },
+    "maker_salt": "0x6161616161616161616161616161616161616161616161616161616161616161"
+   },
+   "derived": {
+    "pair_id": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+    "c_taker": "0xdf76897f99d9b03dc683000ba7b6afbb38ae15ef47b7038f3a8892cf89d96a63",
+    "c_maker": "0x54330f571c697f0c6c8dc4cdb8037285a0cefb1ad3b3bd43b453d67c7dd4726a",
+    "pair_c": "0x3a1b727a2c7def0630f44eb4b9e779d0c9a1aeb8a9a561d1bbe531454666d470"
+   },
+   "summary": "buy 5 000 000 USD vs BRL at 0 BRL per USD, matures 2026-12-31T16:00:00Z, upfront none",
+   "summary_len": 85,
+   "typed_data": {
+    "types": {
+     "EIP712Domain": [
+      {
+       "name": "name",
+       "type": "string"
+      },
+      {
+       "name": "version",
+       "type": "string"
+      },
+      {
+       "name": "chainId",
+       "type": "uint256"
+      },
+      {
+       "name": "verifyingContract",
+       "type": "address"
+      }
+     ],
+     "Trade": [
+      {
+       "name": "summary",
+       "type": "string"
+      },
+      {
+       "name": "pair",
+       "type": "string"
+      },
+      {
+       "name": "side",
+       "type": "string"
+      },
+      {
+       "name": "notionalE6",
+       "type": "uint256"
+      },
+      {
+       "name": "rateE6",
+       "type": "uint64"
+      },
+      {
+       "name": "premiumBps",
+       "type": "int16"
+      },
+      {
+       "name": "maturity",
+       "type": "uint40"
+      },
+      {
+       "name": "pairC",
+       "type": "bytes32"
+      },
+      {
+       "name": "ownLegId",
+       "type": "bytes32"
+      },
+      {
+       "name": "ownNonce",
+       "type": "uint64"
+      },
+      {
+       "name": "ownSalt",
+       "type": "bytes32"
+      }
+     ]
+    },
+    "primaryType": "Trade",
+    "domain": {
+     "name": "CRX",
+     "version": "rulebook-1.0",
+     "chainId": 43113,
+     "verifyingContract": "0xd757933e2a5600c6f00f83fd282b33aa7cb409c0"
+    },
+    "message": {
+     "summary": "buy 5 000 000 USD vs BRL at 0 BRL per USD, matures 2026-12-31T16:00:00Z, upfront none",
+     "pair": "USD/BRL",
+     "side": "buy",
+     "notionalE6": "5000000000000",
+     "rateE6": "0",
+     "premiumBps": "0",
+     "maturity": "1798732800",
+     "pairC": "0x3a1b727a2c7def0630f44eb4b9e779d0c9a1aeb8a9a561d1bbe531454666d470",
+     "ownLegId": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+     "ownNonce": "1790000000123",
+     "ownSalt": "0x3131313131313131313131313131313131313131313131313131313131313131"
+    }
+   },
+   "struct_hash": "0x8ecd2fb3a6736b7bb6c40031636e3ab449bfebc23d6cd43568f49d027727d9e5",
+   "digest": "0x63d3f3084afc96542136bfdd8738dc86bd750265183daa29af6cfa3645c96efb",
+   "signature": "0x3ee54fd5169b87c49bd7b5ccbc3ddf72733d9f6f109a5a7a5a72a17e97f5c94c6bfdac848da65661bc7a632a3d0aeb73ad0d09a25be0411cb5b17ecf224da8ae1c",
+   "base": "V1",
+   "set": {
+    "rate": "0"
+   }
+  },
+  {
+   "id": "E07",
+   "note": "rate 1 (0.000001)",
+   "inputs": {
+    "pair_text": "USD/BRL",
+    "quote_expiry": "1790000600",
+    "rfq_quote_expiry_max": "1790000600",
+    "taker_leg": {
+     "seat": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+     "leg_id": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "1",
+     "notional": "5000000000000",
+     "rate": "1",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "1790000000123"
+    },
+    "taker_salt": "0x3131313131313131313131313131313131313131313131313131313131313131",
+    "maker_leg": {
+     "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "leg_id": "0x555555555555555555555555555555555555555555555555000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "-1",
+     "notional": "5000000000000",
+     "rate": "1",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "6148914691236517205"
+    },
+    "maker_salt": "0x6161616161616161616161616161616161616161616161616161616161616161"
+   },
+   "derived": {
+    "pair_id": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+    "c_taker": "0xe15a9717f2c92f039ab340e018f830315d8855d6e4fd329e522091314ff86349",
+    "c_maker": "0x8766d2bf0f3599b709d5979763aa50d25f9f1ee13f1b110aa5bca3b50cf5f86f",
+    "pair_c": "0x15155e54fd5aa11f911642aff423e72496afa11554edc0dec3eea6d4b4b39026"
+   },
+   "summary": "buy 5 000 000 USD vs BRL at 0.000001 BRL per USD, matures 2026-12-31T16:00:00Z, upfront none",
+   "summary_len": 92,
+   "typed_data": {
+    "types": {
+     "EIP712Domain": [
+      {
+       "name": "name",
+       "type": "string"
+      },
+      {
+       "name": "version",
+       "type": "string"
+      },
+      {
+       "name": "chainId",
+       "type": "uint256"
+      },
+      {
+       "name": "verifyingContract",
+       "type": "address"
+      }
+     ],
+     "Trade": [
+      {
+       "name": "summary",
+       "type": "string"
+      },
+      {
+       "name": "pair",
+       "type": "string"
+      },
+      {
+       "name": "side",
+       "type": "string"
+      },
+      {
+       "name": "notionalE6",
+       "type": "uint256"
+      },
+      {
+       "name": "rateE6",
+       "type": "uint64"
+      },
+      {
+       "name": "premiumBps",
+       "type": "int16"
+      },
+      {
+       "name": "maturity",
+       "type": "uint40"
+      },
+      {
+       "name": "pairC",
+       "type": "bytes32"
+      },
+      {
+       "name": "ownLegId",
+       "type": "bytes32"
+      },
+      {
+       "name": "ownNonce",
+       "type": "uint64"
+      },
+      {
+       "name": "ownSalt",
+       "type": "bytes32"
+      }
+     ]
+    },
+    "primaryType": "Trade",
+    "domain": {
+     "name": "CRX",
+     "version": "rulebook-1.0",
+     "chainId": 43113,
+     "verifyingContract": "0xd757933e2a5600c6f00f83fd282b33aa7cb409c0"
+    },
+    "message": {
+     "summary": "buy 5 000 000 USD vs BRL at 0.000001 BRL per USD, matures 2026-12-31T16:00:00Z, upfront none",
+     "pair": "USD/BRL",
+     "side": "buy",
+     "notionalE6": "5000000000000",
+     "rateE6": "1",
+     "premiumBps": "0",
+     "maturity": "1798732800",
+     "pairC": "0x15155e54fd5aa11f911642aff423e72496afa11554edc0dec3eea6d4b4b39026",
+     "ownLegId": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+     "ownNonce": "1790000000123",
+     "ownSalt": "0x3131313131313131313131313131313131313131313131313131313131313131"
+    }
+   },
+   "struct_hash": "0x4faf32732ba0e15422351a154fc3d0eb45240490314816975ffa2f8cf4718c53",
+   "digest": "0x5ed6644cac9d996d69cbcd4160a9b00baa093da164879fe13a9d3860fa464e7a",
+   "signature": "0x14bf887695d6f60bbc3044c6e713302478614609dadd51ec1b9a17972ff4f02d06a331c2173137302b2aa5be9e027065dd180032b4add6e7046818f3f21b53bf1c",
+   "base": "V1",
+   "set": {
+    "rate": "1"
+   }
+  },
+  {
+   "id": "E08",
+   "note": "rate u64::MAX",
+   "inputs": {
+    "pair_text": "USD/BRL",
+    "quote_expiry": "1790000600",
+    "rfq_quote_expiry_max": "1790000600",
+    "taker_leg": {
+     "seat": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+     "leg_id": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "1",
+     "notional": "5000000000000",
+     "rate": "18446744073709551615",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "1790000000123"
+    },
+    "taker_salt": "0x3131313131313131313131313131313131313131313131313131313131313131",
+    "maker_leg": {
+     "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "leg_id": "0x555555555555555555555555555555555555555555555555000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "-1",
+     "notional": "5000000000000",
+     "rate": "18446744073709551615",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "6148914691236517205"
+    },
+    "maker_salt": "0x6161616161616161616161616161616161616161616161616161616161616161"
+   },
+   "derived": {
+    "pair_id": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+    "c_taker": "0x79c80ce6e5b05f4dea173a4045137aa0e7d5fd53475edb897b6b3e6c23e362c0",
+    "c_maker": "0xd5951fd3a0b49b1426db3d27381aac9b8e661d80fe0f0c740f0b349f8fa7dde8",
+    "pair_c": "0xba7da99539249841f3c169e8a586dca07d18f214a3d878c294f9d6e477b9204d"
+   },
+   "summary": "buy 5 000 000 USD vs BRL at 18446744073709.551615 BRL per USD, matures 2026-12-31T16:00:00Z, upfront none",
+   "summary_len": 105,
+   "typed_data": {
+    "types": {
+     "EIP712Domain": [
+      {
+       "name": "name",
+       "type": "string"
+      },
+      {
+       "name": "version",
+       "type": "string"
+      },
+      {
+       "name": "chainId",
+       "type": "uint256"
+      },
+      {
+       "name": "verifyingContract",
+       "type": "address"
+      }
+     ],
+     "Trade": [
+      {
+       "name": "summary",
+       "type": "string"
+      },
+      {
+       "name": "pair",
+       "type": "string"
+      },
+      {
+       "name": "side",
+       "type": "string"
+      },
+      {
+       "name": "notionalE6",
+       "type": "uint256"
+      },
+      {
+       "name": "rateE6",
+       "type": "uint64"
+      },
+      {
+       "name": "premiumBps",
+       "type": "int16"
+      },
+      {
+       "name": "maturity",
+       "type": "uint40"
+      },
+      {
+       "name": "pairC",
+       "type": "bytes32"
+      },
+      {
+       "name": "ownLegId",
+       "type": "bytes32"
+      },
+      {
+       "name": "ownNonce",
+       "type": "uint64"
+      },
+      {
+       "name": "ownSalt",
+       "type": "bytes32"
+      }
+     ]
+    },
+    "primaryType": "Trade",
+    "domain": {
+     "name": "CRX",
+     "version": "rulebook-1.0",
+     "chainId": 43113,
+     "verifyingContract": "0xd757933e2a5600c6f00f83fd282b33aa7cb409c0"
+    },
+    "message": {
+     "summary": "buy 5 000 000 USD vs BRL at 18446744073709.551615 BRL per USD, matures 2026-12-31T16:00:00Z, upfront none",
+     "pair": "USD/BRL",
+     "side": "buy",
+     "notionalE6": "5000000000000",
+     "rateE6": "18446744073709551615",
+     "premiumBps": "0",
+     "maturity": "1798732800",
+     "pairC": "0xba7da99539249841f3c169e8a586dca07d18f214a3d878c294f9d6e477b9204d",
+     "ownLegId": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+     "ownNonce": "1790000000123",
+     "ownSalt": "0x3131313131313131313131313131313131313131313131313131313131313131"
+    }
+   },
+   "struct_hash": "0x35f3adfeddc5575318ecd235053e6bf4e70ed5195d53646e46b3b808cdf48d10",
+   "digest": "0xb0709cb4a79efcf22e98e80ee4c52298d4d9ec5eb05e12089b86b92e58ed6eb5",
+   "signature": "0x17f4c6497a544d913985e0ca32dd6c625720063c3272bf48ad6d2baa12a9ab9578e2bd0e06c7995a9f7ce2672d6db1d1415627a7005a4e7d219802c887f638ee1c",
+   "base": "V1",
+   "set": {
+    "rate": "18446744073709551615"
+   }
+  },
+  {
+   "id": "E09",
+   "note": "premium i16::MIN, unsigned_abs",
+   "inputs": {
+    "pair_text": "USD/BRL",
+    "quote_expiry": "1790000600",
+    "rfq_quote_expiry_max": "1790000600",
+    "taker_leg": {
+     "seat": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+     "leg_id": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "-32768",
+     "expiry": "1798732800",
+     "nonce": "1790000000123"
+    },
+    "taker_salt": "0x3131313131313131313131313131313131313131313131313131313131313131",
+    "maker_leg": {
+     "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "leg_id": "0x555555555555555555555555555555555555555555555555000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "-1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "-32768",
+     "expiry": "1798732800",
+     "nonce": "6148914691236517205"
+    },
+    "maker_salt": "0x6161616161616161616161616161616161616161616161616161616161616161"
+   },
+   "derived": {
+    "pair_id": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+    "c_taker": "0x95c1c9f385cf13bcdebe47788e94cf998d161488ce45a4c81eeccba43c13d503",
+    "c_maker": "0xaaca66fbb961fa2b6d12a686c89f2188bc441ea8a2f54fd7cd4f1160947cf5b6",
+    "pair_c": "0xabb22713f0d68fb908066f0b95be3f3943241a84c3d33b2afca52d03c91a3ba0"
+   },
+   "summary": "buy 5 000 000 USD vs BRL at 5.41 BRL per USD, matures 2026-12-31T16:00:00Z, upfront maker pays 327.68 %",
+   "summary_len": 103,
+   "typed_data": {
+    "types": {
+     "EIP712Domain": [
+      {
+       "name": "name",
+       "type": "string"
+      },
+      {
+       "name": "version",
+       "type": "string"
+      },
+      {
+       "name": "chainId",
+       "type": "uint256"
+      },
+      {
+       "name": "verifyingContract",
+       "type": "address"
+      }
+     ],
+     "Trade": [
+      {
+       "name": "summary",
+       "type": "string"
+      },
+      {
+       "name": "pair",
+       "type": "string"
+      },
+      {
+       "name": "side",
+       "type": "string"
+      },
+      {
+       "name": "notionalE6",
+       "type": "uint256"
+      },
+      {
+       "name": "rateE6",
+       "type": "uint64"
+      },
+      {
+       "name": "premiumBps",
+       "type": "int16"
+      },
+      {
+       "name": "maturity",
+       "type": "uint40"
+      },
+      {
+       "name": "pairC",
+       "type": "bytes32"
+      },
+      {
+       "name": "ownLegId",
+       "type": "bytes32"
+      },
+      {
+       "name": "ownNonce",
+       "type": "uint64"
+      },
+      {
+       "name": "ownSalt",
+       "type": "bytes32"
+      }
+     ]
+    },
+    "primaryType": "Trade",
+    "domain": {
+     "name": "CRX",
+     "version": "rulebook-1.0",
+     "chainId": 43113,
+     "verifyingContract": "0xd757933e2a5600c6f00f83fd282b33aa7cb409c0"
+    },
+    "message": {
+     "summary": "buy 5 000 000 USD vs BRL at 5.41 BRL per USD, matures 2026-12-31T16:00:00Z, upfront maker pays 327.68 %",
+     "pair": "USD/BRL",
+     "side": "buy",
+     "notionalE6": "5000000000000",
+     "rateE6": "5410000",
+     "premiumBps": "-32768",
+     "maturity": "1798732800",
+     "pairC": "0xabb22713f0d68fb908066f0b95be3f3943241a84c3d33b2afca52d03c91a3ba0",
+     "ownLegId": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+     "ownNonce": "1790000000123",
+     "ownSalt": "0x3131313131313131313131313131313131313131313131313131313131313131"
+    }
+   },
+   "struct_hash": "0x5cc600e65ca1540642de3b3a5c1209b02ea78dceb412f01b8c39291d88e7fa09",
+   "digest": "0x06acac69a85641a3592367f02d884c5cb610e85e2f18142221d5cd74dc483a19",
+   "signature": "0x0a377124305c796037e94ec76c6a6008231b4e4a4a30487b5cb2693f2898decf442738e3986470fc2bd537a1cbb03d5961255d450195a0371b7a0a6fba5134a41c",
+   "base": "V1",
+   "set": {
+    "premium_bps": "-32768"
+   }
+  },
+  {
+   "id": "E10",
+   "note": "premium i16::MAX",
+   "inputs": {
+    "pair_text": "USD/BRL",
+    "quote_expiry": "1790000600",
+    "rfq_quote_expiry_max": "1790000600",
+    "taker_leg": {
+     "seat": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+     "leg_id": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "32767",
+     "expiry": "1798732800",
+     "nonce": "1790000000123"
+    },
+    "taker_salt": "0x3131313131313131313131313131313131313131313131313131313131313131",
+    "maker_leg": {
+     "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "leg_id": "0x555555555555555555555555555555555555555555555555000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "-1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "32767",
+     "expiry": "1798732800",
+     "nonce": "6148914691236517205"
+    },
+    "maker_salt": "0x6161616161616161616161616161616161616161616161616161616161616161"
+   },
+   "derived": {
+    "pair_id": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+    "c_taker": "0x381a7c61503247fd0fcb7fd1375a0b1831d08ac5498417e016b9b8d7f2dfe07c",
+    "c_maker": "0xcc87a773b0c125ea84bf00e0e46e79dab2af14cbd14eaab3d051869e827270a0",
+    "pair_c": "0x11e285a153fc463ad16cb7ac03585757d2c7a78f9e4c3e241611d9a9ed5392ea"
+   },
+   "summary": "buy 5 000 000 USD vs BRL at 5.41 BRL per USD, matures 2026-12-31T16:00:00Z, upfront taker pays 327.67 %",
+   "summary_len": 103,
+   "typed_data": {
+    "types": {
+     "EIP712Domain": [
+      {
+       "name": "name",
+       "type": "string"
+      },
+      {
+       "name": "version",
+       "type": "string"
+      },
+      {
+       "name": "chainId",
+       "type": "uint256"
+      },
+      {
+       "name": "verifyingContract",
+       "type": "address"
+      }
+     ],
+     "Trade": [
+      {
+       "name": "summary",
+       "type": "string"
+      },
+      {
+       "name": "pair",
+       "type": "string"
+      },
+      {
+       "name": "side",
+       "type": "string"
+      },
+      {
+       "name": "notionalE6",
+       "type": "uint256"
+      },
+      {
+       "name": "rateE6",
+       "type": "uint64"
+      },
+      {
+       "name": "premiumBps",
+       "type": "int16"
+      },
+      {
+       "name": "maturity",
+       "type": "uint40"
+      },
+      {
+       "name": "pairC",
+       "type": "bytes32"
+      },
+      {
+       "name": "ownLegId",
+       "type": "bytes32"
+      },
+      {
+       "name": "ownNonce",
+       "type": "uint64"
+      },
+      {
+       "name": "ownSalt",
+       "type": "bytes32"
+      }
+     ]
+    },
+    "primaryType": "Trade",
+    "domain": {
+     "name": "CRX",
+     "version": "rulebook-1.0",
+     "chainId": 43113,
+     "verifyingContract": "0xd757933e2a5600c6f00f83fd282b33aa7cb409c0"
+    },
+    "message": {
+     "summary": "buy 5 000 000 USD vs BRL at 5.41 BRL per USD, matures 2026-12-31T16:00:00Z, upfront taker pays 327.67 %",
+     "pair": "USD/BRL",
+     "side": "buy",
+     "notionalE6": "5000000000000",
+     "rateE6": "5410000",
+     "premiumBps": "32767",
+     "maturity": "1798732800",
+     "pairC": "0x11e285a153fc463ad16cb7ac03585757d2c7a78f9e4c3e241611d9a9ed5392ea",
+     "ownLegId": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+     "ownNonce": "1790000000123",
+     "ownSalt": "0x3131313131313131313131313131313131313131313131313131313131313131"
+    }
+   },
+   "struct_hash": "0xf65b5753b960f4bae2bae2ac290c02654606456fca0f6360812bb0d4d213454a",
+   "digest": "0x14be2de1ff99f81d6154a157a5d89d5fa6056960f60c9720ac705b9d516bf0fa",
+   "signature": "0x6e8f234f66469e8ec15ee169d4c133d43240a09b4ea1aed922eb9d56d25f3cc7312484730cda4557b3135a3b08f0e7dd66b95a318f8df26b6aa48b4531db72661b",
+   "base": "V1",
+   "set": {
+    "premium_bps": "32767"
+   }
+  },
+  {
+   "id": "E13",
+   "note": "maturity 0: epoch",
+   "inputs": {
+    "pair_text": "USD/BRL",
+    "quote_expiry": "1790000600",
+    "rfq_quote_expiry_max": "1790000600",
+    "taker_leg": {
+     "seat": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+     "leg_id": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "0",
+     "nonce": "1790000000123"
+    },
+    "taker_salt": "0x3131313131313131313131313131313131313131313131313131313131313131",
+    "maker_leg": {
+     "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "leg_id": "0x555555555555555555555555555555555555555555555555000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "-1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "0",
+     "nonce": "6148914691236517205"
+    },
+    "maker_salt": "0x6161616161616161616161616161616161616161616161616161616161616161"
+   },
+   "derived": {
+    "pair_id": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+    "c_taker": "0xb086b5ad9b6e2d81517a625f8770dedf04ba0f40bbe53656317e243708eee27a",
+    "c_maker": "0xd91751536b9956806ba288cb1028210eac6c24fd514635d9963af4e2630794d1",
+    "pair_c": "0x02691ca97ee582dd4638e8f932d8f695dac94a41abeef8e31ca2347d8c363749"
+   },
+   "summary": "buy 5 000 000 USD vs BRL at 5.41 BRL per USD, matures 1970-01-01T00:00:00Z, upfront none",
+   "summary_len": 88,
+   "typed_data": {
+    "types": {
+     "EIP712Domain": [
+      {
+       "name": "name",
+       "type": "string"
+      },
+      {
+       "name": "version",
+       "type": "string"
+      },
+      {
+       "name": "chainId",
+       "type": "uint256"
+      },
+      {
+       "name": "verifyingContract",
+       "type": "address"
+      }
+     ],
+     "Trade": [
+      {
+       "name": "summary",
+       "type": "string"
+      },
+      {
+       "name": "pair",
+       "type": "string"
+      },
+      {
+       "name": "side",
+       "type": "string"
+      },
+      {
+       "name": "notionalE6",
+       "type": "uint256"
+      },
+      {
+       "name": "rateE6",
+       "type": "uint64"
+      },
+      {
+       "name": "premiumBps",
+       "type": "int16"
+      },
+      {
+       "name": "maturity",
+       "type": "uint40"
+      },
+      {
+       "name": "pairC",
+       "type": "bytes32"
+      },
+      {
+       "name": "ownLegId",
+       "type": "bytes32"
+      },
+      {
+       "name": "ownNonce",
+       "type": "uint64"
+      },
+      {
+       "name": "ownSalt",
+       "type": "bytes32"
+      }
+     ]
+    },
+    "primaryType": "Trade",
+    "domain": {
+     "name": "CRX",
+     "version": "rulebook-1.0",
+     "chainId": 43113,
+     "verifyingContract": "0xd757933e2a5600c6f00f83fd282b33aa7cb409c0"
+    },
+    "message": {
+     "summary": "buy 5 000 000 USD vs BRL at 5.41 BRL per USD, matures 1970-01-01T00:00:00Z, upfront none",
+     "pair": "USD/BRL",
+     "side": "buy",
+     "notionalE6": "5000000000000",
+     "rateE6": "5410000",
+     "premiumBps": "0",
+     "maturity": "0",
+     "pairC": "0x02691ca97ee582dd4638e8f932d8f695dac94a41abeef8e31ca2347d8c363749",
+     "ownLegId": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+     "ownNonce": "1790000000123",
+     "ownSalt": "0x3131313131313131313131313131313131313131313131313131313131313131"
+    }
+   },
+   "struct_hash": "0xa6ac5f379eac6e62fc6e81f41dc69387796a03da7ee3fb420d94a7e9bcd60887",
+   "digest": "0x8a143816542d6d226979d608fe55763b65b1b5eec3ea65f5c96434c63bb55266",
+   "signature": "0x3064ae36fd01c9904cfa0d4a30a2b23073d83bcc0ac4e1a5e4a610cb0ba1a44226c13839ab3223ad0a8eea0b6ee092bdf52f216ce1ed9c331b0adafceb6327eb1c",
+   "base": "V1",
+   "set": {
+    "expiry": "0"
+   }
+  },
+  {
+   "id": "E14",
+   "note": "maturity 2000-02-29: leap century",
+   "inputs": {
+    "pair_text": "USD/BRL",
+    "quote_expiry": "1790000600",
+    "rfq_quote_expiry_max": "1790000600",
+    "taker_leg": {
+     "seat": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+     "leg_id": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "951782400",
+     "nonce": "1790000000123"
+    },
+    "taker_salt": "0x3131313131313131313131313131313131313131313131313131313131313131",
+    "maker_leg": {
+     "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "leg_id": "0x555555555555555555555555555555555555555555555555000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "-1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "951782400",
+     "nonce": "6148914691236517205"
+    },
+    "maker_salt": "0x6161616161616161616161616161616161616161616161616161616161616161"
+   },
+   "derived": {
+    "pair_id": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+    "c_taker": "0xec444b1a518c1755b992d3c81a36a0fb61c253c8e63b9a6090236c4b9dc3d008",
+    "c_maker": "0x4d47291c56039163c3e1410b5fde284f400b87535f134a089cfd21021e4ad95b",
+    "pair_c": "0x9e24a7c9439b4e2d97a763af335ff56e65f63f61acd6c8beb5b586e51180e9db"
+   },
+   "summary": "buy 5 000 000 USD vs BRL at 5.41 BRL per USD, matures 2000-02-29T00:00:00Z, upfront none",
+   "summary_len": 88,
+   "typed_data": {
+    "types": {
+     "EIP712Domain": [
+      {
+       "name": "name",
+       "type": "string"
+      },
+      {
+       "name": "version",
+       "type": "string"
+      },
+      {
+       "name": "chainId",
+       "type": "uint256"
+      },
+      {
+       "name": "verifyingContract",
+       "type": "address"
+      }
+     ],
+     "Trade": [
+      {
+       "name": "summary",
+       "type": "string"
+      },
+      {
+       "name": "pair",
+       "type": "string"
+      },
+      {
+       "name": "side",
+       "type": "string"
+      },
+      {
+       "name": "notionalE6",
+       "type": "uint256"
+      },
+      {
+       "name": "rateE6",
+       "type": "uint64"
+      },
+      {
+       "name": "premiumBps",
+       "type": "int16"
+      },
+      {
+       "name": "maturity",
+       "type": "uint40"
+      },
+      {
+       "name": "pairC",
+       "type": "bytes32"
+      },
+      {
+       "name": "ownLegId",
+       "type": "bytes32"
+      },
+      {
+       "name": "ownNonce",
+       "type": "uint64"
+      },
+      {
+       "name": "ownSalt",
+       "type": "bytes32"
+      }
+     ]
+    },
+    "primaryType": "Trade",
+    "domain": {
+     "name": "CRX",
+     "version": "rulebook-1.0",
+     "chainId": 43113,
+     "verifyingContract": "0xd757933e2a5600c6f00f83fd282b33aa7cb409c0"
+    },
+    "message": {
+     "summary": "buy 5 000 000 USD vs BRL at 5.41 BRL per USD, matures 2000-02-29T00:00:00Z, upfront none",
+     "pair": "USD/BRL",
+     "side": "buy",
+     "notionalE6": "5000000000000",
+     "rateE6": "5410000",
+     "premiumBps": "0",
+     "maturity": "951782400",
+     "pairC": "0x9e24a7c9439b4e2d97a763af335ff56e65f63f61acd6c8beb5b586e51180e9db",
+     "ownLegId": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+     "ownNonce": "1790000000123",
+     "ownSalt": "0x3131313131313131313131313131313131313131313131313131313131313131"
+    }
+   },
+   "struct_hash": "0x2c1ebeb89d155a60dcc0aab49d8fa03f54b28be3bed9335823b76281db3d5b73",
+   "digest": "0xb982a85103e18b1cc77dff92cd5ebd9c5ba77ac673b0d310f6563b36a135d6ea",
+   "signature": "0xf237f32b526e439c82808667b1267995f60bcc2eaf141a045d41b049acedb07b0e403833c0258411abeef1f2192a80a82288ff0f664b6b5896101ecb652da09d1c",
+   "base": "V1",
+   "set": {
+    "expiry": "951782400"
+   }
+  },
+  {
+   "id": "E15",
+   "note": "maturity 2100-03-01: non-leap century",
+   "inputs": {
+    "pair_text": "USD/BRL",
+    "quote_expiry": "1790000600",
+    "rfq_quote_expiry_max": "1790000600",
+    "taker_leg": {
+     "seat": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+     "leg_id": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "4107542400",
+     "nonce": "1790000000123"
+    },
+    "taker_salt": "0x3131313131313131313131313131313131313131313131313131313131313131",
+    "maker_leg": {
+     "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "leg_id": "0x555555555555555555555555555555555555555555555555000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "-1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "4107542400",
+     "nonce": "6148914691236517205"
+    },
+    "maker_salt": "0x6161616161616161616161616161616161616161616161616161616161616161"
+   },
+   "derived": {
+    "pair_id": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+    "c_taker": "0x736606d5723786ae4f4fc3c67e3f3f506e0ec9fc71a8d72a3f3074bdf260bc5d",
+    "c_maker": "0x3d7bd3e83a290f2262afc83a180e01a0e5c1da8ae97656ed4c2c741cea2126b6",
+    "pair_c": "0x48519e2404cad525181bb8d4846663989e2a14d5647b4f199f2d4463054f6fd8"
+   },
+   "summary": "buy 5 000 000 USD vs BRL at 5.41 BRL per USD, matures 2100-03-01T00:00:00Z, upfront none",
+   "summary_len": 88,
+   "typed_data": {
+    "types": {
+     "EIP712Domain": [
+      {
+       "name": "name",
+       "type": "string"
+      },
+      {
+       "name": "version",
+       "type": "string"
+      },
+      {
+       "name": "chainId",
+       "type": "uint256"
+      },
+      {
+       "name": "verifyingContract",
+       "type": "address"
+      }
+     ],
+     "Trade": [
+      {
+       "name": "summary",
+       "type": "string"
+      },
+      {
+       "name": "pair",
+       "type": "string"
+      },
+      {
+       "name": "side",
+       "type": "string"
+      },
+      {
+       "name": "notionalE6",
+       "type": "uint256"
+      },
+      {
+       "name": "rateE6",
+       "type": "uint64"
+      },
+      {
+       "name": "premiumBps",
+       "type": "int16"
+      },
+      {
+       "name": "maturity",
+       "type": "uint40"
+      },
+      {
+       "name": "pairC",
+       "type": "bytes32"
+      },
+      {
+       "name": "ownLegId",
+       "type": "bytes32"
+      },
+      {
+       "name": "ownNonce",
+       "type": "uint64"
+      },
+      {
+       "name": "ownSalt",
+       "type": "bytes32"
+      }
+     ]
+    },
+    "primaryType": "Trade",
+    "domain": {
+     "name": "CRX",
+     "version": "rulebook-1.0",
+     "chainId": 43113,
+     "verifyingContract": "0xd757933e2a5600c6f00f83fd282b33aa7cb409c0"
+    },
+    "message": {
+     "summary": "buy 5 000 000 USD vs BRL at 5.41 BRL per USD, matures 2100-03-01T00:00:00Z, upfront none",
+     "pair": "USD/BRL",
+     "side": "buy",
+     "notionalE6": "5000000000000",
+     "rateE6": "5410000",
+     "premiumBps": "0",
+     "maturity": "4107542400",
+     "pairC": "0x48519e2404cad525181bb8d4846663989e2a14d5647b4f199f2d4463054f6fd8",
+     "ownLegId": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+     "ownNonce": "1790000000123",
+     "ownSalt": "0x3131313131313131313131313131313131313131313131313131313131313131"
+    }
+   },
+   "struct_hash": "0x44e158d5c116ca0479cc08d2097de6957f340e64f17ab400ab352f26d035489d",
+   "digest": "0xbf6973085b4109e1a733d3e6bf041a27eaa3bc6b8e507fc7f37660c669aabd6d",
+   "signature": "0xc963dcf16e986ad1956a1f436f38588ec1a4ad9c4da50b3af8ceb44d783faa430ad2b1054d930e9e764aa9bfbde015597cb2291ba3b07a7d5b827d6f0add0c021b",
+   "base": "V1",
+   "set": {
+    "expiry": "4107542400"
+   }
+  },
+  {
+   "id": "E16",
+   "note": "maturity 253402300799: last allowed second",
+   "inputs": {
+    "pair_text": "USD/BRL",
+    "quote_expiry": "1790000600",
+    "rfq_quote_expiry_max": "1790000600",
+    "taker_leg": {
+     "seat": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+     "leg_id": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "253402300799",
+     "nonce": "1790000000123"
+    },
+    "taker_salt": "0x3131313131313131313131313131313131313131313131313131313131313131",
+    "maker_leg": {
+     "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "leg_id": "0x555555555555555555555555555555555555555555555555000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "-1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "253402300799",
+     "nonce": "6148914691236517205"
+    },
+    "maker_salt": "0x6161616161616161616161616161616161616161616161616161616161616161"
+   },
+   "derived": {
+    "pair_id": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+    "c_taker": "0xe3f93ac240aef2a1a9cefbe05b434e2145bcbc6e2d9e2c6261a81788eb17f0e1",
+    "c_maker": "0x5500a9e9444324849ce646ba101e1cf354b6fa082acb59381095b267bc0f3904",
+    "pair_c": "0x2312a7fe21b66076a79329a1da78e8bf10d66cea3a662241f19ea9d76cd52bf0"
+   },
+   "summary": "buy 5 000 000 USD vs BRL at 5.41 BRL per USD, matures 9999-12-31T23:59:59Z, upfront none",
+   "summary_len": 88,
+   "typed_data": {
+    "types": {
+     "EIP712Domain": [
+      {
+       "name": "name",
+       "type": "string"
+      },
+      {
+       "name": "version",
+       "type": "string"
+      },
+      {
+       "name": "chainId",
+       "type": "uint256"
+      },
+      {
+       "name": "verifyingContract",
+       "type": "address"
+      }
+     ],
+     "Trade": [
+      {
+       "name": "summary",
+       "type": "string"
+      },
+      {
+       "name": "pair",
+       "type": "string"
+      },
+      {
+       "name": "side",
+       "type": "string"
+      },
+      {
+       "name": "notionalE6",
+       "type": "uint256"
+      },
+      {
+       "name": "rateE6",
+       "type": "uint64"
+      },
+      {
+       "name": "premiumBps",
+       "type": "int16"
+      },
+      {
+       "name": "maturity",
+       "type": "uint40"
+      },
+      {
+       "name": "pairC",
+       "type": "bytes32"
+      },
+      {
+       "name": "ownLegId",
+       "type": "bytes32"
+      },
+      {
+       "name": "ownNonce",
+       "type": "uint64"
+      },
+      {
+       "name": "ownSalt",
+       "type": "bytes32"
+      }
+     ]
+    },
+    "primaryType": "Trade",
+    "domain": {
+     "name": "CRX",
+     "version": "rulebook-1.0",
+     "chainId": 43113,
+     "verifyingContract": "0xd757933e2a5600c6f00f83fd282b33aa7cb409c0"
+    },
+    "message": {
+     "summary": "buy 5 000 000 USD vs BRL at 5.41 BRL per USD, matures 9999-12-31T23:59:59Z, upfront none",
+     "pair": "USD/BRL",
+     "side": "buy",
+     "notionalE6": "5000000000000",
+     "rateE6": "5410000",
+     "premiumBps": "0",
+     "maturity": "253402300799",
+     "pairC": "0x2312a7fe21b66076a79329a1da78e8bf10d66cea3a662241f19ea9d76cd52bf0",
+     "ownLegId": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+     "ownNonce": "1790000000123",
+     "ownSalt": "0x3131313131313131313131313131313131313131313131313131313131313131"
+    }
+   },
+   "struct_hash": "0x2274eeeda5ea0c90eae7f7d33bd3ee64a868e42c825f8cb85c48d9942c61963e",
+   "digest": "0x2e6f310f4c4676e0f9603f36bb6f2ab5244b788e8e36f2dae9385e02fef9833c",
+   "signature": "0xf82bf8d3b2014b342aab0cc6a750bb5a428e253749610b6f010d20d35b668b6e0d8e97e450fa6fd4cdf4a61afb817c222378bd0dac1aa8344c4ac08f5a18fb901c",
+   "base": "V1",
+   "set": {
+    "expiry": "253402300799"
+   }
+  }
+ ],
+ "negative": [
+  {
+   "id": "N1a",
+   "check": 1,
+   "note": "side 0",
+   "expect": "DEGENERATE",
+   "base": "V1",
+   "set": {
+    "side": "0"
+   },
+   "inputs": {
+    "pair_text": "USD/BRL",
+    "quote_expiry": "1790000600",
+    "rfq_quote_expiry_max": "1790000600",
+    "taker_leg": {
+     "seat": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+     "leg_id": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "0",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "1790000000123"
+    },
+    "taker_salt": "0x3131313131313131313131313131313131313131313131313131313131313131",
+    "maker_leg": {
+     "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "leg_id": "0x555555555555555555555555555555555555555555555555000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "-1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "6148914691236517205"
+    },
+    "maker_salt": "0x6161616161616161616161616161616161616161616161616161616161616161"
+   },
+   "pair_text_hex": "0x5553442f42524c",
+   "taker_pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851"
+  },
+  {
+   "id": "N1b",
+   "check": 1,
+   "note": "side 2",
+   "expect": "DEGENERATE",
+   "base": "V1",
+   "set": {
+    "side": "2"
+   },
+   "inputs": {
+    "pair_text": "USD/BRL",
+    "quote_expiry": "1790000600",
+    "rfq_quote_expiry_max": "1790000600",
+    "taker_leg": {
+     "seat": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+     "leg_id": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "2",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "1790000000123"
+    },
+    "taker_salt": "0x3131313131313131313131313131313131313131313131313131313131313131",
+    "maker_leg": {
+     "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "leg_id": "0x555555555555555555555555555555555555555555555555000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "-1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "6148914691236517205"
+    },
+    "maker_salt": "0x6161616161616161616161616161616161616161616161616161616161616161"
+   },
+   "pair_text_hex": "0x5553442f42524c",
+   "taker_pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851"
+  },
+  {
+   "id": "N1c",
+   "check": 1,
+   "note": "side -128 (i8::MIN)",
+   "expect": "DEGENERATE",
+   "base": "V1",
+   "set": {
+    "side": "-128"
+   },
+   "inputs": {
+    "pair_text": "USD/BRL",
+    "quote_expiry": "1790000600",
+    "rfq_quote_expiry_max": "1790000600",
+    "taker_leg": {
+     "seat": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+     "leg_id": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "-128",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "1790000000123"
+    },
+    "taker_salt": "0x3131313131313131313131313131313131313131313131313131313131313131",
+    "maker_leg": {
+     "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "leg_id": "0x555555555555555555555555555555555555555555555555000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "-1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "6148914691236517205"
+    },
+    "maker_salt": "0x6161616161616161616161616161616161616161616161616161616161616161"
+   },
+   "pair_text_hex": "0x5553442f42524c",
+   "taker_pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851"
+  },
+  {
+   "id": "N1d",
+   "check": 1,
+   "note": "side 127 (i8::MAX)",
+   "expect": "DEGENERATE",
+   "base": "V1",
+   "set": {
+    "side": "127"
+   },
+   "inputs": {
+    "pair_text": "USD/BRL",
+    "quote_expiry": "1790000600",
+    "rfq_quote_expiry_max": "1790000600",
+    "taker_leg": {
+     "seat": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+     "leg_id": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "127",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "1790000000123"
+    },
+    "taker_salt": "0x3131313131313131313131313131313131313131313131313131313131313131",
+    "maker_leg": {
+     "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "leg_id": "0x555555555555555555555555555555555555555555555555000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "-1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "6148914691236517205"
+    },
+    "maker_salt": "0x6161616161616161616161616161616161616161616161616161616161616161"
+   },
+   "pair_text_hex": "0x5553442f42524c",
+   "taker_pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851"
+  },
+  {
+   "id": "N2a",
+   "check": 2,
+   "note": "maturity 253402300800, one second past 9999-12-31T23:59:59Z",
+   "expect": "DEGENERATE",
+   "base": "V1",
+   "set": {
+    "expiry": "253402300800"
+   },
+   "inputs": {
+    "pair_text": "USD/BRL",
+    "quote_expiry": "1790000600",
+    "rfq_quote_expiry_max": "1790000600",
+    "taker_leg": {
+     "seat": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+     "leg_id": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "253402300800",
+     "nonce": "1790000000123"
+    },
+    "taker_salt": "0x3131313131313131313131313131313131313131313131313131313131313131",
+    "maker_leg": {
+     "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "leg_id": "0x555555555555555555555555555555555555555555555555000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "-1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "253402300800",
+     "nonce": "6148914691236517205"
+    },
+    "maker_salt": "0x6161616161616161616161616161616161616161616161616161616161616161"
+   },
+   "pair_text_hex": "0x5553442f42524c",
+   "taker_pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851"
+  },
+  {
+   "id": "N2b",
+   "check": 2,
+   "note": "maturity u64::MAX",
+   "expect": "DEGENERATE",
+   "base": "V1",
+   "set": {
+    "expiry": "18446744073709551615"
+   },
+   "inputs": {
+    "pair_text": "USD/BRL",
+    "quote_expiry": "1790000600",
+    "rfq_quote_expiry_max": "1790000600",
+    "taker_leg": {
+     "seat": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+     "leg_id": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "18446744073709551615",
+     "nonce": "1790000000123"
+    },
+    "taker_salt": "0x3131313131313131313131313131313131313131313131313131313131313131",
+    "maker_leg": {
+     "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "leg_id": "0x555555555555555555555555555555555555555555555555000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "-1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "18446744073709551615",
+     "nonce": "6148914691236517205"
+    },
+    "maker_salt": "0x6161616161616161616161616161616161616161616161616161616161616161"
+   },
+   "pair_text_hex": "0x5553442f42524c",
+   "taker_pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851"
+  },
+  {
+   "id": "N3a",
+   "check": 3,
+   "note": "pair text lower case",
+   "expect": "DEGENERATE",
+   "base": "V1",
+   "set": {
+    "pair_text": "usd/brl",
+    "leg_pair_symbol": "USD/BRL"
+   },
+   "inputs": {
+    "pair_text": "usd/brl",
+    "quote_expiry": "1790000600",
+    "rfq_quote_expiry_max": "1790000600",
+    "taker_leg": {
+     "seat": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+     "leg_id": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "1790000000123"
+    },
+    "taker_salt": "0x3131313131313131313131313131313131313131313131313131313131313131",
+    "maker_leg": {
+     "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "leg_id": "0x555555555555555555555555555555555555555555555555000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "-1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "6148914691236517205"
+    },
+    "maker_salt": "0x6161616161616161616161616161616161616161616161616161616161616161"
+   },
+   "pair_text_hex": "0x7573642f62726c",
+   "taker_pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851"
+  },
+  {
+   "id": "N3b",
+   "check": 3,
+   "note": "pair text with '-'",
+   "expect": "DEGENERATE",
+   "base": "V1",
+   "set": {
+    "pair_text": "USD-BRL",
+    "leg_pair_symbol": "USD/BRL"
+   },
+   "inputs": {
+    "pair_text": "USD-BRL",
+    "quote_expiry": "1790000600",
+    "rfq_quote_expiry_max": "1790000600",
+    "taker_leg": {
+     "seat": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+     "leg_id": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "1790000000123"
+    },
+    "taker_salt": "0x3131313131313131313131313131313131313131313131313131313131313131",
+    "maker_leg": {
+     "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "leg_id": "0x555555555555555555555555555555555555555555555555000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "-1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "6148914691236517205"
+    },
+    "maker_salt": "0x6161616161616161616161616161616161616161616161616161616161616161"
+   },
+   "pair_text_hex": "0x5553442d42524c",
+   "taker_pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851"
+  },
+  {
+   "id": "N3c",
+   "check": 3,
+   "note": "pair text with a digit",
+   "expect": "DEGENERATE",
+   "base": "V1",
+   "set": {
+    "pair_text": "USD/BR1",
+    "leg_pair_symbol": "USD/BRL"
+   },
+   "inputs": {
+    "pair_text": "USD/BR1",
+    "quote_expiry": "1790000600",
+    "rfq_quote_expiry_max": "1790000600",
+    "taker_leg": {
+     "seat": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+     "leg_id": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "1790000000123"
+    },
+    "taker_salt": "0x3131313131313131313131313131313131313131313131313131313131313131",
+    "maker_leg": {
+     "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "leg_id": "0x555555555555555555555555555555555555555555555555000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "-1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "6148914691236517205"
+    },
+    "maker_salt": "0x6161616161616161616161616161616161616161616161616161616161616161"
+   },
+   "pair_text_hex": "0x5553442f425231",
+   "taker_pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851"
+  },
+  {
+   "id": "N4",
+   "check": 4,
+   "note": "well-formed pair text of another pair: keccak differs from taker.pair",
+   "expect": "WITNESS_MISMATCH",
+   "base": "V1",
+   "set": {
+    "pair_text": "USD/MXN",
+    "leg_pair_symbol": "USD/BRL"
+   },
+   "inputs": {
+    "pair_text": "USD/MXN",
+    "quote_expiry": "1790000600",
+    "rfq_quote_expiry_max": "1790000600",
+    "taker_leg": {
+     "seat": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+     "leg_id": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "1790000000123"
+    },
+    "taker_salt": "0x3131313131313131313131313131313131313131313131313131313131313131",
+    "maker_leg": {
+     "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "leg_id": "0x555555555555555555555555555555555555555555555555000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "-1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "6148914691236517205"
+    },
+    "maker_salt": "0x6161616161616161616161616161616161616161616161616161616161616161"
+   },
+   "pair_text_hex": "0x5553442f4d584e",
+   "taker_pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+   "keccak_pair_text": "0x69f1670ccd0386df6e79b445190cb08f07e9d85ef8bb6ef820417312ea39752f"
+  },
+  {
+   "id": "N5a",
+   "check": 5,
+   "note": "old client (SDK 0.5.0): taker signs the retired Side digest of its six fields",
+   "expect": "BAD_SIGNATURE",
+   "base": "V1",
+   "set": {},
+   "inputs": {
+    "pair_text": "USD/BRL",
+    "quote_expiry": "1790000600",
+    "rfq_quote_expiry_max": "1790000600",
+    "taker_leg": {
+     "seat": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+     "leg_id": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "1790000000123"
+    },
+    "taker_salt": "0x3131313131313131313131313131313131313131313131313131313131313131",
+    "maker_leg": {
+     "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "leg_id": "0x555555555555555555555555555555555555555555555555000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "-1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "6148914691236517205"
+    },
+    "maker_salt": "0x6161616161616161616161616161616161616161616161616161616161616161"
+   },
+   "pair_text_hex": "0x5553442f42524c",
+   "taker_pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+   "guest_digest": "0xebe1b52ad8e02ea30076f2c86073c185fa3061048a063860b1be9cd51297ab20",
+   "signed_digest": "0xf48f55cda6cfd38800db6f0c18b7e672559effbac7470e924f3bd0b4a8936e67",
+   "signature": "0x38d893cf61ff20c3cd0c1a15b6a8b6b5acd3c573b036445f4cca6c115e8c3283074bbe25c7d63f8d0a8c352b03d5988acbae1444d6ee01c07d420640ff1adc851c",
+   "recovered_from_guest_digest": "0xbfd927108606a5a2af1948281f575330652aa42d",
+   "signed_what": {
+    "kind": "side"
+   }
+  },
+  {
+   "id": "N5b",
+   "check": 5,
+   "note": "lying summary: '50 000 000' shown, integers say 5 000 000",
+   "expect": "BAD_SIGNATURE",
+   "base": "V1",
+   "set": {},
+   "inputs": {
+    "pair_text": "USD/BRL",
+    "quote_expiry": "1790000600",
+    "rfq_quote_expiry_max": "1790000600",
+    "taker_leg": {
+     "seat": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+     "leg_id": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "1790000000123"
+    },
+    "taker_salt": "0x3131313131313131313131313131313131313131313131313131313131313131",
+    "maker_leg": {
+     "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "leg_id": "0x555555555555555555555555555555555555555555555555000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "-1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "6148914691236517205"
+    },
+    "maker_salt": "0x6161616161616161616161616161616161616161616161616161616161616161"
+   },
+   "pair_text_hex": "0x5553442f42524c",
+   "taker_pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+   "guest_digest": "0xebe1b52ad8e02ea30076f2c86073c185fa3061048a063860b1be9cd51297ab20",
+   "signed_digest": "0xd1e4c8f242a7619945a06dc3edfc2fc70e971391f63821b37f180be95fc2460d",
+   "signature": "0xf6c0902590fe501feb3b8e5187d66c6b864b158df36f9235167fd87b37b30c623ebff5bc112fb58035d5545e452d7a4dde95d9c9e33ffe6e8323fa06b4a42aa91b",
+   "recovered_from_guest_digest": "0xad60ff44258c804c996915f5ac60af5c49ec84df",
+   "signed_what": {
+    "kind": "summary",
+    "summary": "buy 50 000 000 USD vs BRL at 5.41 BRL per USD, matures 2026-12-31T16:00:00Z, upfront none"
+   }
+  },
+  {
+   "id": "N5c",
+   "check": 5,
+   "note": "non-canonical summary: comma grouping",
+   "expect": "BAD_SIGNATURE",
+   "base": "V1",
+   "set": {},
+   "inputs": {
+    "pair_text": "USD/BRL",
+    "quote_expiry": "1790000600",
+    "rfq_quote_expiry_max": "1790000600",
+    "taker_leg": {
+     "seat": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+     "leg_id": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "1790000000123"
+    },
+    "taker_salt": "0x3131313131313131313131313131313131313131313131313131313131313131",
+    "maker_leg": {
+     "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "leg_id": "0x555555555555555555555555555555555555555555555555000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "-1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "6148914691236517205"
+    },
+    "maker_salt": "0x6161616161616161616161616161616161616161616161616161616161616161"
+   },
+   "pair_text_hex": "0x5553442f42524c",
+   "taker_pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+   "guest_digest": "0xebe1b52ad8e02ea30076f2c86073c185fa3061048a063860b1be9cd51297ab20",
+   "signed_digest": "0x6397fffddcb017b7b13f03dfc11e69e889b1ceb7410940b546d0b31062519e7e",
+   "signature": "0x49d87d6ab9855f24f0ed8d07817aef61a4380369d09cc6b775d5f94bd6ed4bb430dd81cde0313251df2b3f272fdfdedf0ef9f7dec5d16022971683395b20cae21c",
+   "recovered_from_guest_digest": "0xbbe06d49d7a051c8aff29f435baf7ddc9095ea47",
+   "signed_what": {
+    "kind": "summary",
+    "summary": "buy 5,000,000 USD vs BRL at 5.41 BRL per USD, matures 2026-12-31T16:00:00Z, upfront none"
+   }
+  },
+  {
+   "id": "N5d",
+   "check": 5,
+   "note": "right digest, wrong key (anvil test key 1)",
+   "expect": "BAD_SIGNATURE",
+   "base": "V1",
+   "set": {},
+   "inputs": {
+    "pair_text": "USD/BRL",
+    "quote_expiry": "1790000600",
+    "rfq_quote_expiry_max": "1790000600",
+    "taker_leg": {
+     "seat": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+     "leg_id": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "1790000000123"
+    },
+    "taker_salt": "0x3131313131313131313131313131313131313131313131313131313131313131",
+    "maker_leg": {
+     "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "leg_id": "0x555555555555555555555555555555555555555555555555000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "-1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "6148914691236517205"
+    },
+    "maker_salt": "0x6161616161616161616161616161616161616161616161616161616161616161"
+   },
+   "pair_text_hex": "0x5553442f42524c",
+   "taker_pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+   "guest_digest": "0xebe1b52ad8e02ea30076f2c86073c185fa3061048a063860b1be9cd51297ab20",
+   "signed_digest": "0xebe1b52ad8e02ea30076f2c86073c185fa3061048a063860b1be9cd51297ab20",
+   "signature": "0x5402ed9d28fcfde89fbb6c279b656e146fc57fea74b608d62a2dd3a9fd300944591d1ba9181caf21b7fe6adb2ab0fca07efc1f8d0b9675df1ed87d86f75cc97d1b",
+   "recovered_from_guest_digest": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+   "signed_what": {
+    "kind": "key",
+    "key": "other"
+   }
+  },
+  {
+   "id": "N5e",
+   "check": 5,
+   "note": "right message, wrong domain (chainId 43114)",
+   "expect": "BAD_SIGNATURE",
+   "base": "V1",
+   "set": {},
+   "inputs": {
+    "pair_text": "USD/BRL",
+    "quote_expiry": "1790000600",
+    "rfq_quote_expiry_max": "1790000600",
+    "taker_leg": {
+     "seat": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+     "leg_id": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "1790000000123"
+    },
+    "taker_salt": "0x3131313131313131313131313131313131313131313131313131313131313131",
+    "maker_leg": {
+     "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "leg_id": "0x555555555555555555555555555555555555555555555555000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "-1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "6148914691236517205"
+    },
+    "maker_salt": "0x6161616161616161616161616161616161616161616161616161616161616161"
+   },
+   "pair_text_hex": "0x5553442f42524c",
+   "taker_pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+   "guest_digest": "0xebe1b52ad8e02ea30076f2c86073c185fa3061048a063860b1be9cd51297ab20",
+   "signed_digest": "0xe6aa5556bd8426d126f5210736ae385d9a71ed685cffdc98961037623912f329",
+   "signature": "0x736e07377b2afe1d7158d5bb0f357b7be6b9b03a639b78f11554fc1071a3e0fc67bbd406784f1375ae662fdb19e68176833fe6a84ba3947c3c583fcbb48a8cdb1b",
+   "recovered_from_guest_digest": "0x7a2364f8e75b70b2140ff789d72702e4c72c77ea",
+   "signed_what": {
+    "kind": "domain",
+    "chainId": 43114
+   }
+  },
+  {
+   "id": "N5f",
+   "check": 5,
+   "note": "V1 signature with high s (s' = n - s, v flipped): same signer by math, refused by the low-s rule",
+   "expect": "BAD_SIGNATURE",
+   "base": "V1",
+   "set": {},
+   "inputs": {
+    "pair_text": "USD/BRL",
+    "quote_expiry": "1790000600",
+    "rfq_quote_expiry_max": "1790000600",
+    "taker_leg": {
+     "seat": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+     "leg_id": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "1790000000123"
+    },
+    "taker_salt": "0x3131313131313131313131313131313131313131313131313131313131313131",
+    "maker_leg": {
+     "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "leg_id": "0x555555555555555555555555555555555555555555555555000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "-1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "6148914691236517205"
+    },
+    "maker_salt": "0x6161616161616161616161616161616161616161616161616161616161616161"
+   },
+   "pair_text_hex": "0x5553442f42524c",
+   "taker_pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+   "guest_digest": "0xebe1b52ad8e02ea30076f2c86073c185fa3061048a063860b1be9cd51297ab20",
+   "signed_digest": "0xebe1b52ad8e02ea30076f2c86073c185fa3061048a063860b1be9cd51297ab20",
+   "signature": "0x8c78580ddcab008d8a4750927356cc5c5324fbdb8555c19c4c805257cc18e6b2db862a2c9c5e432143ec239b34b876072d1092fd812aaceb539bcd2ced919a301b",
+   "recovered_from_guest_digest": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+   "signed_what": {
+    "kind": "high_s"
+   }
+  },
+  {
+   "id": "N5g",
+   "check": 5,
+   "note": "V1 signature with v = 29: no recovery id",
+   "expect": "BAD_SIGNATURE",
+   "base": "V1",
+   "set": {},
+   "inputs": {
+    "pair_text": "USD/BRL",
+    "quote_expiry": "1790000600",
+    "rfq_quote_expiry_max": "1790000600",
+    "taker_leg": {
+     "seat": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+     "leg_id": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "1790000000123"
+    },
+    "taker_salt": "0x3131313131313131313131313131313131313131313131313131313131313131",
+    "maker_leg": {
+     "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "leg_id": "0x555555555555555555555555555555555555555555555555000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "-1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "6148914691236517205"
+    },
+    "maker_salt": "0x6161616161616161616161616161616161616161616161616161616161616161"
+   },
+   "pair_text_hex": "0x5553442f42524c",
+   "taker_pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+   "guest_digest": "0xebe1b52ad8e02ea30076f2c86073c185fa3061048a063860b1be9cd51297ab20",
+   "signed_digest": "0xebe1b52ad8e02ea30076f2c86073c185fa3061048a063860b1be9cd51297ab20",
+   "signature": "0x8c78580ddcab008d8a4750927356cc5c5324fbdb8555c19c4c805257cc18e6b22479d5d363a1bcdebc13dc64cb4789f78d9e49e92e1df3506c36915fe2a4a7111d",
+   "recovered_from_guest_digest": null,
+   "signed_what": {
+    "kind": "bad_v",
+    "v": 29
+   }
+  },
+  {
+   "id": "N5h",
+   "check": 5,
+   "note": "old client: taker signs the v4 Trade (quoteExpiry, wrapsHash) over the same terms",
+   "expect": "BAD_SIGNATURE",
+   "base": "V1",
+   "set": {},
+   "inputs": {
+    "pair_text": "USD/BRL",
+    "quote_expiry": "1790000600",
+    "rfq_quote_expiry_max": "1790000600",
+    "taker_leg": {
+     "seat": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+     "leg_id": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "1790000000123"
+    },
+    "taker_salt": "0x3131313131313131313131313131313131313131313131313131313131313131",
+    "maker_leg": {
+     "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "leg_id": "0x555555555555555555555555555555555555555555555555000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "-1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "6148914691236517205"
+    },
+    "maker_salt": "0x6161616161616161616161616161616161616161616161616161616161616161"
+   },
+   "pair_text_hex": "0x5553442f42524c",
+   "taker_pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+   "guest_digest": "0xebe1b52ad8e02ea30076f2c86073c185fa3061048a063860b1be9cd51297ab20",
+   "signed_digest": "0x1c04cd6cbb61dfacd2ecfb937559954e8e3e77a518992f4baeedda107fb60feb",
+   "signature": "0x033c6ab2973f941fc1106f8102c359362825835f41c150a83408ed9a8a527123010ff8beee35e3132b64560bfa125c79b547c4cb89bfd1b6546aea9fe030a7f11b",
+   "recovered_from_guest_digest": "0xd652d27a6e4716ea0b253f6387793876a17ac3ca",
+   "signed_what": {
+    "kind": "trade_v4"
+   }
+  },
+  {
+   "id": "N6",
+   "check": 6,
+   "note": "taker legId tail is not the quote end (one second late): a client refuses before signing; the guest refuses after the signature check. Control: V1",
+   "expect": "DEGENERATE",
+   "base": "V1",
+   "set": {
+    "taker_leg_id": "0x111111111111111111111111111111111111111111111111000000006ab13dd9"
+   },
+   "inputs": {
+    "pair_text": "USD/BRL",
+    "quote_expiry": "1790000600",
+    "rfq_quote_expiry_max": "1790000600",
+    "taker_leg": {
+     "seat": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+     "leg_id": "0x111111111111111111111111111111111111111111111111000000006ab13dd9",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "1790000000123"
+    },
+    "taker_salt": "0x3131313131313131313131313131313131313131313131313131313131313131",
+    "maker_leg": {
+     "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "leg_id": "0x555555555555555555555555555555555555555555555555000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "-1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premium_bps": "0",
+     "expiry": "1798732800",
+     "nonce": "6148914691236517205"
+    },
+    "maker_salt": "0x6161616161616161616161616161616161616161616161616161616161616161"
+   },
+   "pair_text_hex": "0x5553442f42524c",
+   "taker_pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+   "guest_digest": "0xad856d197b6dc960cb6fbed0d85cfcf944c367d1d44b918efeb6c8ba656a65bc",
+   "signed_digest": "0xad856d197b6dc960cb6fbed0d85cfcf944c367d1d44b918efeb6c8ba656a65bc",
+   "signature": "0x254b66fd6e2374bec9844bc4330a2330634e1c88496d10b534c717ed54a39a3b066417a46dd57459eed140302281a8bc3ed9885f221a763905610033919494d21b",
+   "recovered_from_guest_digest": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+   "signed_what": {
+    "kind": "valid"
+   }
+  }
+ ],
+ "quote_old_new": {
+  "base": "V1",
+  "signer": "other",
+  "maker_leg": {
+   "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+   "leg_id": "0x555555555555555555555555555555555555555555555555000000006ab13dd8",
+   "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+   "side": "-1",
+   "notional": "5000000000000",
+   "rate": "5410000",
+   "premium_bps": "0",
+   "expiry": "1798732800",
+   "nonce": "6148914691236517205"
+  },
+  "maker_salt": "0x6161616161616161616161616161616161616161616161616161616161616161",
+  "taker_ref": {
+   "taker_seat": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+   "taker_leg_id": "0x111111111111111111111111111111111111111111111111000000006ab13dd8",
+   "value": "0x4f412fb92304015b744b7a32155b5879b48aa8cbb0076b8234640f8891c53b0b"
+  },
+  "old": {
+   "type_string": "Quote(address seat,bytes32 legId,bytes32 pair,uint8 instrumentId,int8 side,uint256 notional,uint64 rate,uint16 imBps,int16 premiumBps,uint40 expiry,uint64 nonce,uint64 quoteExpiry,bytes32 salt,bytes32 wrapsHash,bytes32 takerRef)",
+   "typehash": "0xe0bb0f60332d120c09afbf82ee09ab3bfbab0de2f53237ed66edb7e42ef333f8",
+   "im_bps": "500",
+   "instrument_id": "1",
+   "wraps": [
+    "0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+    "0xb1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1"
+   ],
+   "wraps_hash": "0xe875b514e35a69c0bf205ec1a81252a31a696b0556f7b1d292238adff8f5622e",
+   "typed_data": {
+    "types": {
+     "EIP712Domain": [
+      {
+       "name": "name",
+       "type": "string"
+      },
+      {
+       "name": "version",
+       "type": "string"
+      },
+      {
+       "name": "chainId",
+       "type": "uint256"
+      },
+      {
+       "name": "verifyingContract",
+       "type": "address"
+      }
+     ],
+     "Quote": [
+      {
+       "name": "seat",
+       "type": "address"
+      },
+      {
+       "name": "legId",
+       "type": "bytes32"
+      },
+      {
+       "name": "pair",
+       "type": "bytes32"
+      },
+      {
+       "name": "instrumentId",
+       "type": "uint8"
+      },
+      {
+       "name": "side",
+       "type": "int8"
+      },
+      {
+       "name": "notional",
+       "type": "uint256"
+      },
+      {
+       "name": "rate",
+       "type": "uint64"
+      },
+      {
+       "name": "imBps",
+       "type": "uint16"
+      },
+      {
+       "name": "premiumBps",
+       "type": "int16"
+      },
+      {
+       "name": "expiry",
+       "type": "uint40"
+      },
+      {
+       "name": "nonce",
+       "type": "uint64"
+      },
+      {
+       "name": "quoteExpiry",
+       "type": "uint64"
+      },
+      {
+       "name": "salt",
+       "type": "bytes32"
+      },
+      {
+       "name": "wrapsHash",
+       "type": "bytes32"
+      },
+      {
+       "name": "takerRef",
+       "type": "bytes32"
+      }
+     ]
+    },
+    "primaryType": "Quote",
+    "domain": {
+     "name": "CRX",
+     "version": "rulebook-1.0",
+     "chainId": 43113,
+     "verifyingContract": "0xd757933e2a5600c6f00f83fd282b33aa7cb409c0"
+    },
+    "message": {
+     "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "legId": "0x555555555555555555555555555555555555555555555555000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "instrumentId": "1",
+     "side": "-1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "imBps": "500",
+     "premiumBps": "0",
+     "expiry": "1798732800",
+     "nonce": "1790000000456",
+     "quoteExpiry": "1790000600",
+     "salt": "0x6161616161616161616161616161616161616161616161616161616161616161",
+     "wrapsHash": "0xe875b514e35a69c0bf205ec1a81252a31a696b0556f7b1d292238adff8f5622e",
+     "takerRef": "0x4f412fb92304015b744b7a32155b5879b48aa8cbb0076b8234640f8891c53b0b"
+    }
+   },
+   "struct_hash": "0x7defa2846be12d74c345720abead5c3929c218c4eb723afee06d385fedaab72d",
+   "digest": "0x5c9ec37740f4131f58bcfdad188a983e8a00cb7483a11d464cca9ff48d5586ba",
+   "signature": "0x9c7124808ed6b50b54fbf2697a0817374bdb7c853389ca5c560b55b72329c456314d2cd93ea08e60e4a18c32db7e0051941fe27dd6717a414f28910af2304da21b"
+  },
+  "new": {
+   "type_string": "Quote(address seat,bytes32 legId,bytes32 pair,int8 side,uint256 notional,uint64 rate,int16 premiumBps,uint40 expiry,uint64 nonce,bytes32 salt,bytes32 takerRef)",
+   "typehash": "0x00fc8b1401eebfc809c01d3a7351526ef07cfd5902793c3d279de280c0aec2cb",
+   "typed_data": {
+    "types": {
+     "EIP712Domain": [
+      {
+       "name": "name",
+       "type": "string"
+      },
+      {
+       "name": "version",
+       "type": "string"
+      },
+      {
+       "name": "chainId",
+       "type": "uint256"
+      },
+      {
+       "name": "verifyingContract",
+       "type": "address"
+      }
+     ],
+     "Quote": [
+      {
+       "name": "seat",
+       "type": "address"
+      },
+      {
+       "name": "legId",
+       "type": "bytes32"
+      },
+      {
+       "name": "pair",
+       "type": "bytes32"
+      },
+      {
+       "name": "side",
+       "type": "int8"
+      },
+      {
+       "name": "notional",
+       "type": "uint256"
+      },
+      {
+       "name": "rate",
+       "type": "uint64"
+      },
+      {
+       "name": "premiumBps",
+       "type": "int16"
+      },
+      {
+       "name": "expiry",
+       "type": "uint40"
+      },
+      {
+       "name": "nonce",
+       "type": "uint64"
+      },
+      {
+       "name": "salt",
+       "type": "bytes32"
+      },
+      {
+       "name": "takerRef",
+       "type": "bytes32"
+      }
+     ]
+    },
+    "primaryType": "Quote",
+    "domain": {
+     "name": "CRX",
+     "version": "rulebook-1.0",
+     "chainId": 43113,
+     "verifyingContract": "0xd757933e2a5600c6f00f83fd282b33aa7cb409c0"
+    },
+    "message": {
+     "seat": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "legId": "0x555555555555555555555555555555555555555555555555000000006ab13dd8",
+     "pair": "0x644668ae48a22c7afafcf35ff66ebf9c8af2c396ae03de0795d66bde06cdf851",
+     "side": "-1",
+     "notional": "5000000000000",
+     "rate": "5410000",
+     "premiumBps": "0",
+     "expiry": "1798732800",
+     "nonce": "6148914691236517205",
+     "salt": "0x6161616161616161616161616161616161616161616161616161616161616161",
+     "takerRef": "0x4f412fb92304015b744b7a32155b5879b48aa8cbb0076b8234640f8891c53b0b"
+    }
+   },
+   "struct_hash": "0xfc12020df46e5a207618f5dd4b960ca5dfb75bc5f279d0b168355b5402cbd089",
+   "digest": "0x464a510bfcf6b0f971abf3f38552b195fcd671d746f2927732827573676bdde9",
+   "signature": "0x83ed331b02642b3397e9719a0a87621bb4b8f8ae6e78387df0479db77ac4c47e528aad238961e426678aa37273a665cd2088017a68ac3db33cd59d0990f69e781c"
+  }
+ }
+}

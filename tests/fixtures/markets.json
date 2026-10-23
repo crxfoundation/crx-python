@@ -1,0 +1,90 @@
+{
+ "as_of": 1790481496138,
+ "markets": [
+  {
+   "pair": "USD/BRL",
+   "tenor": {
+    "max_secs": 7776000,
+    "min_secs": 600
+   },
+   "notional": {
+    "min": "10000",
+    "max": "10000000"
+   },
+   "session": {
+    "label": "Mon\u2013Fri 08:00\u201317:00",
+    "next_boundary": {
+     "at": 1790596800000,
+     "kind": "open"
+    },
+    "open": false,
+    "venue": "America/New_York"
+   },
+   "chains": [
+    {
+     "chain": "avax-fuji",
+     "oracle": "0xf73b9580d407f5e5cf931940b06dc633d7a95906",
+     "max_premium_bps": 200
+    }
+   ]
+  },
+  {
+   "pair": "USD/MXN",
+   "tenor": {
+    "max_secs": 7776000,
+    "min_secs": 600
+   },
+   "notional": {
+    "min": "10000",
+    "max": "10000000"
+   },
+   "session": {
+    "label": "Sun 18:00 \u2013 Fri 17:00",
+    "next_boundary": {
+     "at": 1790546400000,
+     "kind": "open"
+    },
+    "open": false,
+    "venue": "America/New_York"
+   },
+   "chains": [
+    {
+     "chain": "avax-fuji",
+     "oracle": "0x83f01ef385fde7f42ee66049d30570dc866b77ca",
+     "max_premium_bps": 200
+    }
+   ]
+  },
+  {
+   "pair": "USD/PHP",
+   "tenor": {
+    "max_secs": 7776000,
+    "min_secs": 600
+   },
+   "notional": {
+    "min": "10000",
+    "max": "10000000"
+   },
+   "session": {
+    "label": "Sun 18:00 \u2013 Fri 17:00",
+    "next_boundary": {
+     "at": 1790546400000,
+     "kind": "open"
+    },
+    "open": false,
+    "venue": "America/New_York"
+   },
+   "chains": [
+    {
+     "chain": "avax-fuji",
+     "oracle": "0x31445247647350db313caadc6771e6299e0a68c9",
+     "max_premium_bps": 200
+    }
+   ]
+  }
+ ],
+ "scenario": {
+  "root": "0xd077d34f1788d1e0c4a75fa31673a63df6f64090c512257ebb3f9b3e7d4634fa",
+  "version": "crx-scn-2026Q3-eps-29"
+ }
+}
