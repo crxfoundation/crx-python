@@ -6,7 +6,7 @@ from .errors import (
     DepositFailed, EarlierOutcome, InsufficientCollateral, LegIdTaken, LegLive, MarkUnavailable, MarketClosed,
     MarketPaused, NetworkError, NoQuotes, NotWhitelisted, OwnRoundOpen, PositionMatured, QuoteDropped, QuoteExpired,
     QuoteFillsFull, QuoteFormatOutdated, QuoteLost, QuoteNotYours, QuoteRejected, RateLimited, RateOutOfBand,
-    RefusedToSign, Rejected, RelayUnavailable, RfqCancelled, SeatCannotSign, SeatNotReady, SendUnknown, ServerError,
+    RefusedToSign, Rejected, RfqCancelled, SeatCannotSign, SeatNotReady, SendUnknown, ServerError,
     ServiceUnavailable, TradeInFlight, TradeUnknown, TxFailed, UnknownOrEnded, WithdrawInProgress, WithdrawUnknown,
 )
 from .models import (

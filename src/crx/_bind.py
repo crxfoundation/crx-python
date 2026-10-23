@@ -26,8 +26,8 @@ MAX_POSTS = 3  # accept bodies per trade, each posted once
 NOTHING_SENT = (QuoteExpired, OwnRoundOpen, QuoteNotYours, RateLimited, Declined, ServiceUnavailable)
 # Declines sent before the accept reserves anything, whatever the HTTP status.
 DECLINES = ("rate_out_of_band", "mark_unavailable", "position_matured")
-# The service takes no new trade and reserves nothing. Older gateways send the second code.
-UNAVAILABLE = ("service_unavailable", "relay_unavailable")
+# The service takes no new trade and reserves nothing.
+UNAVAILABLE = ("service_unavailable",)
 TEMPLATE = "trade_template"
 STALE = "trade_stale"
 
