@@ -81,8 +81,8 @@ print(w.amount, w.status)
 | `markets()` | Lists each pair with its session, pause state, notional limits and premium cap, with no key. |
 | `market(pair)` | Returns one pair, or raises `market_paused` when this network does not offer it. |
 | `next_check()` | Returns the time of the next hourly check, UTC, with no request. |
-| `quote(pair, side, notional)` | Opens an RFQ and returns the best firm quote after the 10 s window. |
-| `ask(pair, side, notional)` | Opens an RFQ and returns at once, and `.quote()` on the result returns the winner after the 10 s window. |
+| `quote(pair, side, notional, settles=)` | Opens an RFQ and returns the best firm quote after the 10 s window. |
+| `ask(pair, side, notional, settles=)` | Opens an RFQ and returns at once, and `.quote()` on the result returns the winner after the 10 s window. |
 | `accept(quote)`, `trade(quote)` | Signs the trade, posts it once and waits up to `wait` for `open` or `refused`. |
 | `reject(quote)` | Sends nothing, and makes a later `accept()` on the quote's RFQ raise `quote_rejected`. |
 | `deposit(amount)` | Deposits USDC and waits up to `wait` for it to count in free collateral. On testnet, it first mints the test USDC the wallet lacks. |
