@@ -1003,10 +1003,10 @@ class Client:
                     wait: float | None = None) -> Close:
         """Close an open trade with its counterparty, or let another seat take over this seat's side.
 
-        The request goes to the counterparty and to the makers, or to the one seat ``to`` names. An answer of
-        the counterparty inside the price band and at least as good as the best other quote wins, and the
-        trade ends for both seats. Else the best quote of another seat wins and that seat takes over this
-        seat's side. The gateway refuses a rate outside its
+        The request goes to the makers, or to the one seat ``to`` names, and to the counterparty when the
+        gateway offers closes with it. An answer of the counterparty inside the price band and at least as
+        good as the best other quote wins, and the trade ends for both seats. Else the best quote of another
+        seat wins and that seat takes over this seat's side. The gateway refuses a rate outside its
         price band. The SDK checks the close against the trade, then signs it. CRX sends the transaction and
         pays the network fee.
 

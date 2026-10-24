@@ -397,7 +397,10 @@ def _post_quote(c: "Client", rfq_id: str, path: str, body: dict, quote_id: str, 
                 return
             first = False
         except CrxError as e:
-            view = None if first else _soft(c, 1.0, f"/rfqs/{rfq_id}", until)
+            try:
+                view = None if first else _soft(c, 1.0, f"/rfqs/{rfq_id}", until)
+            except CrxError:
+                raise e from None
             rows = view.get("quotes") if isinstance(view, dict) and isinstance(view.get("quotes"), list) else []
             if any(isinstance(x, dict) and _word(x.get("quote_id")) == quote_id for x in rows):
                 return
@@ -411,10 +414,12 @@ def _post_sign(c: "Client", rfq_id: str, sig: str, due: str, until: float) -> bo
     form (round status ``due``) and ``until`` has not passed: a repeat of the same signature is safe. A
     refusal raises. Return False when ``until`` passed with no answer."""
     path = f"/rfqs/{rfq_id}/close/sign"
+    first = True
     while True:
-        if c._clock() >= until:
+        if not first and c._clock() >= until:
             log.info("POST %s: the form's window ended; the round's status decides", path)
             return False
+        first = False
         try:
             c._gw.request("POST", path, body={"sig": sig})
             return True
@@ -570,7 +575,8 @@ def close_trade(c: "Client", trade_id: Any, to: Any, wait: float, poll: float = 
                              to=None if to is None else incoming)
         sig = sign_form(c, t, "AllocationConsent", consent_message(w, t["commitment"], t["item"]["salt"]))
         until = min(end, _w("uint64", w["deadline"]))
-        if not _post_sign(c, rfq_id, sig, "consenting", until):
+        if not _post_sign(c, rfq_id, sig, "consenting", until) and (
+                (_soft(c, poll, f"/rfqs/{rfq_id}") or {}).get("status") not in ("armed", "settled")):
             return Close(trade_id=tid, rfq_id=rfq_id, to=str(t["item"].get("incoming", "")).lower(), rate=rate,
                          status="unsigned", item=None, tx=None, raw=t, counterparty=t.get("path") == "close")
     a = _arm(c, rfq_id, end, poll)
@@ -638,7 +644,7 @@ def _await_award(c: "Client", rfq_id: str, quote_id: str, cursor: int, end: floa
         for r in rows:
             if not _of(r, rfq_id):
                 continue
-            mine = str(r["data"].get("quote_id", "")).lower() == quote_id
+            mine = quote_id in (str(r["data"].get("quote_id", "")).lower(), str(r["data"].get("leg_id", "")).lower())
             if r.get("type") == "rfq.awarded":
                 if mine:
                     seq, ts = r.get("seq"), r.get("ts")
@@ -789,7 +795,7 @@ def requests(c: "Client", after: int | None, wait: float | None, poll: float, st
         try:
             rows, cursor = _tape(c, cursor)
         except TRANSIENT as e:
-            _backoff(c, e, poll, "close_requests")
+            _backoff(c, e, poll, "close_requests", end)
             rows = []
         for row in rows:
             d = row.get("data")
@@ -851,6 +857,9 @@ def answer(c: "Client", request: Any, rate: Any, wait: float, poll: float = 0.5,
         return Close(trade_id=tid, rfq_id=rfq_id, to=seat, rate=rate_d, status="unsigned", item=None, tx=None, raw=t,
                      counterparty=True)
     status, _ = _taken(c, rfq_id, cursor, True, end, max(poll, 2.0), done="closed")
-    a = _soft(c, poll, f"/rfqs/{rfq_id}/close/arm-tx") or {}
+    try:
+        a = _soft(c, poll, f"/rfqs/{rfq_id}/close/arm-tx", end) or {}
+    except CrxError:
+        a = {}
     return Close(trade_id=tid, rfq_id=rfq_id, to=seat, rate=rate_d, status=status, item=_word(a.get("item")),
                  tx=_word(a.get("tx")), raw=t, final=status == "closed", counterparty=True)
