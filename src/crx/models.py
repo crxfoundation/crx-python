@@ -410,13 +410,14 @@ class Close:
     """The result of ``Client.close_trade``.
 
     Attributes:
-        to: The seat that takes the trade over.
+        to: The seat that takes the trade over, or the counterparty that closes it.
         rate: The close rate.
         status: ``sending`` while CRX sends the transaction, ``pending`` until the hourly check counts it,
             ``closed``, or ``refused``.
         item: The chain's id of the signed close.
         tx: The transaction hash once it lands.
         final: True once the close is final.
+        counterparty: True when the trade closes with its counterparty and ends for both seats.
     """
 
     trade_id: str
@@ -428,6 +429,7 @@ class Close:
     tx: str | None
     raw: dict = field(repr=False, compare=False)
     final: bool = False
+    counterparty: bool = False
 
 
 @dataclass(frozen=True)

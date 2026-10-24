@@ -35,8 +35,8 @@ def camel(item, fields):
     return {n: item[_close._snake(n)] for n, _ in fields}
 
 
-def allocation(role, incoming, *, rate=18_612_345, side=1, taker=True, deadline=T0 + 570, **edits):
-    """Return the close template the gateway serves ``role`` on an elective round."""
+def allocation(role, incoming, *, rate=18_612_345, side=1, taker=True, deadline=T0 + 570, path=None, **edits):
+    """Return the close template the gateway serves ``role`` on an elective round. ``side`` is the exiting seat's."""
     old = old_terms(side if taker else -side)
     item = {"old_id": terms_id(old, EX, REM) if taker else terms_id(old, REM, EX), "exiting_side": EX,
             "remaining_side": REM, "incoming": incoming, "incoming_side": e7.h0x(_close.side_id(INC_C)),
@@ -46,7 +46,7 @@ def allocation(role, incoming, *, rate=18_612_345, side=1, taker=True, deadline=
     item.update(edits)
     w = camel(item, e7.ALLOCATION_ITEM_FIELDS)
     commitment = e7.h0x(e7.hidden_commitment(e7.ALLOCATION_ITEM_FIELDS, w, SALT))
-    if role == "exiting":
+    if role != "incoming":
         primary, kind, msg = "AllocationConsent", "allocation_consent", _close.consent_message(w, commitment, SALT)
     else:
         primary, kind = "AllocationAcceptance", "allocation_acceptance"
@@ -57,6 +57,8 @@ def allocation(role, incoming, *, rate=18_612_345, side=1, taker=True, deadline=
          "digest": e7.h0x(e7.typed_digest(td)), "typed_data": td, "signed": False}
     if role == "exiting":
         t["trade_id"] = TRADE
+    if path is not None:
+        t["path"] = path
     return t
 
 
@@ -175,3 +177,32 @@ def test_close_vectors_are_the_gateway_words():
         got = _close.forced_spread(int(f["notional"]), int(f["mark"]), int(f["rate"]), f["side"], f["usd_is_base"],
                                    int(f["entry"]))
         assert str(got) == f["spread"]
+
+
+def test_answer_close_signs_the_same_consent_as_the_exiting_seat(session, tmp_path):
+    """The counterparty's answer wins, and both seats sign one AllocationConsent: the trade ends for both."""
+    clock = Clock(T0)
+    seat = INCOMING["address"].lower()
+    plain = dict(path="close", incoming_side=REM, incoming_c="0x" + "00" * 32)
+    t = allocation("remaining", seat, **plain)
+    assert t["digest"] == allocation("exiting", seat, **plain)["digest"]
+    c = client(session, tmp_path, INCOMING, clock)
+    qid = _close.close_quote_id(RFQ, seat, 18_612_345, "answer-1")
+    rows = [{"type": "trade.close_requested", "seq": 4, "data": {
+        "rfq_id": RFQ, "trade_id": TRADE, "quote_expiry": (T0 + 120) * 1000, "pair": "USD/MXN", "notional": "100",
+        "expiry": SETTLE * 1000}},
+            {"type": "rfq.awarded", "seq": 6, "data": {"rfq_id": RFQ, "quote_id": qid,
+                                                       "digest_kind": "allocation_consent"}},
+            {"type": "trade.closed", "seq": 8, "data": {"trade_id": TRADE, "rfq_id": RFQ, "ended": True}}]
+    session.routes.update({
+        ("GET", "/trades"): lambda req: {"seq": 8, "trades": [x for x in rows if x["seq"] > int(req["query"]["after"][0])]},
+        ("GET", "/positions"): {"positions": [closed_position(side=-1)]},
+        ("POST", f"/rfqs/{RFQ}/close/answer"): {"quote_id": qid, "status": "quoted"},
+        ("GET", f"/rfqs/{RFQ}/close"): t,
+        ("POST", f"/rfqs/{RFQ}/close/sign"): signed_by(lambda: e7.hx(t["digest"]), seat, {"state": "armed"}),
+        ("GET", f"/rfqs/{RFQ}"): {"status": "armed"},
+        ("GET", f"/rfqs/{RFQ}/close/arm-tx"): {"status": "pending"},
+    })
+    req = next(iter(c.close_requests(wait=0)))
+    out = c.answer_close(req, "18.612345", wait=600, client_quote_id="answer-1")
+    assert (out.status, out.counterparty, out.trade_id) == ("closed", True, TRADE)

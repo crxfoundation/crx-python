@@ -1000,11 +1000,13 @@ class Client:
         log.info("rfq %s rejected on this client; nothing sent", quote.rfq_id)
 
     def close_trade(self, trade_id: str, *, to: str | None = None, wait: float | None = None) -> Close:
-        """Close an open trade: another seat takes over this seat's side at its quoted rate.
+        """Close an open trade with its counterparty, or let another seat take over this seat's side.
 
-        The request goes to the makers, or to the one seat ``to`` names, and the best quote wins. The gateway
-        refuses a rate outside its price band. The SDK checks the close against the trade, then signs it. CRX
-        sends the transaction and pays the network fee.
+        The request goes to the counterparty and to the makers, or to the one seat ``to`` names. An answer of
+        the counterparty inside the price band wins and the trade ends for both seats. Else the best quote of
+        another seat wins and that seat takes over this seat's side. The gateway refuses a rate outside its
+        price band. The SDK checks the close against the trade, then signs it. CRX sends the transaction and
+        pays the network fee.
 
         Args:
             trade_id: The trade, as ``positions()`` lists it.
@@ -1020,6 +1022,42 @@ class Client:
         """
         self._need_seat()
         return _close.close_trade(self, trade_id, to, self._wait_of(wait))
+
+    def close_requests(
+        self, *, after: int | None = None, wait: float | None = None, poll: float = 1.0,
+        stop: threading.Event | None = None,
+    ) -> Iterator[Rfq]:
+        """Yield each request of a counterparty to close a trade with this seat, as it arrives.
+
+        Answer one with ``answer_close()`` before ``Rfq.closes_at``.
+
+        Args:
+            after: Start after this ``Rfq.seq``. Defaults to the start of the tape.
+            wait: Seconds until the stream ends. Defaults to no end.
+            poll: Seconds between reads. Defaults to 1.
+            stop: A ``threading.Event`` that ends the stream when set.
+        """
+        self._need_seat()
+        return _close.requests(self, after, wait, poll, stop)
+
+    def answer_close(self, request: Rfq, rate: Any, *, wait: float | None = None,
+                     client_quote_id: str | None = None) -> Close:
+        """Answer a request from ``close_requests()`` at ``rate``. When the answer wins, sign the close.
+
+        An answer inside the price band wins over the quotes of other seats, and the trade ends for both
+        seats. The SDK checks the close against the trade and the rate, then signs it.
+
+        Args:
+            rate: The close rate for the trade's pair, up to 6 decimals.
+            wait: Seconds to wait for ``closed`` or ``refused``. Default 30 minutes on testnet, 15 on mainnet.
+            client_quote_id: Label for the answer. Defaults to a new id.
+
+        Raises:
+            QuoteExpired: The round ended without this answer.
+            RefusedToSign: The close differs from the trade or the rate. The SDK declines it. Nothing is signed.
+        """
+        self._need_seat()
+        return _close.answer(self, request, rate, self._wait_of(wait), client_quote_id=client_quote_id)
 
     def _trade_once(self, b: Binder, quote: Quote, wait: float) -> tuple[Trade, dict]:
         """Accept ``quote``. A ``QuoteDropped`` carries the best other live quote on the RFQ in ``.best``."""

@@ -9,12 +9,12 @@ import logging
 import re
 import uuid
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Iterator
 
 from eth_utils import keccak
 
 from . import _eip712 as e7
-from ._maker import PAGE, _page, _plain, _rate, _slash, _word, read
+from ._maker import PAGE, TRANSIENT, _page, _plain, _rate, _slash, _word, read, rfq_of
 from .errors import BadAnswer, BadRequest, CrxError, NetworkError, NoQuotes, QuoteExpired, RefusedToSign, clean
 from .models import Close, Rfq, TakeOver, dec, side_word
 from .signer import sign_typed
@@ -32,6 +32,7 @@ HOUR = 3600  # a close-out item's deadline falls inside the hour of its round
 BEST_EXEC_K, BEST_EXEC_FLOOR_BPS = 2, 100  # the close-out fee cap: K * ceil(gross * floor bps / 10_000)
 ACCEPTANCE, CONSENT, FAILOVER = "allocation_acceptance", "allocation_consent", "failover_consent"
 ENDED = ("expired", "cancelled")  # round statuses with no close
+PICK_SLACK = 30  # seconds past a request's quote end that its pick may still arrive
 
 
 def close_quote_id(rfq_id: str, maker: str, rate_e6: int, client_quote_id: str) -> str:
@@ -162,10 +163,21 @@ def check_deadline(deadline: int, now: float, longest: int) -> None:
         raise _refuse("the item's deadline is not in its window")
 
 
-def check_commitment(t: dict, fields: Any, words: dict) -> None:
-    """Check the side id and the commitment of the item's hidden words and salt."""
-    if _w("bytes32", words["incomingSide"]) != side_id(t.get("incoming_c")):
-        raise _refuse("the item's incoming_side is not the side id of incoming_c")
+def check_commitment(t: dict, fields: Any, words: dict, counterparty: bool = False) -> None:
+    """Check the side id and the commitment of the item's hidden words and salt.
+
+    On a close with the counterparty the incoming side is the remaining side.
+    """
+    if counterparty:
+        if _w("bytes32", words["incomingSide"]) != _w("bytes32", words["remainingSide"]):
+            raise _refuse("the item's incoming_side is not its remaining_side")
+    else:
+        try:
+            own = side_id(t.get("incoming_c"))
+        except ValueError:
+            raise _refuse("the close template's incoming_c cannot be read") from None
+        if _w("bytes32", words["incomingSide"]) != own:
+            raise _refuse("the item's incoming_side is not the side id of incoming_c")
     try:
         salt = e7.h0x(_w("bytes32", t["item"]["salt"]))
     except (KeyError, ValueError):
@@ -224,18 +236,22 @@ def check_allocation(t: Any, *, role: str, seat: str, rfq_id: str, rate_e6: int,
                      notional_e6: int, settlement_ms: int, now: float) -> dict:
     """Check an allocation template for ``role`` and return its words.
 
-    ``side`` is the side that moves: the exiting seat's own side, which the incoming seat takes.
+    ``role`` is ``exiting``, ``incoming`` (the seat that takes the side over) or ``remaining`` (the
+    counterparty that closes the trade with the exiting seat). ``side`` is the exiting seat's own side.
     """
     if not isinstance(t, dict):
         raise _refuse("the close template cannot be read")
-    kind = CONSENT if role == "exiting" else ACCEPTANCE
+    kind = ACCEPTANCE if role == "incoming" else CONSENT
     if t.get("role") != role or t.get("digest_kind") != kind:
         raise _refuse(f"the template is not the {role} seat's {kind}")
+    path = t.get("path", "novation")
+    if path not in {"exiting": ("novation", "close"), "remaining": ("close",)}.get(role, ("novation",)):
+        raise _refuse(f"the template's path {clean(path, 20)} is not the {role} seat's")
     if str(t.get("rfq_id", "")).lower() != rfq_id:
         raise _refuse("the template is for another round")
     w = _words(t.get("item"), e7.ALLOCATION_ITEM_FIELDS)
     incoming = _w("address", w["incoming"])
-    if (incoming == seat) != (role == "incoming"):
+    if (incoming == seat) != (role != "exiting"):
         raise _refuse("the item's incoming seat is not the seat's role")
     if _w("uint256", w["closeRate"]) != rate_e6:
         raise _refuse(f"the item's close rate is not {_plain(Decimal(rate_e6).scaleb(-6))}")
@@ -251,7 +267,7 @@ def check_allocation(t: Any, *, role: str, seat: str, rfq_id: str, rate_e6: int,
         raise _refuse("the item and the old leg differ")
     check_leg(old, w["oldId"], w["exitingSide"], w["remainingSide"], side)
     check_deadline(_w("uint64", w["deadline"]), now, EXIT_WINDOW)
-    check_commitment(t, e7.ALLOCATION_ITEM_FIELDS, w)
+    check_commitment(t, e7.ALLOCATION_ITEM_FIELDS, w, counterparty=path == "close")
     return w
 
 
@@ -419,7 +435,7 @@ def close_trade(c: "Client", trade_id: Any, to: Any, wait: float, poll: float = 
     return Close(
         trade_id=tid, rfq_id=rfq_id, to=str(item.get("incoming", "")).lower(), rate=rate,
         status=clean(a.get("status") or "sending", 40), item=_word(a.get("item")), tx=_word(a.get("tx")), raw=a,
-        final=a.get("final") is True,
+        final=a.get("final") is True, counterparty=t.get("path") == "close",
     )
 
 
@@ -470,13 +486,19 @@ def _decline(c: "Client", rfq_id: str, quote_id: str, digest: Any) -> None:
         log.info("close decline on rfq %s: %s", rfq_id, e.code)
 
 
-def _taken(c: "Client", rfq_id: str, trade_id: str, cursor: int, elective: bool, end: float, poll: float) -> str:
-    """Wait for the trade to move to the seat: ``open``, ``refused``, or ``pending`` when ``end`` passes."""
+def _taken(c: "Client", rfq_id: str, trade_id: str, cursor: int, elective: bool, end: float, poll: float,
+           done: str = "open") -> str:
+    """Wait for the close to land: ``done``, ``refused``, or ``pending`` when ``end`` passes.
+
+    ``done`` is ``open`` for the seat that takes the side over and ``closed`` for the counterparty.
+    """
     while True:
         rows, cursor = _tape(c, cursor)
         for r in rows:
-            if r.get("type") == "trade.novated" and (_of(r, rfq_id, "close_rfq_id") or _of(r, trade_id, "trade_id")):
-                return "open"
+            moved = r.get("type") == "trade.novated" and done == "open"
+            ended = r.get("type") == "trade.closed" and done == "closed" and r["data"].get("ended") is True
+            if (moved or ended) and (_of(r, rfq_id, "close_rfq_id") or _of(r, rfq_id) or _of(r, trade_id, "trade_id")):
+                return done
             if r.get("type") == "trade.closed_out" and _of(r, rfq_id, "close_rfq_id"):
                 return "refused"
         view = _view(c, rfq_id)
@@ -485,7 +507,7 @@ def _taken(c: "Client", rfq_id: str, trade_id: str, cursor: int, elective: bool,
         if elective and view.get("status") == "armed":
             a = c._gw.request("GET", f"/rfqs/{rfq_id}/close/arm-tx")
             if a.get("status") in ("closed", "refused"):
-                return "open" if a["status"] == "closed" else "refused"
+                return done if a["status"] == "closed" else "refused"
         if c._clock() >= end:
             return "pending"
         c._sleep(poll)
@@ -552,3 +574,84 @@ def take_over(c: "Client", rfq: Any, rate: Any, wait: float, poll: float = 0.5,
         rfq_id=r.rfq_id, quote_id=quote_id, trade_id=trade_id, pair=pair, side=side_word(side) or "",
         notional=r.notional, rate=rate_d, status=status, raw=t,
     )
+
+
+# ── the counterparty ──────────────────────────────────────────────────────────
+
+
+def requests(c: "Client", after: int | None, wait: float | None, poll: float, stop: Any) -> Iterator[Rfq]:
+    """Yield each live request to close a trade of this seat once, oldest first, until ``wait`` ends or ``stop`` is set."""
+    cursor = int(after or 0)
+    end = None if wait is None else c._clock() + max(float(wait), 0.0)
+    seen: set[str] = set()
+    while True:
+        try:
+            rows, cursor = _tape(c, cursor)
+        except TRANSIENT as e:
+            log.warning("close_requests: %s; reading again in %s s", e.code, poll)
+            rows = []
+        for row in rows:
+            d = row.get("data")
+            if row.get("type") != "trade.close_requested" or not isinstance(d, dict):
+                continue
+            ends = d.get("quote_expiry")
+            r = rfq_of({**d, "kind": "close", "closes_at": ends}, row.get("seq"))
+            live = isinstance(ends, int) and not isinstance(ends, bool) and ends > c._clock() * 1000
+            if r is None or r.rfq_id in seen or not live or _word(d.get("trade_id")) is None:
+                continue
+            seen.add(r.rfq_id)
+            yield r
+        if (end is not None and c._clock() >= end) or (stop is not None and stop.is_set()):
+            return
+        c._sleep(poll)
+
+
+def answer(c: "Client", request: Any, rate: Any, wait: float, poll: float = 0.5,
+           client_quote_id: str | None = None) -> Close:
+    if not isinstance(request, Rfq) or _word(request.raw.get("trade_id")) is None:
+        raise BadRequest("answer_close() takes a request from close_requests()")
+    d = request.raw
+    tid, rfq_id = _word(d["trade_id"]), request.rfq_id
+    pos = _position(c, tid)
+    try:
+        pair, own = _slash(pos["pair"]), _w("int8", pos["side"])
+        notional_e6, settlement_ms = e7.scaled6(pos["notional"]), int(pos["settlement"])
+    except (KeyError, TypeError, ValueError, ArithmeticError):
+        raise BadAnswer("/positions sent a row this SDK cannot read") from None
+    if own not in (1, -1) or request.pair != pair or request.notional is None or \
+            e7.scaled6(request.notional) != notional_e6 or d.get("expiry") != settlement_ms:
+        raise BadAnswer("the close request does not match the trade's pair, notional or settlement")
+    rate_d = _rate(rate)
+    rate_e6 = e7.scaled6(rate_d)
+    if client_quote_id is not None and not (isinstance(client_quote_id, str) and 1 <= len(client_quote_id) <= 128):
+        raise BadRequest("client_quote_id is 1 to 128 printable characters")
+    seat = c.address
+    c._chain_info()
+    end = c._clock() + wait
+    cid = client_quote_id or "answer-" + uuid.uuid4().hex
+    quote_id = close_quote_id(rfq_id, seat, rate_e6, cid)
+    try:
+        q = c._gw.request("POST", f"/rfqs/{rfq_id}/close/answer", body={"rate": _plain(rate_d), "client_quote_id": cid})
+    except NetworkError as e:
+        log.info("close answer on rfq %s: %s; the award decides whether it rests", rfq_id, e.code)
+    else:
+        if _word(q.get("quote_id")) != quote_id:
+            raise BadAnswer("the gateway named another quote id for this answer")
+    cursor = request.seq if isinstance(request.seq, int) and request.seq > 0 else 0
+    ends = d.get("quote_expiry") if isinstance(d.get("quote_expiry"), int) else None
+    award_end = end if ends is None else min(end, ends / 1000 + PICK_SLACK)
+    award, cursor = _await_award(c, rfq_id, quote_id, cursor, award_end, poll)
+    t = c._gw.request("GET", f"/rfqs/{rfq_id}/close")
+    try:
+        if award.get("digest_kind") != CONSENT:
+            raise _refuse(f"the award names another form ({clean(award.get('digest_kind'), 40)})")
+        w = check_allocation(t, role="remaining", seat=seat, rfq_id=rfq_id, rate_e6=rate_e6, pair=pair, side=-own,
+                             notional_e6=notional_e6, settlement_ms=settlement_ms, now=c._clock())
+        sig = sign_form(c, t, "AllocationConsent", consent_message(w, t["commitment"], t["item"]["salt"]))
+    except RefusedToSign:
+        _decline(c, rfq_id, quote_id, t.get("digest") if isinstance(t, dict) else None)
+        raise
+    _post_once_more(c, f"/rfqs/{rfq_id}/close/sign", {"sig": sig})
+    status = _taken(c, rfq_id, tid, cursor, True, end, max(poll, 2.0), done="closed")
+    return Close(trade_id=tid, rfq_id=rfq_id, to=seat, rate=rate_d, status=status, item=None, tx=None, raw=t,
+                 counterparty=True)

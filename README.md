@@ -85,7 +85,8 @@ print(w.amount, w.status)
 | `ask(pair, side, notional, settles=)` | Opens an RFQ and returns at once, and `.quote()` on the result returns the winner after the 10 s window. |
 | `accept(quote)`, `trade(quote)` | Signs the trade, posts it once and waits up to `wait` for `open` or `refused`. |
 | `reject(quote)` | Sends nothing, and makes a later `accept()` on the quote's RFQ raise `quote_rejected`. |
-| `close_trade(trade_id, to=None)` | Closes an open trade: the best quote of another seat, or of the seat `to` names, takes over this seat's side. Waits up to `wait` for `closed` or `refused`. |
+| `close_trade(trade_id, to=None)` | Closes an open trade with its counterparty when it answers inside the price band; else the best quote of another seat, or of the seat `to` names, takes over this seat's side. Waits up to `wait` for `closed` or `refused`. |
+| `close_requests()`, `answer_close(request, rate)` | Yields each request of a counterparty to close a trade with this seat. `answer_close()` answers one; an answer inside the price band closes the trade for both seats. |
 | `deposit(amount)` | Deposits USDC and waits up to `wait` for it to count in free collateral. On testnet, it first mints the test USDC the wallet lacks. |
 | `withdraw(amount=None)` | Withdraws USDC to the seat wallet, or all free collateral with no amount. |
 | `balance()` | Returns collateral, free collateral, margin and withdraw state. |
