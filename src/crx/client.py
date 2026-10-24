@@ -1023,6 +1023,9 @@ class Client:
             OwnRoundOpen: Another close of this seat is still open at the accept.
             CrxError: Code ``conflict`` when a close of this trade is already open.
             RefusedToSign: The best rate is past ``limit``, or the close differs from the trade. Nothing is signed.
+
+        A round with no accept stays open for its 120 s window. A new ``close_trade()`` on the trade answers
+        ``conflict`` until it ends.
         """
         self._need_seat()
         return _close.close_trade(self, trade_id, to, self._wait_of(wait), limit=limit)
@@ -1033,7 +1036,8 @@ class Client:
     ) -> Iterator[Rfq]:
         """Yield each request of a counterparty to close a trade with this seat, as it arrives.
 
-        Answer one with ``answer_close()`` before ``Rfq.closes_at``.
+        Answer one with ``answer_close()`` before ``Rfq.closes_at``. A gateway that does not offer closes with
+        the counterparty sends no request.
 
         Args:
             after: Start after this ``Rfq.seq``. Defaults to the start of the tape.

@@ -190,7 +190,7 @@ def test_answer_close_signs_the_same_consent_as_the_exiting_seat(session, tmp_pa
     assert t["digest"] == allocation("exiting", seat, **plain)["digest"]
     c = client(session, tmp_path, INCOMING, clock)
     qid = _close.close_quote_id(RFQ, seat, 18_612_345, "answer-1")
-    rows = [{"type": "trade.close_requested", "seq": 4, "data": {
+    rows = [{"type": "trade.close_requested", "seq": 4, "ts": T0 * 1000, "data": {
         "rfq_id": RFQ, "trade_id": TRADE, "quote_expiry": (T0 + 120) * 1000, "pair": "USD/MXN", "notional": "100",
         "expiry": SETTLE * 1000}},
             {"type": "rfq.awarded", "seq": 6, "data": {"rfq_id": RFQ, "quote_id": qid,
