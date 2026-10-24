@@ -453,6 +453,12 @@ def _soft(c: "Client", poll: float, path: str, until: float | None = None) -> di
         return None
 
 
+def _moved_on(c: "Client", rfq_id: str, end: float) -> bool:
+    """Return True when one read shows the round past the winner's form: its signature landed."""
+    view = _soft(c, 1.0, f"/rfqs/{rfq_id}", end) or {}
+    return view.get("status") in ("consenting", "armed", "settled")
+
+
 def _template(c: "Client", rfq_id: str, until: float) -> dict:
     """Read the seat's close template, through transient errors, until ``until``."""
     while True:
@@ -576,7 +582,7 @@ def close_trade(c: "Client", trade_id: Any, to: Any, wait: float, poll: float = 
         sig = sign_form(c, t, "AllocationConsent", consent_message(w, t["commitment"], t["item"]["salt"]))
         until = min(end, _w("uint64", w["deadline"]))
         if not _post_sign(c, rfq_id, sig, "consenting", until) and (
-                (_soft(c, poll, f"/rfqs/{rfq_id}") or {}).get("status") not in ("armed", "settled")):
+                (_soft(c, poll, f"/rfqs/{rfq_id}", end) or {}).get("status") not in ("armed", "settled")):
             return Close(trade_id=tid, rfq_id=rfq_id, to=str(t["item"].get("incoming", "")).lower(), rate=rate,
                          status="unsigned", item=None, tx=None, raw=t, counterparty=t.get("path") == "close")
     a = _arm(c, rfq_id, end, poll)
@@ -763,7 +769,7 @@ def take_over(c: "Client", rfq: Any, rate: Any, wait: float, poll: float = 0.5,
     except RefusedToSign:
         _decline(c, r.rfq_id, quote_id, t.get("digest") if isinstance(t, dict) else None)
         raise
-    if _post_sign(c, r.rfq_id, sig, "signing", sign_by):
+    if _post_sign(c, r.rfq_id, sig, "signing", sign_by) or _moved_on(c, r.rfq_id, end):
         status, moved = _taken(c, r.rfq_id, cursor, kind == ACCEPTANCE, end, max(poll, 2.0))
     else:
         status, moved = "unsigned", None
@@ -853,7 +859,7 @@ def answer(c: "Client", request: Any, rate: Any, wait: float, poll: float = 0.5,
     except RefusedToSign:
         _decline(c, rfq_id, quote_id, t.get("digest") if isinstance(t, dict) else None)
         raise
-    if not _post_sign(c, rfq_id, sig, "signing", sign_by):
+    if not _post_sign(c, rfq_id, sig, "signing", sign_by) and not _moved_on(c, rfq_id, end):
         return Close(trade_id=tid, rfq_id=rfq_id, to=seat, rate=rate_d, status="unsigned", item=None, tx=None, raw=t,
                      counterparty=True)
     status, _ = _taken(c, rfq_id, cursor, True, end, max(poll, 2.0), done="closed")
