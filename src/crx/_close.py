@@ -265,8 +265,9 @@ def check_allocation(t: Any, *, role: str, seat: str, rfq_id: str, rate_e6: int,
     incoming = _w("address", w["incoming"])
     if (incoming == seat) != (role != "exiting"):
         raise _refuse("the item's incoming seat is not the seat's role")
-    if to is not None and path != "close" and incoming != to:
+    if to is not None and (path == "close" or incoming != to):
         raise _refuse("the item's incoming seat is not the seat to= names")
+    plain = path == "close"
     try:
         close_rate, spread = _w("uint128", w["closeRate"]), _w("uint128", w["spread"])
     except ValueError:
@@ -275,13 +276,20 @@ def check_allocation(t: Any, *, role: str, seat: str, rfq_id: str, rate_e6: int,
         raise _refuse(f"the item's close rate is not {_plain(Decimal(rate_e6).scaleb(-6))}")
     if spread != 0:
         raise _refuse("the item carries a spread")
-    if _w("bytes32", w["pairId"]) != e7.pair_id(pair) or _w("uint256", w["notional"]) != notional_e6:
-        raise _refuse("the item's pair or notional is not the trade's")
-    if _w("uint40", w["settlement"]) * 1000 != settlement_ms:
-        raise _refuse("the item's settlement is not the trade's")
+    leg = (_w("bytes32", w["pairId"]), _w("int8", w["side"]), _w("uint256", w["notional"]), _w("uint40", w["settlement"]))
+    if plain:
+        # A close with the counterparty names the trade through old_id alone: its leg words are zero.
+        if leg != (bytes(32), 0, 0, 0):
+            raise _refuse("the close with the counterparty carries leg words")
+    else:
+        if leg[0] != e7.pair_id(pair) or leg[2] != notional_e6:
+            raise _refuse("the item's pair or notional is not the trade's")
+        if leg[3] * 1000 != settlement_ms:
+            raise _refuse("the item's settlement is not the trade's")
     old = _old_terms(t.get("old"))
-    check_trade(old, _w("int8", w["side"]), pair=pair, side=side, notional_e6=notional_e6, settlement_ms=settlement_ms)
-    if old["settlement"] != _w("uint40", w["settlement"]) or old["notional"] != notional_e6:
+    check_trade(old, side if plain else leg[1], pair=pair, side=side, notional_e6=notional_e6,
+                settlement_ms=settlement_ms)
+    if not plain and (old["settlement"] != leg[3] or old["notional"] != notional_e6):
         raise _refuse("the item and the old leg differ")
     if entry is not None and (old["rate"], old["premium_bps"]) != entry:
         raise _refuse("the old leg's rate or premium is not the trade's")

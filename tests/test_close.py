@@ -43,6 +43,8 @@ def allocation(role, incoming, *, rate=18_612_345, side=1, taker=True, deadline=
             "close_rate": str(rate), "spread": "0", "nonce": "7", "deadline": deadline,
             "pair_id": e7.h0x(e7.pair_id(PAIR)), "side": side, "notional": str(NOTIONAL), "settlement": SETTLE,
             "salt": SALT}
+    if path == "close":
+        item.update(pair_id="0x" + "00" * 32, side=0, notional="0", settlement=0)
     item.update(edits)
     w = camel(item, e7.ALLOCATION_ITEM_FIELDS)
     commitment = e7.h0x(e7.hidden_commitment(e7.ALLOCATION_ITEM_FIELDS, w, SALT))

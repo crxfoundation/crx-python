@@ -1716,7 +1716,9 @@ class Client:
         """Quote a close RFQ at ``rate``. When the quote wins, take over the closing seat's side of the trade.
 
         The quote is a price only. When the round picks it, the SDK checks the item against the RFQ and the
-        rate, then signs it within the round's sign window. CRX sends the transaction and pays the network fee.
+        rate, then signs it within the round's sign window. On a close-out the seat enters at CRX's mark of the
+        round's fix and receives the fee of its rate against that mark, at most 2 % of the leg's gross. CRX sends
+        the transaction and pays the network fee.
 
         Args:
             rfq: A close ``Rfq`` from ``rfqs(kind="close")``, or its id.
