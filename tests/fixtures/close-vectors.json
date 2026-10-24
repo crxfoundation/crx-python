@@ -1,5 +1,5 @@
 {
- "about": "Close templates and words as crx-api c3696350 builds them: two elective rounds (the exiting seat taker, then maker), three close-out rounds, side ids, open nonces, close quote ids and close-out fees. The seats are anvil test keys 0 and 1: never fund them.",
+ "about": "Close templates and words as crx-api c3696350 builds them: two elective rounds (the exiting seat taker, then maker), five close-out rounds (taker USD/MXN buy, sell and capped; maker USD/MXN; taker EUR/USD), side ids, open nonces, close quote ids and close-out fees. The seats are anvil test keys 0 and 1: never fund them.",
  "close_quote_ids": [
   {
    "client_quote_id": "take-1",
@@ -828,6 +828,274 @@
       "nonce": "2",
       "oldId": "0x49d07baed9a56ae274c8e4cd09f8ca9271074c953768d6c0a09ee252fcc0f5ce",
       "openNonce": "15219405652788785873",
+      "remainingSide": "0x1717171717171717171717171717171717171717171717171717171717171717"
+     },
+     "primaryType": "FailoverConsent",
+     "types": {
+      "EIP712Domain": [
+       {
+        "name": "name",
+        "type": "string"
+       },
+       {
+        "name": "version",
+        "type": "string"
+       },
+       {
+        "name": "chainId",
+        "type": "uint256"
+       },
+       {
+        "name": "verifyingContract",
+        "type": "address"
+       }
+      ],
+      "FailoverConsent": [
+       {
+        "name": "oldId",
+        "type": "bytes32"
+       },
+       {
+        "name": "closedOutSide",
+        "type": "bytes32"
+       },
+       {
+        "name": "remainingSide",
+        "type": "bytes32"
+       },
+       {
+        "name": "incomingSide",
+        "type": "bytes32"
+       },
+       {
+        "name": "incomingC",
+        "type": "bytes32"
+       },
+       {
+        "name": "nonce",
+        "type": "uint64"
+       },
+       {
+        "name": "openNonce",
+        "type": "uint64"
+       },
+       {
+        "name": "deadline",
+        "type": "uint64"
+       },
+       {
+        "name": "commitment",
+        "type": "bytes32"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "c_side": -1,
+   "closed_out_taker": false,
+   "pair": "USD/MXN",
+   "spread": "808625",
+   "template": {
+    "chain": "avax-fuji",
+    "commitment": "0x7b3ed386fd5741e7f760bc408c19e5b7dddc83b7a5e344328ee00ad8be258c8b",
+    "digest": "0x5a0c46e9c45956499a952db100eb79fd025033d7b0283f6f5e8b91abe3d62d0e",
+    "digest_kind": "failover_consent",
+    "domain_separator": "0xbecf297e99c7bf09c89e90162e71f253515219487294e50a4ab0e5e8b60741f2",
+    "incoming_c": "0x5353535353535353535353535353535353535353535353535353535353535353",
+    "item": {
+     "close_time": 1792801620,
+     "closed_out_side": "0x1616161616161616161616161616161616161616161616161616161616161616",
+     "deadline": 1792803000,
+     "feed_id": "0x5454545454545454545454545454545454545454545454545454545454545454",
+     "incoming": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "incoming_side": "0xf1cab04c313f3bfb7357c69bf09efea27b33290488cdeeec080e0a7e79fa09cf",
+     "nonce": "3",
+     "old_id": "0x6dc6c927e934ac5a90559c4376033d84fad9ccb18758e43a37bcf32f52163b2a",
+     "open_nonce": "18226320013929109492",
+     "remaining_side": "0x1717171717171717171717171717171717171717171717171717171717171717",
+     "salt": "0x5555555555555555555555555555555555555555555555555555555555555555",
+     "spread": "808625",
+     "subsidy_max_usd": "0"
+    },
+    "novation_id": "0x626658968fac3ff9c33562edb8d0c7f323ee22ffb996f11e9ab47fc74d4aab9d",
+    "old": {
+     "nonce": 4243,
+     "notional": "100000000",
+     "pair": "0x69f1670ccd0386df6e79b445190cb08f07e9d85ef8bb6ef820417312ea39752f",
+     "premium_bps": 0,
+     "rate": "18500000",
+     "settlement": 1793000000,
+     "side": 1
+    },
+    "pricing": {
+     "entry_rate": "18500000",
+     "mark": "18550000",
+     "notional": "100000000",
+     "quote_rate": "18700000",
+     "side": -1,
+     "usd_is_base": true
+    },
+    "rfq_id": "0x5252525252525252525252525252525252525252525252525252525252525252",
+    "role": "incoming",
+    "signed": false,
+    "status": {
+     "deadline": 1792803000,
+     "queued": false,
+     "signed": false,
+     "state": "signing"
+    },
+    "typed_data": {
+     "domain": {
+      "chainId": 43113,
+      "name": "CRX",
+      "verifyingContract": "0x072000d0eb830f767dc5128ed28139bb731b1521",
+      "version": "rulebook-1.0"
+     },
+     "message": {
+      "closedOutSide": "0x1616161616161616161616161616161616161616161616161616161616161616",
+      "commitment": "0x7b3ed386fd5741e7f760bc408c19e5b7dddc83b7a5e344328ee00ad8be258c8b",
+      "deadline": "1792803000",
+      "incomingC": "0x5353535353535353535353535353535353535353535353535353535353535353",
+      "incomingSide": "0xf1cab04c313f3bfb7357c69bf09efea27b33290488cdeeec080e0a7e79fa09cf",
+      "nonce": "3",
+      "oldId": "0x6dc6c927e934ac5a90559c4376033d84fad9ccb18758e43a37bcf32f52163b2a",
+      "openNonce": "18226320013929109492",
+      "remainingSide": "0x1717171717171717171717171717171717171717171717171717171717171717"
+     },
+     "primaryType": "FailoverConsent",
+     "types": {
+      "EIP712Domain": [
+       {
+        "name": "name",
+        "type": "string"
+       },
+       {
+        "name": "version",
+        "type": "string"
+       },
+       {
+        "name": "chainId",
+        "type": "uint256"
+       },
+       {
+        "name": "verifyingContract",
+        "type": "address"
+       }
+      ],
+      "FailoverConsent": [
+       {
+        "name": "oldId",
+        "type": "bytes32"
+       },
+       {
+        "name": "closedOutSide",
+        "type": "bytes32"
+       },
+       {
+        "name": "remainingSide",
+        "type": "bytes32"
+       },
+       {
+        "name": "incomingSide",
+        "type": "bytes32"
+       },
+       {
+        "name": "incomingC",
+        "type": "bytes32"
+       },
+       {
+        "name": "nonce",
+        "type": "uint64"
+       },
+       {
+        "name": "openNonce",
+        "type": "uint64"
+       },
+       {
+        "name": "deadline",
+        "type": "uint64"
+       },
+       {
+        "name": "commitment",
+        "type": "bytes32"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "c_side": 1,
+   "closed_out_taker": true,
+   "pair": "EUR/USD",
+   "spread": "25000000",
+   "template": {
+    "chain": "avax-fuji",
+    "commitment": "0x7603077ebcddcf7b09749dfb33bf7315a11987bd2f691a4175b27dd76453c4eb",
+    "digest": "0xa9f1d507dbd20a161add8bada9a580d1f304a21a586c5d6112d5708319595de6",
+    "digest_kind": "failover_consent",
+    "domain_separator": "0xbecf297e99c7bf09c89e90162e71f253515219487294e50a4ab0e5e8b60741f2",
+    "incoming_c": "0x5353535353535353535353535353535353535353535353535353535353535353",
+    "item": {
+     "close_time": 1792801620,
+     "closed_out_side": "0x1616161616161616161616161616161616161616161616161616161616161616",
+     "deadline": 1792803000,
+     "feed_id": "0x5454545454545454545454545454545454545454545454545454545454545454",
+     "incoming": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "incoming_side": "0xf1cab04c313f3bfb7357c69bf09efea27b33290488cdeeec080e0a7e79fa09cf",
+     "nonce": "3",
+     "old_id": "0x159ef707fcb386abce39832c2a35e8d9c7e2e612a5bff62f539885e8d267611e",
+     "open_nonce": "9785007206079922761",
+     "remaining_side": "0x1717171717171717171717171717171717171717171717171717171717171717",
+     "salt": "0x5555555555555555555555555555555555555555555555555555555555555555",
+     "spread": "25000000",
+     "subsidy_max_usd": "0"
+    },
+    "novation_id": "0x6d11665cb0940b71f74552e86ed9e68fbf4b625d1c10d6c0339eaca50e0f7901",
+    "old": {
+     "nonce": 4243,
+     "notional": "5000000000",
+     "pair": "0xa9226449042e36bf6865099eec57482aa55e3ad026c315a0e4a692b776c318ca",
+     "premium_bps": 0,
+     "rate": "1090000",
+     "settlement": 1793000000,
+     "side": 1
+    },
+    "pricing": {
+     "entry_rate": "1090000",
+     "mark": "1085000",
+     "notional": "5000000000",
+     "quote_rate": "1080000",
+     "side": 1,
+     "usd_is_base": false
+    },
+    "rfq_id": "0x5252525252525252525252525252525252525252525252525252525252525252",
+    "role": "incoming",
+    "signed": false,
+    "status": {
+     "deadline": 1792803000,
+     "queued": false,
+     "signed": false,
+     "state": "signing"
+    },
+    "typed_data": {
+     "domain": {
+      "chainId": 43113,
+      "name": "CRX",
+      "verifyingContract": "0x072000d0eb830f767dc5128ed28139bb731b1521",
+      "version": "rulebook-1.0"
+     },
+     "message": {
+      "closedOutSide": "0x1616161616161616161616161616161616161616161616161616161616161616",
+      "commitment": "0x7603077ebcddcf7b09749dfb33bf7315a11987bd2f691a4175b27dd76453c4eb",
+      "deadline": "1792803000",
+      "incomingC": "0x5353535353535353535353535353535353535353535353535353535353535353",
+      "incomingSide": "0xf1cab04c313f3bfb7357c69bf09efea27b33290488cdeeec080e0a7e79fa09cf",
+      "nonce": "3",
+      "oldId": "0x159ef707fcb386abce39832c2a35e8d9c7e2e612a5bff62f539885e8d267611e",
+      "openNonce": "9785007206079922761",
       "remainingSide": "0x1717171717171717171717171717171717171717171717171717171717171717"
      },
      "primaryType": "FailoverConsent",
