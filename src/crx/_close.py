@@ -1,6 +1,7 @@
 """Close rounds: close a trade with another seat, or take over another seat's trade.
 
-The SDK signs only typed data it builds from the round's item, after it checks each word against the trade.
+The SDK signs only typed data it builds from the round's item, after it checks the item against the trade and
+the quote.
 """
 
 from __future__ import annotations
@@ -756,8 +757,10 @@ def take_over(c: "Client", rfq: Any, rate: Any, wait: float, poll: float = 0.5,
     except RefusedToSign:
         _decline(c, r.rfq_id, quote_id, t.get("digest") if isinstance(t, dict) else None)
         raise
-    _post_sign(c, r.rfq_id, sig, "signing", sign_by)
-    status, moved = _taken(c, r.rfq_id, cursor, kind == ACCEPTANCE, end, max(poll, 2.0))
+    if _post_sign(c, r.rfq_id, sig, "signing", sign_by):
+        status, moved = _taken(c, r.rfq_id, cursor, kind == ACCEPTANCE, end, max(poll, 2.0))
+    else:
+        status, moved = "unsigned", None
     return TakeOver(
         rfq_id=r.rfq_id, quote_id=quote_id, trade_id=moved or trade_id, pair=pair, side=side_word(side) or "",
         notional=r.notional, rate=rate_d, status=status, raw=t,
@@ -844,7 +847,9 @@ def answer(c: "Client", request: Any, rate: Any, wait: float, poll: float = 0.5,
     except RefusedToSign:
         _decline(c, rfq_id, quote_id, t.get("digest") if isinstance(t, dict) else None)
         raise
-    _post_sign(c, rfq_id, sig, "signing", sign_by)
+    if not _post_sign(c, rfq_id, sig, "signing", sign_by):
+        return Close(trade_id=tid, rfq_id=rfq_id, to=seat, rate=rate_d, status="unsigned", item=None, tx=None, raw=t,
+                     counterparty=True)
     status, _ = _taken(c, rfq_id, cursor, True, end, max(poll, 2.0), done="closed")
     a = _soft(c, poll, f"/rfqs/{rfq_id}/close/arm-tx") or {}
     return Close(trade_id=tid, rfq_id=rfq_id, to=seat, rate=rate_d, status=status, item=_word(a.get("item")),
