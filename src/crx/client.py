@@ -999,7 +999,8 @@ class Client:
                 del self._rejected[rid]
         log.info("rfq %s rejected on this client; nothing sent", quote.rfq_id)
 
-    def close_trade(self, trade_id: str, *, to: str | None = None, wait: float | None = None) -> Close:
+    def close_trade(self, trade_id: str, *, to: str | None = None, limit: Any = None,
+                    wait: float | None = None) -> Close:
         """Close an open trade with its counterparty, or let another seat take over this seat's side.
 
         The request goes to the counterparty and to the makers, or to the one seat ``to`` names. An answer of
@@ -1011,6 +1012,8 @@ class Client:
         Args:
             trade_id: The trade, as ``positions()`` lists it.
             to: The one seat to ask. Defaults to every maker.
+            limit: The worst close rate this seat takes: the lowest on a buy, the highest on a sell. Defaults
+                to the price band.
             wait: Seconds to wait for ``closed`` or ``refused``. Default 30 minutes on testnet, 15 on mainnet.
 
         Raises:
@@ -1019,10 +1022,10 @@ class Client:
             QuoteExpired: The winning maker did not sign in time.
             OwnRoundOpen: Another close of this seat is still open at the accept.
             CrxError: Code ``conflict`` when a close of this trade is already open.
-            RefusedToSign: The close differs from the trade. Nothing is signed.
+            RefusedToSign: The best rate is past ``limit``, or the close differs from the trade. Nothing is signed.
         """
         self._need_seat()
-        return _close.close_trade(self, trade_id, to, self._wait_of(wait))
+        return _close.close_trade(self, trade_id, to, self._wait_of(wait), limit=limit)
 
     def close_requests(
         self, *, after: int | None = None, wait: float | None = None, poll: float = 1.0,

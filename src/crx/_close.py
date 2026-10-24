@@ -97,14 +97,19 @@ def fee_cap_e6(gross: int) -> int:
     return BEST_EXEC_K * -(-gross * BEST_EXEC_FLOOR_BPS // 10_000)
 
 
-def forced_spread(notional_e6: int, mark_e6: int, rate_e6: int, side: int, usd_is_base: bool, entry_e6: int) -> int:
-    """Return the fee a close-out at ``rate_e6`` costs the closed-out seat against ``mark_e6``, capped.
+def uncapped_fee(notional_e6: int, mark_e6: int, rate_e6: int, side: int, usd_is_base: bool) -> int:
+    """Return the fee a close-out at ``rate_e6`` costs the closed-out seat against ``mark_e6``, USD at 6 decimals.
 
     ``side`` is the incoming seat's own side. A rate at or better than the mark for the closed-out seat costs 0.
     """
     d = mark_e6 - rate_e6 if side == 1 else rate_e6 - mark_e6 if side == -1 else 0
     div = mark_e6 if usd_is_base else 10**6
-    fee = notional_e6 * d // div if d > 0 and div > 0 else 0
+    return notional_e6 * d // div if d > 0 and div > 0 else 0
+
+
+def forced_spread(notional_e6: int, mark_e6: int, rate_e6: int, side: int, usd_is_base: bool, entry_e6: int) -> int:
+    """Return the fee of a close-out at ``rate_e6``, capped at 2 % of the leg's gross."""
+    fee = uncapped_fee(notional_e6, mark_e6, rate_e6, side, usd_is_base)
     return min(fee, fee_cap_e6(gross_e6(notional_e6, entry_e6, usd_is_base)))
 
 
@@ -182,7 +187,11 @@ def check_commitment(t: dict, fields: Any, words: dict, counterparty: bool = Fal
         salt = e7.h0x(_w("bytes32", t["item"]["salt"]))
     except (KeyError, ValueError):
         raise _refuse("the item's salt cannot be read") from None
-    if e7.hidden_commitment(fields, words, salt) != _w("bytes32", t.get("commitment")):
+    try:
+        served = _w("bytes32", t.get("commitment"))
+    except ValueError:
+        raise _refuse("the close template's commitment cannot be read") from None
+    if e7.hidden_commitment(fields, words, salt) != served:
         raise _refuse("the commitment is not the hash of the item and its salt")
 
 
@@ -233,11 +242,14 @@ def failover_message(words: dict, incoming_c: Any, commitment: Any) -> dict:
 
 
 def check_allocation(t: Any, *, role: str, seat: str, rfq_id: str, rate_e6: int, pair: str, side: int,
-                     notional_e6: int, settlement_ms: int, now: float) -> dict:
+                     notional_e6: int, settlement_ms: int, now: float, entry: tuple | None = None,
+                     to: str | None = None) -> dict:
     """Check an allocation template for ``role`` and return its words.
 
     ``role`` is ``exiting``, ``incoming`` (the seat that takes the side over) or ``remaining`` (the
     counterparty that closes the trade with the exiting seat). ``side`` is the exiting seat's own side.
+    ``entry`` is the seat's own (rate at 6 decimals, premium bps) of the trade; ``to`` the incoming seat
+    the exiting seat named.
     """
     if not isinstance(t, dict):
         raise _refuse("the close template cannot be read")
@@ -253,9 +265,15 @@ def check_allocation(t: Any, *, role: str, seat: str, rfq_id: str, rate_e6: int,
     incoming = _w("address", w["incoming"])
     if (incoming == seat) != (role != "exiting"):
         raise _refuse("the item's incoming seat is not the seat's role")
-    if _w("uint256", w["closeRate"]) != rate_e6:
+    if to is not None and path != "close" and incoming != to:
+        raise _refuse("the item's incoming seat is not the seat to= names")
+    try:
+        close_rate, spread = _w("uint128", w["closeRate"]), _w("uint128", w["spread"])
+    except ValueError:
+        raise _refuse("the item's close rate or spread is out of range") from None
+    if close_rate != rate_e6:
         raise _refuse(f"the item's close rate is not {_plain(Decimal(rate_e6).scaleb(-6))}")
-    if _w("uint256", w["spread"]) != 0:
+    if spread != 0:
         raise _refuse("the item carries a spread")
     if _w("bytes32", w["pairId"]) != e7.pair_id(pair) or _w("uint256", w["notional"]) != notional_e6:
         raise _refuse("the item's pair or notional is not the trade's")
@@ -265,6 +283,8 @@ def check_allocation(t: Any, *, role: str, seat: str, rfq_id: str, rate_e6: int,
     check_trade(old, _w("int8", w["side"]), pair=pair, side=side, notional_e6=notional_e6, settlement_ms=settlement_ms)
     if old["settlement"] != _w("uint40", w["settlement"]) or old["notional"] != notional_e6:
         raise _refuse("the item and the old leg differ")
+    if entry is not None and (old["rate"], old["premium_bps"]) != entry:
+        raise _refuse("the old leg's rate or premium is not the trade's")
     check_leg(old, w["oldId"], w["exitingSide"], w["remainingSide"], side)
     check_deadline(_w("uint64", w["deadline"]), now, EXIT_WINDOW)
     check_commitment(t, e7.ALLOCATION_ITEM_FIELDS, w, counterparty=path == "close")
@@ -300,9 +320,17 @@ def check_failover(t: Any, *, seat: str, rfq_id: str, rate_e6: int, pair: str, s
     check_trade(old, p_side, pair=pair, side=side, notional_e6=notional_e6, settlement_ms=settlement_ms)
     if entry != old["rate"]:
         raise _refuse("the priced entry rate is not the old leg's")
-    if _w("uint256", w["spread"]) != forced_spread(n, mark, quoted, side, usd_is_base, entry):
+    try:
+        spread, subsidy = _w("uint128", w["spread"]), _w("uint128", w["subsidyMaxUsd"])
+    except ValueError:
+        raise _refuse("the item's fee is out of range") from None
+    if spread != forced_spread(n, mark, quoted, side, usd_is_base, entry):
         raise _refuse("the item's fee is not the fee of the quoted rate")
-    if _w("uint256", w["subsidyMaxUsd"]) != 0:
+    if forced_spread(n, mark, quoted, side, usd_is_base, entry) != uncapped_fee(n, mark, quoted, side, usd_is_base):
+        raise _refuse("the fee of the quoted rate passes the close-out cap: the seat would enter worse than its rate")
+    if not now - HOUR <= _w("uint64", w["closeTime"]) <= now + CLOCK_SLACK:
+        raise _refuse("the item's close time is not this hour's fix")
+    if subsidy != 0:
         raise _refuse("the close-out carries a term this SDK does not sign")
     nonce = _w("uint64", w["nonce"])
     if _w("uint64", w["openNonce"]) != open_nonce(w["oldId"], nonce):
@@ -406,17 +434,25 @@ def _arm(c: "Client", rfq_id: str, end: float, poll: float) -> dict:
             c._sleep(poll)
 
 
-def close_trade(c: "Client", trade_id: Any, to: Any, wait: float, poll: float = 1.0) -> Close:
-    tid = _word(trade_id)
-    if tid is None:
-        raise BadRequest("trade_id is a 0x 32-byte hex word")
-    seat = c.address
-    pos = _position(c, tid)
+def _own_trade(pos: dict) -> tuple:
+    """Return (pair, side, notional at 6 dp, settlement ms, (entry rate at 6 dp, premium bps)) of a /positions row."""
     try:
         pair, side = _slash(pos["pair"]), _w("int8", pos["side"])
         notional_e6, settlement_ms = e7.scaled6(pos["notional"]), int(pos["settlement"])
+        entry = (e7.scaled6(pos["rate"]), _w("int16", pos.get("premium_bps", 0)))
     except (KeyError, TypeError, ValueError, ArithmeticError):
         raise BadAnswer("/positions sent a row this SDK cannot read") from None
+    return pair, side, notional_e6, settlement_ms, entry
+
+
+def close_trade(c: "Client", trade_id: Any, to: Any, wait: float, poll: float = 1.0, limit: Any = None) -> Close:
+    tid = _word(trade_id)
+    if tid is None:
+        raise BadRequest("trade_id is a 0x 32-byte hex word")
+    limit_e6 = None if limit is None else e7.scaled6(_rate(limit))
+    seat = c.address
+    pos = _position(c, tid)
+    pair, side, notional_e6, settlement_ms, entry = _own_trade(pos)
     if not e7.pair_text_ok(pair) or side not in (1, -1):
         raise BadAnswer("/positions sent a row this SDK cannot read")
     c._chain_info()
@@ -440,6 +476,10 @@ def close_trade(c: "Client", trade_id: Any, to: Any, wait: float, poll: float = 
     if rate is None:
         raise BadAnswer("the winning quote has no rate")
     rate_e6 = e7.scaled6(rate)
+    if limit_e6 is not None and (rate_e6 < limit_e6 if side == 1 else rate_e6 > limit_e6):
+        raise RefusedToSign(f"refused to accept: the best close rate {_plain(rate)} is past the limit "
+                            f"{_plain(Decimal(limit_e6).scaleb(-6))}; nothing accepted",
+                            details={"rfq_id": rfq_id, "rate": _plain(rate)})
     try:
         c._gw.request("POST", f"/rfqs/{rfq_id}/accept", body={"quote_id": q["quote_id"]})
     except NetworkError as e:
@@ -450,7 +490,8 @@ def close_trade(c: "Client", trade_id: Any, to: Any, wait: float, poll: float = 
         if str(t.get("trade_id", "")).lower() != tid:
             raise _refuse("the template is for another trade")
         w = check_allocation(t, role="exiting", seat=seat, rfq_id=rfq_id, rate_e6=rate_e6, pair=pair, side=side,
-                             notional_e6=notional_e6, settlement_ms=settlement_ms, now=c._clock())
+                             notional_e6=notional_e6, settlement_ms=settlement_ms, now=c._clock(), entry=entry,
+                             to=None if to is None else incoming)
         sig = sign_form(c, t, "AllocationConsent", consent_message(w, t["commitment"], t["item"]["salt"]))
         _post_once_more(c, f"/rfqs/{rfq_id}/close/sign", {"sig": sig})
     a = _arm(c, rfq_id, end, poll)
@@ -655,12 +696,7 @@ def answer(c: "Client", request: Any, rate: Any, wait: float, poll: float = 0.5,
         raise BadRequest("answer_close() takes a request from close_requests()")
     d = request.raw
     tid, rfq_id = _word(d["trade_id"]), request.rfq_id
-    pos = _position(c, tid)
-    try:
-        pair, own = _slash(pos["pair"]), _w("int8", pos["side"])
-        notional_e6, settlement_ms = e7.scaled6(pos["notional"]), int(pos["settlement"])
-    except (KeyError, TypeError, ValueError, ArithmeticError):
-        raise BadAnswer("/positions sent a row this SDK cannot read") from None
+    pair, own, notional_e6, settlement_ms, entry = _own_trade(_position(c, tid))
     if own not in (1, -1) or request.pair != pair or request.notional is None or \
             e7.scaled6(request.notional) != notional_e6 or d.get("expiry") != settlement_ms:
         raise BadAnswer("the close request does not match the trade's pair, notional or settlement")
@@ -689,7 +725,7 @@ def answer(c: "Client", request: Any, rate: Any, wait: float, poll: float = 0.5,
         if award.get("digest_kind") != CONSENT:
             raise _refuse(f"the award names another form ({clean(award.get('digest_kind'), 40)})")
         w = check_allocation(t, role="remaining", seat=seat, rfq_id=rfq_id, rate_e6=rate_e6, pair=pair, side=-own,
-                             notional_e6=notional_e6, settlement_ms=settlement_ms, now=c._clock())
+                             notional_e6=notional_e6, settlement_ms=settlement_ms, now=c._clock(), entry=entry)
         sig = sign_form(c, t, "AllocationConsent", consent_message(w, t["commitment"], t["item"]["salt"]))
     except RefusedToSign:
         _decline(c, rfq_id, quote_id, t.get("digest") if isinstance(t, dict) else None)
