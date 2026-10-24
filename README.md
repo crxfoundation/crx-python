@@ -85,6 +85,7 @@ print(w.amount, w.status)
 | `ask(pair, side, notional, settles=)` | Opens an RFQ and returns at once, and `.quote()` on the result returns the winner after the 10 s window. |
 | `accept(quote)`, `trade(quote)` | Signs the trade, posts it once and waits up to `wait` for `open` or `refused`. |
 | `reject(quote)` | Sends nothing, and makes a later `accept()` on the quote's RFQ raise `quote_rejected`. |
+| `close_trade(trade_id, to=None)` | Closes an open trade: the best quote of another seat, or of the seat `to` names, takes over this seat's side. Waits up to `wait` for `closed` or `refused`. |
 | `deposit(amount)` | Deposits USDC and waits up to `wait` for it to count in free collateral. On testnet, it first mints the test USDC the wallet lacks. |
 | `withdraw(amount=None)` | Withdraws USDC to the seat wallet, or all free collateral with no amount. |
 | `balance()` | Returns collateral, free collateral, margin and withdraw state. |
@@ -144,6 +145,7 @@ The script exits with success only when the trade is `open` and final. A deposit
 | `send_quote(rfq, rate)` | Signs and posts a binding quote, and returns a `MakerQuote`. |
 | `confirm(quote, timeout=None)` | Waits for the accept up to `timeout` (default: the quote window), then up to `wait` for the trade. |
 | `drop_quote(quote)` | Ends the binding quote at once. |
+| `take_over(rfq, rate)` | Quotes a close RFQ from `rfqs(kind="close")`. When the quote wins, signs and takes over the closing seat's side, then waits up to `wait` for `open` or `refused`. |
 | `quote_live(price, seconds=3600)` | Quotes each new RFQ at `price(rfq)`, drops every live quote on exit and returns the trades that opened. |
 
 ```python

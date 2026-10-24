@@ -386,7 +386,10 @@ def close_trade(c: "Client", trade_id: Any, to: Any, wait: float, poll: float = 
     if to is None:
         opened = _post_once_more(c, "/rfqs", {"kind": "close", "position_id": tid, "client_rfq_id": cid})
     else:
-        incoming = e7.address(to)
+        try:
+            incoming = e7.address(to)
+        except ValueError:
+            raise BadRequest("to= is a 0x 20-byte address") from None
         if incoming == seat:
             raise BadRequest("to= names this seat; name the seat that takes the trade over")
         opened = _post_once_more(c, "/novations", {"trade_id": tid, "incoming": incoming, "client_novation_id": cid})
@@ -440,13 +443,15 @@ def _of(row: dict, rfq_id: str, key: str = "rfq_id") -> bool:
 def _await_award(c: "Client", rfq_id: str, quote_id: str, cursor: int, end: float, poll: float) -> tuple[dict, int]:
     """Read the tape until the round awards this quote. Raise QuoteExpired when the round ends or the wait ends."""
     while True:
+        start = cursor
         rows, cursor = _tape(c, cursor)
         for r in rows:
             if not _of(r, rfq_id):
                 continue
             if r.get("type") == "rfq.awarded":
                 if str(r["data"].get("quote_id", "")).lower() == quote_id:
-                    return r["data"], cursor
+                    seq = r.get("seq")
+                    return r["data"], seq if isinstance(seq, int) and not isinstance(seq, bool) and seq > start else start
                 raise QuoteExpired("the round awarded another quote", details={"rfq_id": rfq_id})
             if r.get("type") in ("rfq.expired", "rfq.cancelled", "quote.declined"):
                 raise QuoteExpired("the round ended without this quote", details={"rfq_id": rfq_id})
@@ -500,9 +505,12 @@ def take_over(c: "Client", rfq: Any, rate: Any, wait: float, poll: float = 0.5,
     side = d.get("side")
     if trade_id is None or isinstance(side, bool) or side not in (1, -1):
         raise BadAnswer("the close RFQ names no trade or side")
-    if not e7.pair_text_ok(r.pair) or r.notional is None or not isinstance(d.get("expiry"), int):
-        raise BadAnswer("the close RFQ's pair, notional or settlement cannot be read")
-    pair, notional_e6, settlement_ms = r.pair, e7.scaled6(r.notional), d["expiry"]
+    try:
+        if not e7.pair_text_ok(r.pair) or r.notional is None or not isinstance(d.get("expiry"), int):
+            raise ValueError
+        pair, notional_e6, settlement_ms = r.pair, e7.scaled6(r.notional), d["expiry"]
+    except (ValueError, ArithmeticError):
+        raise BadAnswer("the close RFQ's pair, notional or settlement cannot be read") from None
     rate_d = _rate(rate)
     rate_e6 = e7.scaled6(rate_d)
     if client_quote_id is not None and not (isinstance(client_quote_id, str) and 1 <= len(client_quote_id) <= 128):

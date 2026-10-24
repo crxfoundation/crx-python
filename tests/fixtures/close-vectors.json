@@ -1,0 +1,947 @@
+{
+ "about": "Close templates and words as crx-api c3696350 builds them: two elective rounds (the exiting seat taker, then maker), three close-out rounds, side ids, open nonces, close quote ids and close-out fees. The seats are anvil test keys 0 and 1: never fund them.",
+ "close_quote_ids": [
+  {
+   "client_quote_id": "take-1",
+   "maker": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+   "quote_id": "0xbf9988c523e808d7ed8a10e2a44453d51d5b9d724e4dbc3dc88c6974e4afb7e9",
+   "rate_e6": 18612345,
+   "rfq_id": "0x3333333333333333333333333333333333333333333333333333333333333333"
+  }
+ ],
+ "elective": [
+  {
+   "exiting": {
+    "chain": "avax-fuji",
+    "commitment": "0x47b14eecb619dde71c0c7b80d7d24245e6a4c248bb26e33ce35507ac3b32419a",
+    "digest": "0x8aa2360ec9f1ce4605077d4bbe28cbdb48c9dff6d9d3e4725b2ef349d634c3af",
+    "digest_kind": "allocation_consent",
+    "domain_separator": "0xbecf297e99c7bf09c89e90162e71f253515219487294e50a4ab0e5e8b60741f2",
+    "incoming_c": "0x1818181818181818181818181818181818181818181818181818181818181818",
+    "item": {
+     "close_rate": "18612345",
+     "deadline": 1792800570,
+     "exiting_side": "0x1616161616161616161616161616161616161616161616161616161616161616",
+     "incoming": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "incoming_side": "0x076d4928afb5d8285a154b3cf50a35d5773e12b692828815ea7f960c08f52d58",
+     "nonce": "7",
+     "notional": "100000000",
+     "old_id": "0x49d07baed9a56ae274c8e4cd09f8ca9271074c953768d6c0a09ee252fcc0f5ce",
+     "pair_id": "0x69f1670ccd0386df6e79b445190cb08f07e9d85ef8bb6ef820417312ea39752f",
+     "remaining_side": "0x1717171717171717171717171717171717171717171717171717171717171717",
+     "salt": "0x1919191919191919191919191919191919191919191919191919191919191919",
+     "settlement": 1793000000,
+     "side": 1,
+     "spread": "0"
+    },
+    "novation_id": "0x342ff0c0203fd64ad5547c28b43242dd8c4f6976ce062fa41e349ff0ff7fe2e6",
+    "old": {
+     "nonce": 4242,
+     "notional": "100000000",
+     "pair": "0x69f1670ccd0386df6e79b445190cb08f07e9d85ef8bb6ef820417312ea39752f",
+     "premium_bps": 0,
+     "rate": "18500000",
+     "settlement": 1793000000,
+     "side": 1
+    },
+    "rfq_id": "0x3333333333333333333333333333333333333333333333333333333333333333",
+    "role": "exiting",
+    "signed": false,
+    "status": {
+     "armed": false,
+     "deadline": 1792800570,
+     "exiting_signed": false,
+     "incoming_signed": false,
+     "novation_id": "0x342ff0c0203fd64ad5547c28b43242dd8c4f6976ce062fa41e349ff0ff7fe2e6",
+     "ready": false
+    },
+    "successor": {
+     "premium_bps": 0,
+     "rate": "18.5",
+     "side": 1,
+     "trade_id": "0x0d7d3536f024f7c62c1069e473fe67311c905984b6076ed8bd75ac32541a8dcd"
+    },
+    "trade_id": "0x3131313131313131313131313131313131313131313131313131313131313131",
+    "typed_data": {
+     "domain": {
+      "chainId": 43113,
+      "name": "CRX",
+      "verifyingContract": "0x072000d0eb830f767dc5128ed28139bb731b1521",
+      "version": "rulebook-1.0"
+     },
+     "message": {
+      "commitment": "0x47b14eecb619dde71c0c7b80d7d24245e6a4c248bb26e33ce35507ac3b32419a",
+      "deadline": "1792800570",
+      "exitingSide": "0x1616161616161616161616161616161616161616161616161616161616161616",
+      "incomingSide": "0x076d4928afb5d8285a154b3cf50a35d5773e12b692828815ea7f960c08f52d58",
+      "nonce": "7",
+      "oldId": "0x49d07baed9a56ae274c8e4cd09f8ca9271074c953768d6c0a09ee252fcc0f5ce",
+      "remainingSide": "0x1717171717171717171717171717171717171717171717171717171717171717",
+      "salt": "0x1919191919191919191919191919191919191919191919191919191919191919"
+     },
+     "primaryType": "AllocationConsent",
+     "types": {
+      "AllocationConsent": [
+       {
+        "name": "oldId",
+        "type": "bytes32"
+       },
+       {
+        "name": "exitingSide",
+        "type": "bytes32"
+       },
+       {
+        "name": "remainingSide",
+        "type": "bytes32"
+       },
+       {
+        "name": "incomingSide",
+        "type": "bytes32"
+       },
+       {
+        "name": "nonce",
+        "type": "uint64"
+       },
+       {
+        "name": "deadline",
+        "type": "uint64"
+       },
+       {
+        "name": "commitment",
+        "type": "bytes32"
+       },
+       {
+        "name": "salt",
+        "type": "bytes32"
+       }
+      ],
+      "EIP712Domain": [
+       {
+        "name": "name",
+        "type": "string"
+       },
+       {
+        "name": "version",
+        "type": "string"
+       },
+       {
+        "name": "chainId",
+        "type": "uint256"
+       },
+       {
+        "name": "verifyingContract",
+        "type": "address"
+       }
+      ]
+     }
+    }
+   },
+   "exiting_is_taker": true,
+   "incoming": {
+    "chain": "avax-fuji",
+    "commitment": "0x47b14eecb619dde71c0c7b80d7d24245e6a4c248bb26e33ce35507ac3b32419a",
+    "digest": "0xc237ce0508cecfa07a8ccecd07ff4ee602c4e0da29ac41d5a6c1e2a276645eda",
+    "digest_kind": "allocation_acceptance",
+    "domain_separator": "0xbecf297e99c7bf09c89e90162e71f253515219487294e50a4ab0e5e8b60741f2",
+    "incoming_c": "0x1818181818181818181818181818181818181818181818181818181818181818",
+    "item": {
+     "close_rate": "18612345",
+     "deadline": 1792800570,
+     "exiting_side": "0x1616161616161616161616161616161616161616161616161616161616161616",
+     "incoming": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "incoming_side": "0x076d4928afb5d8285a154b3cf50a35d5773e12b692828815ea7f960c08f52d58",
+     "nonce": "7",
+     "notional": "100000000",
+     "old_id": "0x49d07baed9a56ae274c8e4cd09f8ca9271074c953768d6c0a09ee252fcc0f5ce",
+     "pair_id": "0x69f1670ccd0386df6e79b445190cb08f07e9d85ef8bb6ef820417312ea39752f",
+     "remaining_side": "0x1717171717171717171717171717171717171717171717171717171717171717",
+     "salt": "0x1919191919191919191919191919191919191919191919191919191919191919",
+     "settlement": 1793000000,
+     "side": 1,
+     "spread": "0"
+    },
+    "novation_id": "0x342ff0c0203fd64ad5547c28b43242dd8c4f6976ce062fa41e349ff0ff7fe2e6",
+    "old": {
+     "nonce": 4242,
+     "notional": "100000000",
+     "pair": "0x69f1670ccd0386df6e79b445190cb08f07e9d85ef8bb6ef820417312ea39752f",
+     "premium_bps": 0,
+     "rate": "18500000",
+     "settlement": 1793000000,
+     "side": 1
+    },
+    "rfq_id": "0x3333333333333333333333333333333333333333333333333333333333333333",
+    "role": "incoming",
+    "signed": false,
+    "status": {
+     "armed": false,
+     "deadline": 1792800570,
+     "exiting_signed": false,
+     "incoming_signed": false,
+     "novation_id": "0x342ff0c0203fd64ad5547c28b43242dd8c4f6976ce062fa41e349ff0ff7fe2e6",
+     "ready": false
+    },
+    "successor": {
+     "premium_bps": 0,
+     "rate": "18.5",
+     "side": 1,
+     "trade_id": "0x0d7d3536f024f7c62c1069e473fe67311c905984b6076ed8bd75ac32541a8dcd"
+    },
+    "typed_data": {
+     "domain": {
+      "chainId": 43113,
+      "name": "CRX",
+      "verifyingContract": "0x072000d0eb830f767dc5128ed28139bb731b1521",
+      "version": "rulebook-1.0"
+     },
+     "message": {
+      "commitment": "0x47b14eecb619dde71c0c7b80d7d24245e6a4c248bb26e33ce35507ac3b32419a",
+      "deadline": "1792800570",
+      "incomingC": "0x1818181818181818181818181818181818181818181818181818181818181818",
+      "incomingSide": "0x076d4928afb5d8285a154b3cf50a35d5773e12b692828815ea7f960c08f52d58",
+      "nonce": "7",
+      "oldId": "0x49d07baed9a56ae274c8e4cd09f8ca9271074c953768d6c0a09ee252fcc0f5ce"
+     },
+     "primaryType": "AllocationAcceptance",
+     "types": {
+      "AllocationAcceptance": [
+       {
+        "name": "oldId",
+        "type": "bytes32"
+       },
+       {
+        "name": "incomingSide",
+        "type": "bytes32"
+       },
+       {
+        "name": "incomingC",
+        "type": "bytes32"
+       },
+       {
+        "name": "nonce",
+        "type": "uint64"
+       },
+       {
+        "name": "deadline",
+        "type": "uint64"
+       },
+       {
+        "name": "commitment",
+        "type": "bytes32"
+       }
+      ],
+      "EIP712Domain": [
+       {
+        "name": "name",
+        "type": "string"
+       },
+       {
+        "name": "version",
+        "type": "string"
+       },
+       {
+        "name": "chainId",
+        "type": "uint256"
+       },
+       {
+        "name": "verifyingContract",
+        "type": "address"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "exiting": {
+    "chain": "avax-fuji",
+    "commitment": "0xb43bd5db24fc35ea2c2b8e58c6a9830342d1c918a4ae7a4a421364e982061ac6",
+    "digest": "0x545b17fcefdff4421d4ff1c75c989e92d3548b12c1b9830e98fb3522c6bc2be6",
+    "digest_kind": "allocation_consent",
+    "domain_separator": "0xbecf297e99c7bf09c89e90162e71f253515219487294e50a4ab0e5e8b60741f2",
+    "incoming_c": "0x1818181818181818181818181818181818181818181818181818181818181818",
+    "item": {
+     "close_rate": "18612345",
+     "deadline": 1792800570,
+     "exiting_side": "0x1616161616161616161616161616161616161616161616161616161616161616",
+     "incoming": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "incoming_side": "0x076d4928afb5d8285a154b3cf50a35d5773e12b692828815ea7f960c08f52d58",
+     "nonce": "7",
+     "notional": "100000000",
+     "old_id": "0x2d9306d9f71429448e7e639a1f3dcc870b9f5bcb6a5b46e6751f779b13e3c0a4",
+     "pair_id": "0x69f1670ccd0386df6e79b445190cb08f07e9d85ef8bb6ef820417312ea39752f",
+     "remaining_side": "0x1717171717171717171717171717171717171717171717171717171717171717",
+     "salt": "0x1919191919191919191919191919191919191919191919191919191919191919",
+     "settlement": 1793000000,
+     "side": -1,
+     "spread": "0"
+    },
+    "novation_id": "0x17aeb6cc10245062c3ae9c16dd962c1b842913a5324fba38420f7d0ce522740e",
+    "old": {
+     "nonce": 4242,
+     "notional": "100000000",
+     "pair": "0x69f1670ccd0386df6e79b445190cb08f07e9d85ef8bb6ef820417312ea39752f",
+     "premium_bps": 0,
+     "rate": "18500000",
+     "settlement": 1793000000,
+     "side": 1
+    },
+    "rfq_id": "0x3333333333333333333333333333333333333333333333333333333333333333",
+    "role": "exiting",
+    "signed": false,
+    "status": {
+     "armed": false,
+     "deadline": 1792800570,
+     "exiting_signed": false,
+     "incoming_signed": false,
+     "novation_id": "0x17aeb6cc10245062c3ae9c16dd962c1b842913a5324fba38420f7d0ce522740e",
+     "ready": false
+    },
+    "successor": {
+     "premium_bps": 0,
+     "rate": "18.5",
+     "side": -1,
+     "trade_id": "0xb7b385943521d91251c26b1d113b516cdf8c0785a920d7c4c5727a0048ede28a"
+    },
+    "trade_id": "0x3131313131313131313131313131313131313131313131313131313131313131",
+    "typed_data": {
+     "domain": {
+      "chainId": 43113,
+      "name": "CRX",
+      "verifyingContract": "0x072000d0eb830f767dc5128ed28139bb731b1521",
+      "version": "rulebook-1.0"
+     },
+     "message": {
+      "commitment": "0xb43bd5db24fc35ea2c2b8e58c6a9830342d1c918a4ae7a4a421364e982061ac6",
+      "deadline": "1792800570",
+      "exitingSide": "0x1616161616161616161616161616161616161616161616161616161616161616",
+      "incomingSide": "0x076d4928afb5d8285a154b3cf50a35d5773e12b692828815ea7f960c08f52d58",
+      "nonce": "7",
+      "oldId": "0x2d9306d9f71429448e7e639a1f3dcc870b9f5bcb6a5b46e6751f779b13e3c0a4",
+      "remainingSide": "0x1717171717171717171717171717171717171717171717171717171717171717",
+      "salt": "0x1919191919191919191919191919191919191919191919191919191919191919"
+     },
+     "primaryType": "AllocationConsent",
+     "types": {
+      "AllocationConsent": [
+       {
+        "name": "oldId",
+        "type": "bytes32"
+       },
+       {
+        "name": "exitingSide",
+        "type": "bytes32"
+       },
+       {
+        "name": "remainingSide",
+        "type": "bytes32"
+       },
+       {
+        "name": "incomingSide",
+        "type": "bytes32"
+       },
+       {
+        "name": "nonce",
+        "type": "uint64"
+       },
+       {
+        "name": "deadline",
+        "type": "uint64"
+       },
+       {
+        "name": "commitment",
+        "type": "bytes32"
+       },
+       {
+        "name": "salt",
+        "type": "bytes32"
+       }
+      ],
+      "EIP712Domain": [
+       {
+        "name": "name",
+        "type": "string"
+       },
+       {
+        "name": "version",
+        "type": "string"
+       },
+       {
+        "name": "chainId",
+        "type": "uint256"
+       },
+       {
+        "name": "verifyingContract",
+        "type": "address"
+       }
+      ]
+     }
+    }
+   },
+   "exiting_is_taker": false,
+   "incoming": {
+    "chain": "avax-fuji",
+    "commitment": "0xb43bd5db24fc35ea2c2b8e58c6a9830342d1c918a4ae7a4a421364e982061ac6",
+    "digest": "0x5851702eb2c2e633f9e5a123b3bbb398771c19f5a6da465befc3afe22302c73f",
+    "digest_kind": "allocation_acceptance",
+    "domain_separator": "0xbecf297e99c7bf09c89e90162e71f253515219487294e50a4ab0e5e8b60741f2",
+    "incoming_c": "0x1818181818181818181818181818181818181818181818181818181818181818",
+    "item": {
+     "close_rate": "18612345",
+     "deadline": 1792800570,
+     "exiting_side": "0x1616161616161616161616161616161616161616161616161616161616161616",
+     "incoming": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "incoming_side": "0x076d4928afb5d8285a154b3cf50a35d5773e12b692828815ea7f960c08f52d58",
+     "nonce": "7",
+     "notional": "100000000",
+     "old_id": "0x2d9306d9f71429448e7e639a1f3dcc870b9f5bcb6a5b46e6751f779b13e3c0a4",
+     "pair_id": "0x69f1670ccd0386df6e79b445190cb08f07e9d85ef8bb6ef820417312ea39752f",
+     "remaining_side": "0x1717171717171717171717171717171717171717171717171717171717171717",
+     "salt": "0x1919191919191919191919191919191919191919191919191919191919191919",
+     "settlement": 1793000000,
+     "side": -1,
+     "spread": "0"
+    },
+    "novation_id": "0x17aeb6cc10245062c3ae9c16dd962c1b842913a5324fba38420f7d0ce522740e",
+    "old": {
+     "nonce": 4242,
+     "notional": "100000000",
+     "pair": "0x69f1670ccd0386df6e79b445190cb08f07e9d85ef8bb6ef820417312ea39752f",
+     "premium_bps": 0,
+     "rate": "18500000",
+     "settlement": 1793000000,
+     "side": 1
+    },
+    "rfq_id": "0x3333333333333333333333333333333333333333333333333333333333333333",
+    "role": "incoming",
+    "signed": false,
+    "status": {
+     "armed": false,
+     "deadline": 1792800570,
+     "exiting_signed": false,
+     "incoming_signed": false,
+     "novation_id": "0x17aeb6cc10245062c3ae9c16dd962c1b842913a5324fba38420f7d0ce522740e",
+     "ready": false
+    },
+    "successor": {
+     "premium_bps": 0,
+     "rate": "18.5",
+     "side": -1,
+     "trade_id": "0xb7b385943521d91251c26b1d113b516cdf8c0785a920d7c4c5727a0048ede28a"
+    },
+    "typed_data": {
+     "domain": {
+      "chainId": 43113,
+      "name": "CRX",
+      "verifyingContract": "0x072000d0eb830f767dc5128ed28139bb731b1521",
+      "version": "rulebook-1.0"
+     },
+     "message": {
+      "commitment": "0xb43bd5db24fc35ea2c2b8e58c6a9830342d1c918a4ae7a4a421364e982061ac6",
+      "deadline": "1792800570",
+      "incomingC": "0x1818181818181818181818181818181818181818181818181818181818181818",
+      "incomingSide": "0x076d4928afb5d8285a154b3cf50a35d5773e12b692828815ea7f960c08f52d58",
+      "nonce": "7",
+      "oldId": "0x2d9306d9f71429448e7e639a1f3dcc870b9f5bcb6a5b46e6751f779b13e3c0a4"
+     },
+     "primaryType": "AllocationAcceptance",
+     "types": {
+      "AllocationAcceptance": [
+       {
+        "name": "oldId",
+        "type": "bytes32"
+       },
+       {
+        "name": "incomingSide",
+        "type": "bytes32"
+       },
+       {
+        "name": "incomingC",
+        "type": "bytes32"
+       },
+       {
+        "name": "nonce",
+        "type": "uint64"
+       },
+       {
+        "name": "deadline",
+        "type": "uint64"
+       },
+       {
+        "name": "commitment",
+        "type": "bytes32"
+       }
+      ],
+      "EIP712Domain": [
+       {
+        "name": "name",
+        "type": "string"
+       },
+       {
+        "name": "version",
+        "type": "string"
+       },
+       {
+        "name": "chainId",
+        "type": "uint256"
+       },
+       {
+        "name": "verifyingContract",
+        "type": "address"
+       }
+      ]
+     }
+    }
+   }
+  }
+ ],
+ "forced": [
+  {
+   "c_side": 1,
+   "spread": "808625",
+   "template": {
+    "chain": "avax-fuji",
+    "commitment": "0xe59aa63c7290007b6ab7b88ac454bd3264035518d92d3917a88069eac9ff1b16",
+    "digest": "0x1f3155a8ec7c9698dd62d2a730be21e17d582e26cdde9bc5ef6aead5c46ec8e8",
+    "digest_kind": "failover_consent",
+    "domain_separator": "0xbecf297e99c7bf09c89e90162e71f253515219487294e50a4ab0e5e8b60741f2",
+    "incoming_c": "0x4343434343434343434343434343434343434343434343434343434343434343",
+    "item": {
+     "close_time": 1792801620,
+     "closed_out_side": "0x1616161616161616161616161616161616161616161616161616161616161616",
+     "deadline": 1792803000,
+     "feed_id": "0x4444444444444444444444444444444444444444444444444444444444444444",
+     "incoming": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "incoming_side": "0x3335a3c034c4158fd163b9e55f1a5638b1023ee01d8c2594bdaf9f42e793ecb4",
+     "nonce": "2",
+     "old_id": "0x49d07baed9a56ae274c8e4cd09f8ca9271074c953768d6c0a09ee252fcc0f5ce",
+     "open_nonce": "15219405652788785873",
+     "remaining_side": "0x1717171717171717171717171717171717171717171717171717171717171717",
+     "salt": "0x4545454545454545454545454545454545454545454545454545454545454545",
+     "spread": "808625",
+     "subsidy_max_usd": "0"
+    },
+    "novation_id": "0x70020877b6d95fadf0b1bc899cbcd8ff308a7ba3b4e06d0d89bc53f2be072bde",
+    "old": {
+     "nonce": 4242,
+     "notional": "100000000",
+     "pair": "0x69f1670ccd0386df6e79b445190cb08f07e9d85ef8bb6ef820417312ea39752f",
+     "premium_bps": 0,
+     "rate": "18500000",
+     "settlement": 1793000000,
+     "side": 1
+    },
+    "pricing": {
+     "entry_rate": "18500000",
+     "mark": "18550000",
+     "notional": "100000000",
+     "quote_rate": "18400000",
+     "side": 1,
+     "usd_is_base": true
+    },
+    "rfq_id": "0x4242424242424242424242424242424242424242424242424242424242424242",
+    "role": "incoming",
+    "signed": false,
+    "status": {
+     "deadline": 1792803000,
+     "queued": false,
+     "signed": false,
+     "state": "signing"
+    },
+    "typed_data": {
+     "domain": {
+      "chainId": 43113,
+      "name": "CRX",
+      "verifyingContract": "0x072000d0eb830f767dc5128ed28139bb731b1521",
+      "version": "rulebook-1.0"
+     },
+     "message": {
+      "closedOutSide": "0x1616161616161616161616161616161616161616161616161616161616161616",
+      "commitment": "0xe59aa63c7290007b6ab7b88ac454bd3264035518d92d3917a88069eac9ff1b16",
+      "deadline": "1792803000",
+      "incomingC": "0x4343434343434343434343434343434343434343434343434343434343434343",
+      "incomingSide": "0x3335a3c034c4158fd163b9e55f1a5638b1023ee01d8c2594bdaf9f42e793ecb4",
+      "nonce": "2",
+      "oldId": "0x49d07baed9a56ae274c8e4cd09f8ca9271074c953768d6c0a09ee252fcc0f5ce",
+      "openNonce": "15219405652788785873",
+      "remainingSide": "0x1717171717171717171717171717171717171717171717171717171717171717"
+     },
+     "primaryType": "FailoverConsent",
+     "types": {
+      "EIP712Domain": [
+       {
+        "name": "name",
+        "type": "string"
+       },
+       {
+        "name": "version",
+        "type": "string"
+       },
+       {
+        "name": "chainId",
+        "type": "uint256"
+       },
+       {
+        "name": "verifyingContract",
+        "type": "address"
+       }
+      ],
+      "FailoverConsent": [
+       {
+        "name": "oldId",
+        "type": "bytes32"
+       },
+       {
+        "name": "closedOutSide",
+        "type": "bytes32"
+       },
+       {
+        "name": "remainingSide",
+        "type": "bytes32"
+       },
+       {
+        "name": "incomingSide",
+        "type": "bytes32"
+       },
+       {
+        "name": "incomingC",
+        "type": "bytes32"
+       },
+       {
+        "name": "nonce",
+        "type": "uint64"
+       },
+       {
+        "name": "openNonce",
+        "type": "uint64"
+       },
+       {
+        "name": "deadline",
+        "type": "uint64"
+       },
+       {
+        "name": "commitment",
+        "type": "bytes32"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "c_side": -1,
+   "spread": "808625",
+   "template": {
+    "chain": "avax-fuji",
+    "commitment": "0x1d07e6a6a0941f37a25434cfeb306b0644bee12599e0a4c95367c2dec44d05f1",
+    "digest": "0x0293bac0046cc69352c129ecd44433112158a683428dc735ae9efba6ae1751d7",
+    "digest_kind": "failover_consent",
+    "domain_separator": "0xbecf297e99c7bf09c89e90162e71f253515219487294e50a4ab0e5e8b60741f2",
+    "incoming_c": "0x4343434343434343434343434343434343434343434343434343434343434343",
+    "item": {
+     "close_time": 1792801620,
+     "closed_out_side": "0x1616161616161616161616161616161616161616161616161616161616161616",
+     "deadline": 1792803000,
+     "feed_id": "0x4444444444444444444444444444444444444444444444444444444444444444",
+     "incoming": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "incoming_side": "0x3335a3c034c4158fd163b9e55f1a5638b1023ee01d8c2594bdaf9f42e793ecb4",
+     "nonce": "2",
+     "old_id": "0xb6820c36869c1c3dce525ce6e499aba34fd8139d4f7270c6100e43102de499c8",
+     "open_nonce": "2799305389089508480",
+     "remaining_side": "0x1717171717171717171717171717171717171717171717171717171717171717",
+     "salt": "0x4545454545454545454545454545454545454545454545454545454545454545",
+     "spread": "808625",
+     "subsidy_max_usd": "0"
+    },
+    "novation_id": "0xab465d693445b68e739430f9a21a5669a56ff942076a4b2c55f060aae217d9da",
+    "old": {
+     "nonce": 4242,
+     "notional": "100000000",
+     "pair": "0x69f1670ccd0386df6e79b445190cb08f07e9d85ef8bb6ef820417312ea39752f",
+     "premium_bps": 0,
+     "rate": "18500000",
+     "settlement": 1793000000,
+     "side": -1
+    },
+    "pricing": {
+     "entry_rate": "18500000",
+     "mark": "18550000",
+     "notional": "100000000",
+     "quote_rate": "18700000",
+     "side": -1,
+     "usd_is_base": true
+    },
+    "rfq_id": "0x4242424242424242424242424242424242424242424242424242424242424242",
+    "role": "incoming",
+    "signed": false,
+    "status": {
+     "deadline": 1792803000,
+     "queued": false,
+     "signed": false,
+     "state": "signing"
+    },
+    "typed_data": {
+     "domain": {
+      "chainId": 43113,
+      "name": "CRX",
+      "verifyingContract": "0x072000d0eb830f767dc5128ed28139bb731b1521",
+      "version": "rulebook-1.0"
+     },
+     "message": {
+      "closedOutSide": "0x1616161616161616161616161616161616161616161616161616161616161616",
+      "commitment": "0x1d07e6a6a0941f37a25434cfeb306b0644bee12599e0a4c95367c2dec44d05f1",
+      "deadline": "1792803000",
+      "incomingC": "0x4343434343434343434343434343434343434343434343434343434343434343",
+      "incomingSide": "0x3335a3c034c4158fd163b9e55f1a5638b1023ee01d8c2594bdaf9f42e793ecb4",
+      "nonce": "2",
+      "oldId": "0xb6820c36869c1c3dce525ce6e499aba34fd8139d4f7270c6100e43102de499c8",
+      "openNonce": "2799305389089508480",
+      "remainingSide": "0x1717171717171717171717171717171717171717171717171717171717171717"
+     },
+     "primaryType": "FailoverConsent",
+     "types": {
+      "EIP712Domain": [
+       {
+        "name": "name",
+        "type": "string"
+       },
+       {
+        "name": "version",
+        "type": "string"
+       },
+       {
+        "name": "chainId",
+        "type": "uint256"
+       },
+       {
+        "name": "verifyingContract",
+        "type": "address"
+       }
+      ],
+      "FailoverConsent": [
+       {
+        "name": "oldId",
+        "type": "bytes32"
+       },
+       {
+        "name": "closedOutSide",
+        "type": "bytes32"
+       },
+       {
+        "name": "remainingSide",
+        "type": "bytes32"
+       },
+       {
+        "name": "incomingSide",
+        "type": "bytes32"
+       },
+       {
+        "name": "incomingC",
+        "type": "bytes32"
+       },
+       {
+        "name": "nonce",
+        "type": "uint64"
+       },
+       {
+        "name": "openNonce",
+        "type": "uint64"
+       },
+       {
+        "name": "deadline",
+        "type": "uint64"
+       },
+       {
+        "name": "commitment",
+        "type": "bytes32"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "c_side": 1,
+   "spread": "2000000",
+   "template": {
+    "chain": "avax-fuji",
+    "commitment": "0x9dd337175a0c36a3dba65fbac5bb3522d9c7a549cb4f5bec9e7a1be6d8112d8a",
+    "digest": "0xc4d6df5d4a8ed25f47cc39dfe1d2ca6833bf59f257d7150ee270d7915b741b08",
+    "digest_kind": "failover_consent",
+    "domain_separator": "0xbecf297e99c7bf09c89e90162e71f253515219487294e50a4ab0e5e8b60741f2",
+    "incoming_c": "0x4343434343434343434343434343434343434343434343434343434343434343",
+    "item": {
+     "close_time": 1792801620,
+     "closed_out_side": "0x1616161616161616161616161616161616161616161616161616161616161616",
+     "deadline": 1792803000,
+     "feed_id": "0x4444444444444444444444444444444444444444444444444444444444444444",
+     "incoming": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+     "incoming_side": "0x3335a3c034c4158fd163b9e55f1a5638b1023ee01d8c2594bdaf9f42e793ecb4",
+     "nonce": "2",
+     "old_id": "0x49d07baed9a56ae274c8e4cd09f8ca9271074c953768d6c0a09ee252fcc0f5ce",
+     "open_nonce": "15219405652788785873",
+     "remaining_side": "0x1717171717171717171717171717171717171717171717171717171717171717",
+     "salt": "0x4545454545454545454545454545454545454545454545454545454545454545",
+     "spread": "2000000",
+     "subsidy_max_usd": "0"
+    },
+    "novation_id": "0xd9849a1d2d0b590e03c3ed8dce7d6ab578d6152d9f795cda96366a424a96836c",
+    "old": {
+     "nonce": 4242,
+     "notional": "100000000",
+     "pair": "0x69f1670ccd0386df6e79b445190cb08f07e9d85ef8bb6ef820417312ea39752f",
+     "premium_bps": 0,
+     "rate": "18500000",
+     "settlement": 1793000000,
+     "side": 1
+    },
+    "pricing": {
+     "entry_rate": "18500000",
+     "mark": "18550000",
+     "notional": "100000000",
+     "quote_rate": "15000000",
+     "side": 1,
+     "usd_is_base": true
+    },
+    "rfq_id": "0x4242424242424242424242424242424242424242424242424242424242424242",
+    "role": "incoming",
+    "signed": false,
+    "status": {
+     "deadline": 1792803000,
+     "queued": false,
+     "signed": false,
+     "state": "signing"
+    },
+    "typed_data": {
+     "domain": {
+      "chainId": 43113,
+      "name": "CRX",
+      "verifyingContract": "0x072000d0eb830f767dc5128ed28139bb731b1521",
+      "version": "rulebook-1.0"
+     },
+     "message": {
+      "closedOutSide": "0x1616161616161616161616161616161616161616161616161616161616161616",
+      "commitment": "0x9dd337175a0c36a3dba65fbac5bb3522d9c7a549cb4f5bec9e7a1be6d8112d8a",
+      "deadline": "1792803000",
+      "incomingC": "0x4343434343434343434343434343434343434343434343434343434343434343",
+      "incomingSide": "0x3335a3c034c4158fd163b9e55f1a5638b1023ee01d8c2594bdaf9f42e793ecb4",
+      "nonce": "2",
+      "oldId": "0x49d07baed9a56ae274c8e4cd09f8ca9271074c953768d6c0a09ee252fcc0f5ce",
+      "openNonce": "15219405652788785873",
+      "remainingSide": "0x1717171717171717171717171717171717171717171717171717171717171717"
+     },
+     "primaryType": "FailoverConsent",
+     "types": {
+      "EIP712Domain": [
+       {
+        "name": "name",
+        "type": "string"
+       },
+       {
+        "name": "version",
+        "type": "string"
+       },
+       {
+        "name": "chainId",
+        "type": "uint256"
+       },
+       {
+        "name": "verifyingContract",
+        "type": "address"
+       }
+      ],
+      "FailoverConsent": [
+       {
+        "name": "oldId",
+        "type": "bytes32"
+       },
+       {
+        "name": "closedOutSide",
+        "type": "bytes32"
+       },
+       {
+        "name": "remainingSide",
+        "type": "bytes32"
+       },
+       {
+        "name": "incomingSide",
+        "type": "bytes32"
+       },
+       {
+        "name": "incomingC",
+        "type": "bytes32"
+       },
+       {
+        "name": "nonce",
+        "type": "uint64"
+       },
+       {
+        "name": "openNonce",
+        "type": "uint64"
+       },
+       {
+        "name": "deadline",
+        "type": "uint64"
+       },
+       {
+        "name": "commitment",
+        "type": "bytes32"
+       }
+      ]
+     }
+    }
+   }
+  }
+ ],
+ "forced_spreads": [
+  {
+   "entry": "18500000",
+   "mark": "18550000",
+   "notional": "100000000",
+   "rate": "18400000",
+   "side": 1,
+   "spread": "808625",
+   "usd_is_base": true
+  },
+  {
+   "entry": "150000000",
+   "mark": "150000000",
+   "notional": "10000000000000",
+   "rate": "140000000",
+   "side": 1,
+   "spread": "30000000000000",
+   "usd_is_base": false
+  },
+  {
+   "entry": "150000000",
+   "mark": "150000000",
+   "notional": "10000000000000",
+   "rate": "151000000",
+   "side": -1,
+   "spread": "10000000000000",
+   "usd_is_base": false
+  },
+  {
+   "entry": "1080000",
+   "mark": "1085000",
+   "notional": "5000000000",
+   "rate": "1090000",
+   "side": -1,
+   "spread": "25000000",
+   "usd_is_base": false
+  }
+ ],
+ "open_nonces": [
+  {
+   "nonce": 9,
+   "old_id": "0x0505050505050505050505050505050505050505050505050505050505050505",
+   "open_nonce": "5985435902913140779"
+  }
+ ],
+ "side_ids": [
+  {
+   "incoming_c": "0x1818181818181818181818181818181818181818181818181818181818181818",
+   "side_id": "0x076d4928afb5d8285a154b3cf50a35d5773e12b692828815ea7f960c08f52d58"
+  }
+ ]
+}
