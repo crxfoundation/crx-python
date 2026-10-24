@@ -144,7 +144,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m crx.quickstart_maker",
         description="Run a 100 USD maker test request on Ethereum mainnet.",
-        epilog=f"Set {ENV_KEY} or {ENV_KEY_FILE}, and CRX_RPC. The script asks for a missing key with hidden input.",
+        epilog=f"Set {ENV_KEY} or {ENV_KEY_FILE}. The script asks for a missing key with hidden input.",
     )
     parser.parse_args(argv)
     if hasattr(sys.stdout, "reconfigure"):

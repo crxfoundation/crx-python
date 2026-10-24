@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.17
+
+- Mainnet needs no RPC of your own. With no `rpc_url=` and no `CRX_RPC`, the client sends its chain calls to `<base URL>/rpc` (`https://api.crxfx.com/rpc`, or the `base_url=` / `CRX_BASE` host). Each call carries the signed headers of a REST call (`x-crx-address`, `x-crx-ts`, `x-crx-sig`, and `x-crx-signer` for a delegate) over the exact body bytes sent. `rpc_url=` or `CRX_RPC` replaces the route and gets no signed headers. Testnet is unchanged.
+- On the `/rpc` route: a 401 or 403 raises `AuthError` (or the typed error of the gateway's code) that names the call; a 404 raises `ConfigError`; a 429 waits `Retry-After` once (60 s at most) and sends the call again with a new signature, then raises `RateLimited`. Receipts are read every 3 s. A refused receipt read after a send raises `SendUnknown` with the transaction hash.
+
 ## 0.3.16
 
 - `quote()` and `ask()` need `settles=` (or the older `expiry=`); there is no default. A call with neither raises `BadRequest` that names the accepted forms.

@@ -5,19 +5,20 @@ Trade FX forwards on CRX from Python.
 ## Install
 
 ```bash
-pip install "git+https://github.com/crxfoundation/crx-python@v0.3.16"
+pip install "git+https://github.com/crxfoundation/crx-python@v0.3.17"
 ```
 
 Python 3.10 or newer.
 
 Set `CRX_WALLET_PK` to the private key of an onboarded seat wallet. To read the key from a file, pass `key_file="seat.key"` or set `CRX_WALLET_PK_FILE`. When other users can open the file and it is yours, the SDK sets it to owner-only (0600) and prints `set seat.key to owner-only (0600)`. It refuses a key file of another user, or one whose mode does not change. The SDK never prints or logs the key. On mainnet, the wallet needs ETH for the network fee of a deposit.
 
+Mainnet needs no RPC of your own: the client sends its chain calls to the gateway's `/rpc` route, signed with the seat key. `CRX_RPC` is optional and replaces that route with your own node.
+
 The client also reads the `CRX_*` settings from a `.env` file in the working directory:
 
 ```bash
 # .env
 CRX_WALLET_PK_FILE=seat.key
-CRX_RPC="https://eth-mainnet.example/v2/..."
 ```
 
 One `NAME=VALUE` per line; `#` starts a comment; quotes are optional. Nothing is expanded. A name set in the environment wins over the file. A `.env` file with a `CRX_*` line gets the same owner-only rule as a key file.
@@ -49,7 +50,7 @@ import time
 
 import crx
 
-c = crx.Client(network="mainnet", allow_mainnet=True)  # reads CRX_WALLET_PK and CRX_RPC
+c = crx.Client(network="mainnet", allow_mainnet=True)  # reads CRX_WALLET_PK
 
 d = c.deposit(100)                                 # USDC from the seat wallet
 print(d.status, c.balance().free)
@@ -124,7 +125,7 @@ A maker seat quotes the RFQs other seats open.
 python -m crx.quickstart_maker
 ```
 
-Set `CRX_WALLET_PK` or `CRX_WALLET_PK_FILE`, and `CRX_RPC`. The script uses one approved maker account on Ethereum mainnet at `https://api.crxfx.com`, and asks for a missing key with hidden input. Under 20 USDC of free collateral, it deposits the shortfall, at least the 100 USDC minimum deposit. It then calls `test_request()`, quotes the returned `reference_rate` and reads the trade from `positions()` until it is final:
+Set `CRX_WALLET_PK` or `CRX_WALLET_PK_FILE`. The script uses one approved maker account on Ethereum mainnet at `https://api.crxfx.com`, and asks for a missing key with hidden input. Under 20 USDC of free collateral, it deposits the shortfall, at least the 100 USDC minimum deposit. It then calls `test_request()`, quotes the returned `reference_rate` and reads the trade from `positions()` until it is final:
 
 ```text
 19:22:22 0x7e57de5c4a0c1f3b9e2d58a6c07b41e93f6d0a01
@@ -164,7 +165,7 @@ c.quote_live(lambda rfq: "18.49" if rfq.pair == "USD/MXN" else None, seconds=600
 
 The gateway counts a maker live for 15 s after it reads `/trades`. The first maker call starts a background thread that reads `/trades` when the client has read none for 5 s. `Client(keepalive=)` sets the interval, 1 to 10 s, and `None` turns it off. `close()` stops it.
 
-`python -m crx.test_request_worker` accepts dedicated test requests. It requires `--enable`, `--key-file` and `--state-dir`, reads its Ethereum RPC from `CRX_RPC` only, and does not renew RFQs.
+`python -m crx.test_request_worker` accepts dedicated test requests. It requires `--enable`, `--key-file` and `--state-dir`, sends its chain calls to the gateway's `/rpc` route or to `CRX_RPC` when set, and does not renew RFQs.
 
 ## Custodian signer
 
@@ -237,7 +238,7 @@ Every error is a `crx.CrxError`. Branch on `.code`. Show `str(e)`: on a gateway 
 | Argument | Environment | Default |
 |---|---|---|
 | `allow_mainnet=True` | `CRX_ALLOW_MAINNET=1` | Off. Mainnet needs it. |
-| `rpc_url=` | `CRX_RPC` | A public RPC on testnet. Mainnet has none. |
+| `rpc_url=` | `CRX_RPC` | Optional. Testnet: a public RPC. Mainnet: the gateway's `/rpc` route at the base URL, each call signed with the seat key. An RPC set here gets no signed headers. |
 | `base_url=` | `CRX_BASE` | Testnet: `https://api.sandbox.crxfx.com`. Mainnet: `https://api.crxfx.com`. |
 | `state_dir=` | `CRX_STATE_DIR` | `~/.crx-quickstart/`, which holds the nonce floor and is shared with the quickstart scripts. |
 

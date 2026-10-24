@@ -194,6 +194,10 @@ class Gateway:
         # The signed path carries no query string.
         return self._send(method, path, raw, query, timeout, self.headers(method, path, raw) if auth else {})
 
+    def signed_post(self, path: str, raw: bytes, timeout: float | None = None) -> requests.Response:
+        """POST the exact bytes ``raw`` to ``path`` with signed headers over them. A session token is never used."""
+        return self._send("POST", path, raw, None, timeout, self.headers("POST", path, raw))
+
     def request(
         self, method: str, path: str, *, body: Any = None, query: dict | None = None, auth: bool = True,
         ok: tuple[int, ...] = (200,), timeout: float | None = None,

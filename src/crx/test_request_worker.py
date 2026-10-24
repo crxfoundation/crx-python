@@ -189,7 +189,7 @@ class TestRequestWorker:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Accept dedicated CRX test requests on Ethereum mainnet.",
-        epilog="Set CRX_RPC for the Ethereum connection.",
+        epilog="CRX_RPC is optional: it replaces the gateway's /rpc route for the Ethereum connection.",
     )
     parser.add_argument("--enable", action="store_true", required=True, help="Enable test request acceptance.")
     parser.add_argument("--key-file", required=True, help="Dedicated taker key file.")

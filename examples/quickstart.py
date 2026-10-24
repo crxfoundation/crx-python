@@ -19,7 +19,7 @@ def short(value):
     return f"{value[:6]}...{value[-4:]}"
 
 
-# Read the key from CRX_WALLET_PK and the Ethereum RPC URL from CRX_RPC.
+# Read the key from CRX_WALLET_PK. Chain calls go to the gateway's /rpc route unless CRX_RPC is set.
 c = crx.Client(network="mainnet", allow_mainnet=True,
                base_url="https://api.crxfx.com")
 log(c.address)  # 15:40:18 0x656e3a8c4f1d2b07e9a65c3d4b8f2e1a90c76bed

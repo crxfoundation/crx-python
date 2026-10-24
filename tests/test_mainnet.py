@@ -1,4 +1,4 @@
-"""The mainnet network: off by default, chain 1 only, the api.crxfx.com gateway and a configured RPC."""
+"""The mainnet network: off by default, chain 1 only, the api.crxfx.com gateway and its RPC route."""
 
 import pytest
 from eth_utils import is_hex_address
@@ -65,11 +65,11 @@ def test_mainnet_off_its_pins_signs_nothing(session, tmp_path, account, monkeypa
 
 OFF = [  # Client arguments, words
     ({}, "allow_mainnet"),
-    ({"allow_mainnet": True, "rpc_url": None}, "rpc_url"),  # no default RPC
+    ({"rpc_url": None}, "allow_mainnet"),
 ]
 
 
-def test_mainnet_is_off_by_default_and_has_no_default_rpc(session, tmp_path, account):
+def test_mainnet_is_off_by_default(session, tmp_path, account):
     for kw, words in OFF:
         with pytest.raises(crx.ConfigError) as ei:
             main(session, tmp_path, account, **kw)

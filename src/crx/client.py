@@ -19,7 +19,7 @@ from eth_utils import is_checksum_address, is_hex_address, to_checksum_address
 
 from . import _eip712 as e7
 from ._bind import Binder, read_later
-from ._chain import Rpc, TxLog, send_tx
+from ._chain import GATEWAY_PATH, Rpc, TxLog, send_tx
 from . import _env
 from ._http import Gateway
 from ._keys import load_account
@@ -43,6 +43,8 @@ log = logging.getLogger("crx")
 # accept(), confirm(), deposit(), withdraw() and test_request() when the call passes no wait=. check_minute: the
 # minute past the hour of the hourly check. chain_id and core: the EIP-712 domain the SDK signs for. When
 # /health serves another chain id, core or domain separator, or core is not an address, signing calls refuse.
+# rpc_url GATEWAY_RPC: the gateway's /rpc route at base_url, each call signed like a REST call.
+GATEWAY_RPC = "<base_url>" + GATEWAY_PATH
 MAINNET_CORE = "0x0d716cA9Fc2BFD8c66D2AF2fB38b56D08809A8cc"
 NETWORKS = {
     "testnet": {
@@ -55,11 +57,11 @@ NETWORKS = {
         "chain_id": 43113,
         "core": "0x072000D0EB830F767DC5128ED28139bB731b1521",
     },
-    # Needs allow_mainnet and an RPC URL.
+    # Needs allow_mainnet.
     "mainnet": {
         "chain": "ethereum",
         "base_url": "https://api.crxfx.com",
-        "rpc_url": None,
+        "rpc_url": GATEWAY_RPC,
         "settle_wait": 90.0,
         "default_wait": 900.0,
         "check_minute": 35,
@@ -353,7 +355,9 @@ class Client:
             ``CRX_WALLET_PK_FILE``. Without a key, only ``health()``, ``markets()``, ``market()`` and ``next_check()`` work.
         network: ``"testnet"`` (default) or ``"mainnet"``.
         allow_mainnet: Required for mainnet, or set ``CRX_ALLOW_MAINNET=1``.
-        rpc_url: Chain RPC URL, or ``CRX_RPC``. Mainnet has no default.
+        rpc_url: Chain RPC URL, or ``CRX_RPC``. Optional. Testnet default: a public RPC. Mainnet default: the
+            gateway's ``/rpc`` route at ``base_url``, each call signed like a REST call. An RPC set here
+            replaces the default and gets no signed headers.
         signer: A custodian signer in place of the key (see ``crx.signer``). ``deposit``, ``send_quote``
             and ``confirm`` still need a local key.
         account: Another seat this key may read (see ``add_viewer``). Then only ``balance``, ``positions``
@@ -422,23 +426,26 @@ class Client:
             key = None
             raise
         gw_url = base_url or env.get("CRX_BASE") or net["base_url"]
-        rpc = rpc_url or env.get("CRX_RPC") or net["rpc_url"]
-        if name == "mainnet":
-            refusal = None
-            if not (allow_mainnet is True or env.get("CRX_ALLOW_MAINNET") == "1"):
-                refusal = "mainnet is off: pass allow_mainnet=True or set CRX_ALLOW_MAINNET=1"
-            elif not rpc:
-                refusal = f"{name} has no default RPC: pass rpc_url= or set CRX_RPC"
-            if refusal:
-                key = None
-                raise ConfigError(refusal)
+        own_rpc = rpc_url or env.get("CRX_RPC")
+        rpc = own_rpc or net["rpc_url"]
+        refusal = None
+        if name == "mainnet" and not (allow_mainnet is True or env.get("CRX_ALLOW_MAINNET") == "1"):
+            refusal = "mainnet is off: pass allow_mainnet=True or set CRX_ALLOW_MAINNET=1"
+        elif not rpc:
+            refusal = f"{name} has no default RPC: pass rpc_url= or set CRX_RPC"
+        if refusal:
+            key = None
+            raise ConfigError(refusal)
         self._session = session or requests.Session()
         try:
             self._gw = Gateway(gw_url, None, self._session, timeout)
         except ConfigError:
             key = None
             raise
-        self._rpc = Rpc(rpc, self._session, max(timeout, 20.0))
+        if not own_rpc and rpc == GATEWAY_RPC:
+            self._rpc = Rpc(self._gw.base_url + GATEWAY_PATH, self._session, max(timeout, 20.0), gateway=self._gw)
+        else:
+            self._rpc = Rpc(rpc, self._session, max(timeout, 20.0))
         try:
             custody = None if account is None else _address(account, "account", ConfigError)
         except ConfigError:

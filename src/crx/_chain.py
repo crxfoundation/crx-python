@@ -1,6 +1,7 @@
 """JSON-RPC client and checked transaction sender.
 
 Reprs and errors never show the RPC URL, which can hold a key. urllib3 DEBUG logs still show its path.
+On the gateway RPC, each call is signed like a REST call over the exact body bytes it sends.
 """
 
 from __future__ import annotations
@@ -11,14 +12,20 @@ import threading
 import time
 from pathlib import Path
 from time import time as wall
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 import requests
 from eth_abi import decode
 from eth_abi.exceptions import DecodingError
 from eth_utils import keccak, to_checksum_address
 
-from .errors import BadAnswer, NetworkError, SendUnknown, TxFailed, clean
+from .errors import (
+    BadAnswer, ConfigError, CrxError, NetworkError, RateLimited, SendUnknown, TxFailed, clean, from_gateway,
+    gateway_code,
+)
+
+if TYPE_CHECKING:
+    from ._http import Gateway
 
 try:
     import fcntl
@@ -72,11 +79,46 @@ def revert_name(error: Any) -> str:
     return clean(error.get("message", "a revert"), 120)
 
 
+GATEWAY_PATH = "/rpc"  # the gateway's chain call route
+RECEIPT_POLL_S = 2.0  # seconds between receipt reads
+GATEWAY_RECEIPT_POLL_S = 3.0  # seconds between receipt reads on the gateway RPC
+RATE_WAIT_MAX = 60  # longest Retry-After, in seconds, the gateway RPC waits before its one resend
+
+
+def gateway_refusal(r: requests.Response, method: str, host: str) -> CrxError:
+    """Return the typed error of a 401, 403, 404 or 429 from the gateway RPC, with the served words."""
+    if r.status_code == 404:
+        return ConfigError(f"{host} serves no chain calls; pass rpc_url= or set CRX_RPC", status=404)
+    try:
+        body = r.json()
+    except ValueError:
+        body = None
+    body = body if isinstance(body, dict) else {}
+    err = body.get("error")
+    if isinstance(err, dict):  # a JSON-RPC error object
+        words, code = err.get("message"), None
+        details = {"rpc_code": err["code"]} if isinstance(err.get("code"), int) else {}
+    else:
+        words, code = body.get("message") or err, gateway_code(body) or None
+        details = dict(body["details"]) if isinstance(body.get("details"), dict) else {}
+    words = clean(words, 160).strip() if isinstance(words, str) else ""
+    shown = {"code": code, "details": {**details, "method": method},
+             "message": f"{host} refused the chain call {method}: {words or f'HTTP {r.status_code}'}"}
+    headers = getattr(r, "headers", None) or {}
+    return from_gateway(r.status_code, shown, host=host, retry_after=headers.get("Retry-After"))
+
+
 class Rpc:
-    def __init__(self, url: str, session: requests.Session, timeout: float = 20) -> None:
+    """JSON-RPC client. With ``gateway``, calls go to its ``/rpc`` route with the signed headers of a REST call."""
+
+    def __init__(
+        self, url: str, session: requests.Session, timeout: float = 20, gateway: Gateway | None = None,
+    ) -> None:
         self._url = url
         self._session = session
         self._timeout = timeout
+        self._gw = gateway
+        self.receipt_poll = GATEWAY_RECEIPT_POLL_S if gateway is not None else RECEIPT_POLL_S
 
     def __repr__(self) -> str:
         return "Rpc(<url hidden>)"
@@ -84,16 +126,32 @@ class Rpc:
     def __getstate__(self) -> object:
         raise TypeError("the RPC URL can hold a key; an Rpc cannot be pickled or copied")
 
+    def _post_gateway(self, method: str, raw: bytes) -> requests.Response:
+        """Send ``raw`` to the gateway RPC. On a 429, wait Retry-After once (up to ``RATE_WAIT_MAX``) and resend."""
+        gw = self._gw
+        r = gw.signed_post(GATEWAY_PATH, raw, self._timeout)
+        if r.status_code == 429:
+            e = gateway_refusal(r, method, gw.host)
+            pause = e.retry_after if isinstance(e, RateLimited) else None
+            if pause is None or pause > RATE_WAIT_MAX:
+                raise e
+            gw.sleep(pause)
+            r = gw.signed_post(GATEWAY_PATH, raw, self._timeout)  # a new timestamp and signature
+        if r.status_code in (401, 403, 404, 429):
+            raise gateway_refusal(r, method, gw.host)
+        return r
+
     def __call__(self, method: str, *params: Any) -> Any:
         err: Exception | None = None
         r = body = None
-        try:
-            r = self._session.post(
-                self._url, timeout=self._timeout,
-                json={"jsonrpc": "2.0", "id": 1, "method": method, "params": list(params)},
-            )
-        except requests.RequestException as e:
-            err = NetworkError(f"the RPC did not answer ({type(e).__name__})")
+        call = {"jsonrpc": "2.0", "id": 1, "method": method, "params": list(params)}
+        if self._gw is not None:
+            r = self._post_gateway(method, json.dumps(call, separators=(",", ":")).encode())
+        else:
+            try:
+                r = self._session.post(self._url, timeout=self._timeout, json=call)
+            except requests.RequestException as e:
+                err = NetworkError(f"the RPC did not answer ({type(e).__name__})")
         if err is None and r.status_code >= 500:
             # A 5xx comes from a proxy or a failed node, not from a JSON-RPC answer.
             err = BadAnswer(f"the RPC answered HTTP {r.status_code}")
@@ -375,6 +433,10 @@ def send_tx(
                 receipt = rpc("eth_getTransactionReceipt", h)
             except (RpcError, NetworkError, BadAnswer):
                 receipt = None
+            except CrxError as e:
+                # The gateway refused the read; the tx can still be mined.
+                raise SendUnknown(f"{what} tx {tx}. {UNKNOWN_LINE} {e}",
+                                  details={"step": what, "tx": tx, "txs": watch, "cause": e.code}) from None
             mined = receipt_status(receipt)
             if mined == 1:
                 return h
@@ -382,4 +444,4 @@ def send_tx(
                 raise TxFailed(f"{what} tx {h} reverted", details={"step": what, "tx": h})
         if time.monotonic() > deadline:
             raise SendUnknown(f"{what} tx {tx}. {UNKNOWN_LINE}", details={"step": what, "tx": tx, "txs": watch})
-        sleep(2)
+        sleep(getattr(rpc, "receipt_poll", RECEIPT_POLL_S))
