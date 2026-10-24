@@ -303,7 +303,7 @@ def check_failover(t: Any, *, seat: str, rfq_id: str, rate_e6: int, pair: str, s
     if _w("uint256", w["spread"]) != forced_spread(n, mark, quoted, side, usd_is_base, entry):
         raise _refuse("the item's fee is not the fee of the quoted rate")
     if _w("uint256", w["subsidyMaxUsd"]) != 0:
-        raise _refuse("the item carries a subsidy")
+        raise _refuse("the close-out carries a term this SDK does not sign")
     nonce = _w("uint64", w["nonce"])
     if _w("uint64", w["openNonce"]) != open_nonce(w["oldId"], nonce):
         raise _refuse("the item's open_nonce is not the old leg's")
@@ -337,50 +337,73 @@ def _post_once_more(c: "Client", path: str, body: dict) -> dict:
     return c._gw.request("POST", path, body=body)
 
 
-def _view(c: "Client", rfq_id: str) -> dict:
-    return c._gw.request("GET", f"/rfqs/{rfq_id}")
+def _backoff(c: "Client", e: CrxError, poll: float, what: str) -> None:
+    """Pause after a transient error: ``Retry-After`` when sent, else ``poll``, at most 30 s."""
+    after = getattr(e, "retry_after", None)
+    pause = min(max(float(after) if isinstance(after, (int, float)) and not isinstance(after, bool) else poll,
+                    poll), 30.0)
+    log.info("%s: %s; reading again in %s s", what, e.code, pause)
+    c._sleep(pause)
 
 
-def _round_ended(view: dict, rfq_id: str, what: str) -> CrxError:
-    st = clean(view.get("status"), 40)
-    return NoQuotes(f"the close round is {st}: {what}", details={"rfq_id": rfq_id, "status": st})
+def _soft(c: "Client", poll: float, path: str) -> dict | None:
+    """GET ``path`` for a poll loop. On a transient error, pause and return None."""
+    try:
+        return c._gw.request("GET", path)
+    except TRANSIENT as e:
+        _backoff(c, e, poll, f"GET {path}")
+        return None
 
 
 def _await_winner(c: "Client", rfq_id: str, end: float) -> dict:
     """Poll the round until the gateway names its winner. Raise NoQuotes when the round or the wait ends first."""
+    from .client import _ended
     while True:
-        view = _view(c, rfq_id)
-        if view.get("status") in ENDED:
-            raise _round_ended(view, rfq_id, "no quote")
-        q = view.get("quote")
+        view = _soft(c, 1.0, f"/rfqs/{rfq_id}")
+        if view is not None and view.get("status") in ENDED:
+            raise _ended(view, rfq_id)
+        q = view.get("quote") if view is not None else None
         if isinstance(q, dict) and q.get("status") == "quoted" and q.get("quote_id"):
             return q
         if c._clock() >= end:
             raise NoQuotes("no quote before the wait ended: the round is still open", details={"rfq_id": rfq_id})
-        c._sleep(1.0)
+        if view is not None:
+            c._sleep(1.0)
 
 
 def _await_status(c: "Client", rfq_id: str, want: tuple, end: float, poll: float) -> dict:
     """Poll the round until its status is one of ``want``. Raise QuoteExpired when it ends first."""
     while True:
-        view = _view(c, rfq_id)
-        if view.get("status") in want:
+        view = _soft(c, poll, f"/rfqs/{rfq_id}")
+        if view is not None and view.get("status") in want:
             return view
-        if view.get("status") in ENDED:
+        if view is not None and view.get("status") in ENDED:
             raise QuoteExpired("the close round ended before its forms were signed",
                                details={"rfq_id": rfq_id, "status": clean(view.get("status"), 40)})
         if c._clock() >= end:
             raise QuoteExpired("the wait ended before the winner signed", details={"rfq_id": rfq_id})
-        c._sleep(poll)
+        if view is not None:
+            c._sleep(poll)
 
 
 def _arm(c: "Client", rfq_id: str, end: float, poll: float) -> dict:
-    """Poll the item's status until ``closed`` or ``refused``, or until ``end``."""
+    """Poll the item's status until ``closed`` or ``refused``, or until ``end``. A round that ended with
+    nothing sent reads ``refused``."""
+    last: dict = {}
     while True:
-        a = c._gw.request("GET", f"/rfqs/{rfq_id}/close/arm-tx")
-        if a.get("status") in ("closed", "refused") or c._clock() >= end:
-            return a
-        c._sleep(poll)
+        a = _soft(c, poll, f"/rfqs/{rfq_id}/close/arm-tx")
+        if a is not None:
+            last = a
+            if a.get("status") in ("closed", "refused"):
+                return a
+            if a.get("status") is None:
+                view = _soft(c, poll, f"/rfqs/{rfq_id}")
+                if view is not None and view.get("status") in ENDED:
+                    return dict(a, status="refused")
+        if c._clock() >= end:
+            return last
+        if a is not None:
+            c._sleep(poll)
 
 
 def close_trade(c: "Client", trade_id: Any, to: Any, wait: float, poll: float = 1.0) -> Close:
@@ -460,7 +483,13 @@ def _await_award(c: "Client", rfq_id: str, quote_id: str, cursor: int, end: floa
     """Read the tape until the round awards this quote. Raise QuoteExpired when the round ends or the wait ends."""
     while True:
         start = cursor
-        rows, cursor = _tape(c, cursor)
+        try:
+            rows, cursor = _tape(c, cursor)
+        except TRANSIENT as e:
+            if c._clock() >= end:
+                raise QuoteExpired("the wait ended before the round picked a quote", details={"rfq_id": rfq_id}) from None
+            _backoff(c, e, poll, "close round tape")
+            continue
         for r in rows:
             if not _of(r, rfq_id):
                 continue
@@ -486,30 +515,41 @@ def _decline(c: "Client", rfq_id: str, quote_id: str, digest: Any) -> None:
         log.info("close decline on rfq %s: %s", rfq_id, e.code)
 
 
-def _taken(c: "Client", rfq_id: str, trade_id: str, cursor: int, elective: bool, end: float, poll: float,
-           done: str = "open") -> str:
-    """Wait for the close to land: ``done``, ``refused``, or ``pending`` when ``end`` passes.
+def _taken(c: "Client", rfq_id: str, cursor: int, elective: bool, end: float, poll: float,
+           done: str = "open") -> tuple[str, str | None]:
+    """Wait for the close to land. Return ``done``, ``refused``, or ``pending`` when ``end`` passes, and the
+    trade id the tape names.
 
-    ``done`` is ``open`` for the seat that takes the side over and ``closed`` for the counterparty.
+    ``done`` is ``open`` for the seat that takes the side over and ``closed`` for the counterparty. A close
+    reads ``done`` once the tape shows it, or once its status is ``closed`` and final.
     """
     while True:
-        rows, cursor = _tape(c, cursor)
+        try:
+            rows, cursor = _tape(c, cursor)
+        except TRANSIENT as e:
+            if c._clock() >= end:
+                return "pending", None
+            _backoff(c, e, poll, "close round tape")
+            continue
         for r in rows:
-            moved = r.get("type") == "trade.novated" and done == "open"
-            ended = r.get("type") == "trade.closed" and done == "closed" and r["data"].get("ended") is True
-            if (moved or ended) and (_of(r, rfq_id, "close_rfq_id") or _of(r, rfq_id) or _of(r, trade_id, "trade_id")):
-                return done
+            moved = r.get("type") == "trade.novated" and done == "open" and _of(r, rfq_id, "close_rfq_id")
+            ended = (r.get("type") == "trade.closed" and done == "closed" and _of(r, rfq_id)
+                     and r["data"].get("ended") is True)
+            if moved or ended:
+                return done, _word(r["data"].get("trade_id"))
             if r.get("type") == "trade.closed_out" and _of(r, rfq_id, "close_rfq_id"):
-                return "refused"
-        view = _view(c, rfq_id)
-        if view.get("status") in ENDED:
-            return "refused"
-        if elective and view.get("status") == "armed":
-            a = c._gw.request("GET", f"/rfqs/{rfq_id}/close/arm-tx")
-            if a.get("status") in ("closed", "refused"):
-                return done if a["status"] == "closed" else "refused"
+                return "refused", None
+        view = _soft(c, poll, f"/rfqs/{rfq_id}")
+        if view is not None and view.get("status") in ENDED:
+            return "refused", None
+        if elective and view is not None and view.get("status") == "armed":
+            a = _soft(c, poll, f"/rfqs/{rfq_id}/close/arm-tx") or {}
+            if a.get("status") == "refused":
+                return "refused", None
+            if a.get("status") == "closed" and a.get("final") is True:
+                return done, None
         if c._clock() >= end:
-            return "pending"
+            return "pending", None
         c._sleep(poll)
 
 
@@ -525,8 +565,8 @@ def take_over(c: "Client", rfq: Any, rate: Any, wait: float, poll: float = 0.5,
         raise BadRequest("this is your own RFQ; a seat does not take over its own trade")
     trade_id = _word(d.get("position_id"))
     side = d.get("side")
-    if trade_id is None or isinstance(side, bool) or side not in (1, -1):
-        raise BadAnswer("the close RFQ names no trade or side")
+    if isinstance(side, bool) or side not in (1, -1):
+        raise BadAnswer("the close RFQ names no side")
     try:
         if not e7.pair_text_ok(r.pair) or r.notional is None or not isinstance(d.get("expiry"), int):
             raise ValueError
@@ -540,7 +580,10 @@ def take_over(c: "Client", rfq: Any, rate: Any, wait: float, poll: float = 0.5,
     seat = c.address
     c._chain_info()
     end = c._clock() + wait
-    cursor = r.seq if isinstance(r.seq, int) and r.seq > 0 else 0
+    if isinstance(r.seq, int) and r.seq > 0:
+        cursor = r.seq
+    else:
+        _, cursor = _tape(c, 0)
     cid = client_quote_id or "take-" + uuid.uuid4().hex
     quote_id = close_quote_id(r.rfq_id, seat, rate_e6, cid)
     try:
@@ -569,9 +612,9 @@ def take_over(c: "Client", rfq: Any, rate: Any, wait: float, poll: float = 0.5,
         _decline(c, r.rfq_id, quote_id, t.get("digest") if isinstance(t, dict) else None)
         raise
     _post_once_more(c, f"/rfqs/{r.rfq_id}/close/sign", {"sig": sig})
-    status = _taken(c, r.rfq_id, trade_id, cursor, kind == ACCEPTANCE, end, max(poll, 2.0))
+    status, moved = _taken(c, r.rfq_id, cursor, kind == ACCEPTANCE, end, max(poll, 2.0))
     return TakeOver(
-        rfq_id=r.rfq_id, quote_id=quote_id, trade_id=trade_id, pair=pair, side=side_word(side) or "",
+        rfq_id=r.rfq_id, quote_id=quote_id, trade_id=moved or trade_id, pair=pair, side=side_word(side) or "",
         notional=r.notional, rate=rate_d, status=status, raw=t,
     )
 
@@ -588,7 +631,7 @@ def requests(c: "Client", after: int | None, wait: float | None, poll: float, st
         try:
             rows, cursor = _tape(c, cursor)
         except TRANSIENT as e:
-            log.warning("close_requests: %s; reading again in %s s", e.code, poll)
+            _backoff(c, e, poll, "close_requests")
             rows = []
         for row in rows:
             d = row.get("data")
@@ -652,6 +695,6 @@ def answer(c: "Client", request: Any, rate: Any, wait: float, poll: float = 0.5,
         _decline(c, rfq_id, quote_id, t.get("digest") if isinstance(t, dict) else None)
         raise
     _post_once_more(c, f"/rfqs/{rfq_id}/close/sign", {"sig": sig})
-    status = _taken(c, rfq_id, tid, cursor, True, end, max(poll, 2.0), done="closed")
+    status, _ = _taken(c, rfq_id, cursor, True, end, max(poll, 2.0), done="closed")
     return Close(trade_id=tid, rfq_id=rfq_id, to=seat, rate=rate_d, status=status, item=None, tx=None, raw=t,
                  counterparty=True)

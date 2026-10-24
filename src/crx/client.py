@@ -1017,7 +1017,8 @@ class Client:
             NoQuotes: No quote before the request ended.
             RateOutOfBand: The winning rate is outside the price band.
             QuoteExpired: The winning maker did not sign in time.
-            OwnRoundOpen: Another close of this seat is still open.
+            OwnRoundOpen: Another close of this seat is still open at the accept.
+            CrxError: Code ``conflict`` when a close of this trade is already open.
             RefusedToSign: The close differs from the trade. Nothing is signed.
         """
         self._need_seat()

@@ -437,7 +437,7 @@ class TakeOver:
     """The result of ``Client.take_over``.
 
     Attributes:
-        trade_id: The trade the seat takes over. ``positions()`` lists it once ``open``.
+        trade_id: The trade the seat takes over, once the tape names it. ``positions()`` lists it once ``open``.
         side: The seat's side in the base currency.
         rate: The seat's quoted rate.
         status: ``pending`` until the trade moves to the seat, ``open``, or ``refused``.
@@ -445,7 +445,7 @@ class TakeOver:
 
     rfq_id: str
     quote_id: str
-    trade_id: str
+    trade_id: str | None
     pair: str
     side: str
     notional: Decimal

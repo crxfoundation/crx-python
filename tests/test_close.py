@@ -118,7 +118,7 @@ def test_take_over_declines_an_allocation_off_its_quote(session, tmp_path, edit,
     c = client(session, tmp_path, INCOMING, clock)
     seat = INCOMING["address"].lower()
     r = rfq_of({"rfq_id": RFQ, "kind": "close", "chain": "avax-fuji", "pair": "USDMXN", "side": 1,
-                "notional": "100", "expiry": SETTLE * 1000, "position_id": TRADE}, 5)
+                "notional": "100", "expiry": SETTLE * 1000}, 5)
     qid = _close.close_quote_id(RFQ, seat, 18_612_345, "take-1")
     edit = dict(edit)
     t = allocation("incoming", edit.pop("incoming", seat), **edit)
@@ -145,7 +145,7 @@ def test_take_over_signs_the_gateway_close_out_template(session, tmp_path):
     seat = INCOMING["address"].lower()
     rate = int(t["pricing"]["quote_rate"])
     r = rfq_of({"rfq_id": t["rfq_id"], "kind": "close", "chain": "avax-fuji", "pair": "USDMXN",
-                "side": v["c_side"], "notional": "100", "expiry": SETTLE * 1000, "position_id": "0x" + "41" * 32}, 5)
+                "side": v["c_side"], "notional": "100", "expiry": SETTLE * 1000}, 5)
     qid = _close.close_quote_id(t["rfq_id"], seat, rate, "take-2")
     rows = [{"type": "rfq.awarded", "seq": 6, "data": {"rfq_id": t["rfq_id"], "quote_id": qid,
                                                        "digest_kind": "failover_consent"}},
