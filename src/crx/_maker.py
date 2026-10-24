@@ -91,10 +91,10 @@ def rfq_of(d: dict, seq: Any = None, quotes: Any = ()) -> Rfq | None:
     )
 
 
-def _quotable(r: Rfq, chain: str, now_ms: float) -> bool:
-    """Return True for another seat's open RFQ on this chain that still takes quotes."""
+def _quotable(r: Rfq, chain: str, now_ms: float, kind: str = "open") -> bool:
+    """Return True for another seat's RFQ of ``kind`` on this chain that still takes quotes."""
     d = r.raw
-    if r.kind != "open" or d.get("chain") != chain or r.own:
+    if r.kind != kind or d.get("chain") != chain or r.own:
         return False
     if r.status is not None and r.status not in LIVE:
         return False
@@ -156,6 +156,7 @@ def _opened(rows: list) -> Iterator[Rfq]:
 
 def stream(
     c: "Client", after: int | None, wait: float | None, poll: float, stop: Any = None, only: Any = None,
+    kind: str = "open",
 ) -> Iterator[Rfq]:
     """Yield open RFQs from the ``/trades`` tape, oldest first, once each, until ``wait`` ends or ``stop`` is set."""
     rid = None
@@ -168,11 +169,11 @@ def stream(
     backlog: list[Rfq] = []
     while True:
         rows, cursor = _page(c, cursor)
-        backlog = [r for r in backlog if _quotable(r, c.chain_key, c._clock() * 1000)]
-        backlog += [r for r in _opened(rows) if _quotable(r, c.chain_key, c._clock() * 1000)]
+        backlog = [r for r in backlog if _quotable(r, c.chain_key, c._clock() * 1000, kind)]
+        backlog += [r for r in _opened(rows) if _quotable(r, c.chain_key, c._clock() * 1000, kind)]
         if len(rows) < PAGE:
             break
-    rfqs = _follow(c, cursor, backlog, end, poll, stop)
+    rfqs = _follow(c, cursor, backlog, end, poll, stop, kind)
     return rfqs if rid is None else _only(rfqs, rid, stop)
 
 
@@ -188,13 +189,13 @@ def _only(rfqs: Iterator[Rfq], rfq_id: str, stop: Any) -> Iterator[Rfq]:
 
 
 def _follow(
-    c: "Client", cursor: int, backlog: list[Rfq], end: float | None, poll: float, stop: Any,
+    c: "Client", cursor: int, backlog: list[Rfq], end: float | None, poll: float, stop: Any, kind: str = "open",
 ) -> Iterator[Rfq]:
     seen: set[str] = set()
     pending = list(backlog)
     while True:
         for r in pending:
-            if r.rfq_id in seen or not _quotable(r, c.chain_key, c._clock() * 1000):
+            if r.rfq_id in seen or not _quotable(r, c.chain_key, c._clock() * 1000, kind):
                 continue
             seen.add(r.rfq_id)
             if len(seen) > 10_000:

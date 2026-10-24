@@ -10,15 +10,16 @@ from .errors import (
     ServiceUnavailable, TradeInFlight, TradeUnknown, TxFailed, UnknownOrEnded, WithdrawInProgress, WithdrawUnknown,
 )
 from .models import (
-    Ask, Balance, Deposit, Drop, Event, MakerQuote, Market, Position, Quote, Rfq, Trade, Viewer, Withdraw,
+    Ask, Balance, Close, Deposit, Drop, Event, MakerQuote, Market, Position, Quote, Rfq, TakeOver, Trade, Viewer,
+    Withdraw,
 )
 
 __version__ = "0.3.16"
 
 __all__ = [
     "Client", "NETWORKS", "__version__",
-    "Ask", "Balance", "Deposit", "Drop", "Event", "MakerQuote", "Market", "Position", "Quote", "Rfq", "Trade",
-    "Viewer", "Withdraw",
+    "Ask", "Balance", "Close", "Deposit", "Drop", "Event", "MakerQuote", "Market", "Position", "Quote", "Rfq",
+    "TakeOver", "Trade", "Viewer", "Withdraw",
     "CrxError", "AboveMax", "DepositFailed", "EarlierOutcome", "AlreadyAccepted", "AuthError", "BadAnswer",
     "BadRequest", "BelowMin", "ConfigError", "Declined", "MarkUnavailable", "PositionMatured", "RateOutOfBand",
     "InsufficientCollateral", "LegIdTaken", "LegLive", "MarketClosed", "MarketPaused", "NetworkError", "NoQuotes",
