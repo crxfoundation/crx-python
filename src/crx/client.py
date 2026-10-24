@@ -43,7 +43,7 @@ log = logging.getLogger("crx")
 # accept(), confirm(), deposit(), withdraw() and test_request() when the call passes no wait=. check_minute: the
 # minute past the hour of the hourly check. chain_id and core: the EIP-712 domain the SDK signs for. When
 # /health serves another chain id, core or domain separator, or core is not an address, signing calls refuse.
-# rpc_url GATEWAY_RPC: the gateway's /rpc route at base_url, each call signed like a REST call.
+# rpc_url GATEWAY_RPC: the gateway's /rpc route at base_url, each call authenticated like a REST call.
 GATEWAY_RPC = "<base_url>" + GATEWAY_PATH
 MAINNET_CORE = "0x0d716cA9Fc2BFD8c66D2AF2fB38b56D08809A8cc"
 NETWORKS = {
@@ -356,8 +356,9 @@ class Client:
         network: ``"testnet"`` (default) or ``"mainnet"``.
         allow_mainnet: Required for mainnet, or set ``CRX_ALLOW_MAINNET=1``.
         rpc_url: Chain RPC URL, or ``CRX_RPC``. Optional. Testnet default: a public RPC. Mainnet default: the
-            gateway's ``/rpc`` route at ``base_url``, each call signed like a REST call. An RPC set here
-            replaces the default and gets no signed headers.
+            gateway's ``/rpc`` route at ``base_url``, each call authenticated like a REST call. An RPC set
+            here replaces the default and gets no authentication. A ``CRX_RPC`` that holds ``<`` or ``>``
+            is ignored.
         signer: A custodian signer in place of the key (see ``crx.signer``). ``deposit``, ``send_quote``
             and ``confirm`` still need a local key.
         account: Another seat this key may read (see ``add_viewer``). Then only ``balance``, ``positions``
@@ -426,7 +427,11 @@ class Client:
             key = None
             raise
         gw_url = base_url or env.get("CRX_BASE") or net["base_url"]
-        own_rpc = rpc_url or env.get("CRX_RPC")
+        env_rpc = env.get("CRX_RPC")
+        if not rpc_url and env_rpc and ("<" in env_rpc or ">" in env_rpc):
+            log.warning("CRX_RPC holds a placeholder (< or >) and is ignored")
+            env_rpc = None
+        own_rpc = rpc_url or env_rpc
         rpc = own_rpc or net["rpc_url"]
         refusal = None
         if name == "mainnet" and not (allow_mainnet is True or env.get("CRX_ALLOW_MAINNET") == "1"):
@@ -579,9 +584,12 @@ class Client:
         return self._chain
 
     def _chain_ready(self) -> dict:
-        """Return the chain after checking the RPC's chain id and that the core is a contract."""
+        """Return the chain after checking the RPC's chain id and that the core is a contract.
+
+        On the gateway RPC, the /health pins of chain id, core and domain stand, and no RPC call is made.
+        """
         c = self._chain_info()
-        if not self._rpc_checked:
+        if not self._rpc_checked and not self._rpc.on_gateway:
             if self._rpc.int("eth_chainId") != c["chain_id"]:
                 raise ConfigError(f"the RPC is not on {self.chain_key} (chain {c['chain_id']})")
             if self._rpc("eth_getCode", c["core"], "latest") in ("0x", "", None):

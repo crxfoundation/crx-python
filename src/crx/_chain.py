@@ -1,13 +1,14 @@
 """JSON-RPC client and checked transaction sender.
 
 Reprs and errors never show the RPC URL, which can hold a key. urllib3 DEBUG logs still show its path.
-On the gateway RPC, each call is signed like a REST call over the exact body bytes it sends.
+On the gateway RPC, each call is sent and authenticated like a REST call.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import secrets
 import threading
 import time
 from pathlib import Path
@@ -19,10 +20,7 @@ from eth_abi import decode
 from eth_abi.exceptions import DecodingError
 from eth_utils import keccak, to_checksum_address
 
-from .errors import (
-    BadAnswer, ConfigError, CrxError, NetworkError, RateLimited, SendUnknown, TxFailed, clean, from_gateway,
-    gateway_code,
-)
+from .errors import BadAnswer, CrxError, NetworkError, RateLimited, SendUnknown, ServerError, TxFailed, clean
 
 if TYPE_CHECKING:
     from ._http import Gateway
@@ -80,36 +78,13 @@ def revert_name(error: Any) -> str:
 
 
 GATEWAY_PATH = "/rpc"  # the gateway's chain call route
-RECEIPT_POLL_S = 2.0  # seconds between receipt reads
-GATEWAY_RECEIPT_POLL_S = 3.0  # seconds between receipt reads on the gateway RPC
+POLL_S = 2.0  # seconds between nonce reads and between receipt reads
+GATEWAY_POLL_S = 4.0  # the same pause on the gateway RPC
 RATE_WAIT_MAX = 60  # longest Retry-After, in seconds, the gateway RPC waits before its one resend
 
 
-def gateway_refusal(r: requests.Response, method: str, host: str) -> CrxError:
-    """Return the typed error of a 401, 403, 404 or 429 from the gateway RPC, with the served words."""
-    if r.status_code == 404:
-        return ConfigError(f"{host} serves no chain calls; pass rpc_url= or set CRX_RPC", status=404)
-    try:
-        body = r.json()
-    except ValueError:
-        body = None
-    body = body if isinstance(body, dict) else {}
-    err = body.get("error")
-    if isinstance(err, dict):  # a JSON-RPC error object
-        words, code = err.get("message"), None
-        details = {"rpc_code": err["code"]} if isinstance(err.get("code"), int) else {}
-    else:
-        words, code = body.get("message") or err, gateway_code(body) or None
-        details = dict(body["details"]) if isinstance(body.get("details"), dict) else {}
-    words = clean(words, 160).strip() if isinstance(words, str) else ""
-    shown = {"code": code, "details": {**details, "method": method},
-             "message": f"{host} refused the chain call {method}: {words or f'HTTP {r.status_code}'}"}
-    headers = getattr(r, "headers", None) or {}
-    return from_gateway(r.status_code, shown, host=host, retry_after=headers.get("Retry-After"))
-
-
 class Rpc:
-    """JSON-RPC client. With ``gateway``, calls go to its ``/rpc`` route with the signed headers of a REST call."""
+    """JSON-RPC client. With ``gateway``, calls go to its ``/rpc`` route as signed gateway calls."""
 
     def __init__(
         self, url: str, session: requests.Session, timeout: float = 20, gateway: Gateway | None = None,
@@ -118,7 +93,12 @@ class Rpc:
         self._session = session
         self._timeout = timeout
         self._gw = gateway
-        self.receipt_poll = GATEWAY_RECEIPT_POLL_S if gateway is not None else RECEIPT_POLL_S
+        self.poll_s = GATEWAY_POLL_S if gateway is not None else POLL_S
+
+    @property
+    def on_gateway(self) -> bool:
+        """True when calls go to the gateway's ``/rpc`` route."""
+        return self._gw is not None
 
     def __repr__(self) -> str:
         return "Rpc(<url hidden>)"
@@ -126,27 +106,35 @@ class Rpc:
     def __getstate__(self) -> object:
         raise TypeError("the RPC URL can hold a key; an Rpc cannot be pickled or copied")
 
-    def _post_gateway(self, method: str, raw: bytes) -> requests.Response:
-        """Send ``raw`` to the gateway RPC. On a 429, wait Retry-After once (up to ``RATE_WAIT_MAX``) and resend."""
-        gw = self._gw
-        r = gw.signed_post(GATEWAY_PATH, raw, self._timeout)
+    def _refusal(self, r: requests.Response, method: str) -> CrxError:
+        e = self._gw.error_of(r, self._gw.host)
+        e.details.setdefault("method", method)
+        return e
+
+    def _post_gateway(self, method: str, call: dict) -> requests.Response:
+        """Send ``call`` to the gateway RPC and return its 200 answer. Raise the typed error of any other status.
+
+        On a 429, wait Retry-After once (up to ``RATE_WAIT_MAX`` s) and send the call again.
+        """
+        r = self._gw.raw_request("POST", GATEWAY_PATH, body=call, timeout=self._timeout)
         if r.status_code == 429:
-            e = gateway_refusal(r, method, gw.host)
+            e = self._refusal(r, method)
             pause = e.retry_after if isinstance(e, RateLimited) else None
             if pause is None or pause > RATE_WAIT_MAX:
                 raise e
-            gw.sleep(pause)
-            r = gw.signed_post(GATEWAY_PATH, raw, self._timeout)  # a new timestamp and signature
-        if r.status_code in (401, 403, 404, 429):
-            raise gateway_refusal(r, method, gw.host)
+            self._gw.sleep(pause)
+            r = self._gw.raw_request("POST", GATEWAY_PATH, body=call, timeout=self._timeout)
+        if r.status_code != 200:
+            raise self._refusal(r, method)
         return r
 
     def __call__(self, method: str, *params: Any) -> Any:
         err: Exception | None = None
         r = body = None
-        call = {"jsonrpc": "2.0", "id": 1, "method": method, "params": list(params)}
+        # A random id makes each signed body unique, also across processes on one key.
+        call = {"jsonrpc": "2.0", "id": 1 + secrets.randbelow(2**31 - 1), "method": method, "params": list(params)}
         if self._gw is not None:
-            r = self._post_gateway(method, json.dumps(call, separators=(",", ":")).encode())
+            r = self._post_gateway(method, call)
         else:
             try:
                 r = self._session.post(self._url, timeout=self._timeout, json=call)
@@ -353,7 +341,7 @@ def slot(
                 return latest, hit[0], hit[2], True
             raise TxFailed(f"{what} not sent: a transaction from this wallet is pending at nonce {latest}; "
                            "it must confirm before this step can be sent.", details={"step": what, "nonce": latest})
-        sleep(2)
+        sleep(getattr(rpc, "poll_s", POLL_S))
 
 
 def send_tx(
@@ -418,7 +406,7 @@ def send_tx(
                                details={"step": what, "nonce": nonce}) from None
             held = nonce
             continue
-        except (NetworkError, BadAnswer):
+        except (NetworkError, BadAnswer, ServerError):
             # The node may hold the tx without an answer, so track it by its own hash.
             tx = "0x" + bytes(signed.hash).hex()
         if log is not None:
@@ -431,7 +419,7 @@ def send_tx(
         for h in watch:
             try:
                 receipt = rpc("eth_getTransactionReceipt", h)
-            except (RpcError, NetworkError, BadAnswer):
+            except (RpcError, NetworkError, BadAnswer, ServerError):
                 receipt = None
             except CrxError as e:
                 # The gateway refused the read; the tx can still be mined.
@@ -444,4 +432,4 @@ def send_tx(
                 raise TxFailed(f"{what} tx {h} reverted", details={"step": what, "tx": h})
         if time.monotonic() > deadline:
             raise SendUnknown(f"{what} tx {tx}. {UNKNOWN_LINE}", details={"step": what, "tx": tx, "txs": watch})
-        sleep(getattr(rpc, "receipt_poll", RECEIPT_POLL_S))
+        sleep(getattr(rpc, "poll_s", POLL_S))

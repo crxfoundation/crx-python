@@ -12,7 +12,7 @@ Python 3.10 or newer.
 
 Set `CRX_WALLET_PK` to the private key of an onboarded seat wallet. To read the key from a file, pass `key_file="seat.key"` or set `CRX_WALLET_PK_FILE`. When other users can open the file and it is yours, the SDK sets it to owner-only (0600) and prints `set seat.key to owner-only (0600)`. It refuses a key file of another user, or one whose mode does not change. The SDK never prints or logs the key. On mainnet, the wallet needs ETH for the network fee of a deposit.
 
-Mainnet needs no RPC of your own: the client sends its chain calls to the gateway's `/rpc` route, signed with the seat key. `CRX_RPC` is optional and replaces that route with your own node.
+Mainnet needs no RPC of your own: the client sends its chain calls to the gateway's `/rpc` route, authenticated like its other gateway calls. `CRX_RPC` is optional and replaces that route with your own node. A `CRX_RPC` that holds `<` or `>` is ignored.
 
 The client also reads the `CRX_*` settings from a `.env` file in the working directory:
 
@@ -238,7 +238,7 @@ Every error is a `crx.CrxError`. Branch on `.code`. Show `str(e)`: on a gateway 
 | Argument | Environment | Default |
 |---|---|---|
 | `allow_mainnet=True` | `CRX_ALLOW_MAINNET=1` | Off. Mainnet needs it. |
-| `rpc_url=` | `CRX_RPC` | Optional. Testnet: a public RPC. Mainnet: the gateway's `/rpc` route at the base URL, each call signed with the seat key. An RPC set here gets no signed headers. |
+| `rpc_url=` | `CRX_RPC` | Optional. Testnet: a public RPC. Mainnet: the gateway's `/rpc` route at the base URL, authenticated like the other gateway calls. An RPC set here gets no authentication. |
 | `base_url=` | `CRX_BASE` | Testnet: `https://api.sandbox.crxfx.com`. Mainnet: `https://api.crxfx.com`. |
 | `state_dir=` | `CRX_STATE_DIR` | `~/.crx-quickstart/`, which holds the nonce floor and is shared with the quickstart scripts. |
 

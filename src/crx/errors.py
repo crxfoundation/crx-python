@@ -435,6 +435,12 @@ def wait_secs(details: dict) -> float | None:
 
 def from_gateway(status: int, body: Any, text: str = "", *, host: str = "", retry_after: Any = None) -> CrxError:
     """Map one gateway refusal to a typed error, with the gateway's message and the time to call again."""
+    if isinstance(body, dict) and isinstance(body.get("error"), dict):
+        # A JSON-RPC error object: its message is the gateway's words; its code goes to details['rpc_code'].
+        rpc = body["error"]
+        code = rpc.get("code")
+        body = {"message": rpc.get("message"),
+                "details": {"rpc_code": code} if isinstance(code, int) and not isinstance(code, bool) else {}}
     if isinstance(body, dict):
         gw = gateway_code(body) or None
         said, why = (v if isinstance(v, str) and v.strip() else None for v in (body.get("message"), body.get("error")))

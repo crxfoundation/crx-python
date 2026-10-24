@@ -2,8 +2,10 @@
 
 ## 0.3.17
 
-- Mainnet needs no RPC of your own. With no `rpc_url=` and no `CRX_RPC`, the client sends its chain calls to `<base URL>/rpc` (`https://api.crxfx.com/rpc`, or the `base_url=` / `CRX_BASE` host). Each call carries the signed headers of a REST call (`x-crx-address`, `x-crx-ts`, `x-crx-sig`, and `x-crx-signer` for a delegate) over the exact body bytes sent. `rpc_url=` or `CRX_RPC` replaces the route and gets no signed headers. Testnet is unchanged.
-- On the `/rpc` route: a 401 or 403 raises `AuthError` (or the typed error of the gateway's code) that names the call; a 404 raises `ConfigError`; a 429 waits `Retry-After` once (60 s at most) and sends the call again with a new signature, then raises `RateLimited`. Receipts are read every 3 s. A refused receipt read after a send raises `SendUnknown` with the transaction hash.
+- Mainnet needs no RPC of your own. With no `rpc_url=` and no `CRX_RPC`, the client sends its chain calls to `<base URL>/rpc` (`https://api.crxfx.com/rpc`, or the `base_url=` / `CRX_BASE` host) as gateway calls: the signed headers over the exact body bytes (`x-crx-address`, `x-crx-ts`, `x-crx-sig`, and `x-crx-signer` for a delegate), or the session token of a custodian signer. Redirects are not followed. `rpc_url=` or `CRX_RPC` replaces the route and gets no authentication. A `CRX_RPC` that holds `<` or `>` is ignored, with one log line. Testnet is unchanged.
+- On the `/rpc` route, any answer other than 200 raises the typed gateway error (`AuthError`, `NotWhitelisted`, `RateLimited`, `ServerError` and others), with `details['method']`. A 429 waits `Retry-After` once (60 s at most) and sends the call again, then raises `RateLimited`. A 5xx to a send is tracked by the transaction hash, as a send with no answer.
+- On the `/rpc` route, the pinned chain id, core and domain from `/health` stand: no chain id or core code read. Nonce and receipt reads pause 4 s.
+- Each JSON-RPC call carries a random `id`. A refused receipt read after a send raises `SendUnknown` with the transaction hash.
 
 ## 0.3.16
 
