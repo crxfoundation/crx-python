@@ -57,7 +57,7 @@ def allocation(role, incoming, *, rate=18_612_345, side=1, taker=True, deadline=
     t = {"novation_id": "0x" + "34" * 32, "rfq_id": RFQ, "chain": "avax-fuji", "commitment": commitment,
          "incoming_c": INC_C, "item": item, "old": old, "role": role, "digest_kind": kind,
          "digest": e7.h0x(e7.typed_digest(td)), "typed_data": td, "signed": False}
-    if role == "exiting":
+    if role != "incoming":
         t["trade_id"] = TRADE
     if path is not None:
         t["path"] = path

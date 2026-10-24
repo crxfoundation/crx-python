@@ -322,7 +322,8 @@ def check_failover(t: Any, *, seat: str, rfq_id: str, rate_e6: int, pair: str, s
         raise _refuse("the item's incoming seat is not this seat")
     p = t.get("pricing")
     try:
-        mark, n, entry, quoted = (_w("uint64", p[k]) for k in ("mark", "notional", "entry_rate", "quote_rate"))
+        mark, entry, quoted = (_w("uint64", p[k]) for k in ("mark", "entry_rate", "quote_rate"))
+        n = _w("uint128", p["notional"])
         p_side, usd_is_base = _w("int8", p["side"]), p["usd_is_base"]
     except (KeyError, TypeError, ValueError):
         raise _refuse("the close-out pricing cannot be read") from None
@@ -807,7 +808,7 @@ def answer(c: "Client", request: Any, rate: Any, wait: float, poll: float = 0.5,
     sign_by = min(end, c._clock() + ELECTIVE_SIGN)
     t = _template(c, rfq_id, sign_by)
     try:
-        if isinstance(t, dict) and t.get("trade_id") is not None and _word(t.get("trade_id")) != tid:
+        if not isinstance(t, dict) or _word(t.get("trade_id")) != tid:
             raise _refuse("the template is for another trade")
         if award.get("digest_kind") != CONSENT:
             raise _refuse(f"the award names another form ({clean(award.get('digest_kind'), 40)})")
