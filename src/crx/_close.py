@@ -453,10 +453,11 @@ def _soft(c: "Client", poll: float, path: str, until: float | None = None) -> di
         return None
 
 
-def _moved_on(c: "Client", rfq_id: str, end: float) -> bool:
-    """Return True when one read shows the round past the winner's form: its signature landed."""
-    view = _soft(c, 1.0, f"/rfqs/{rfq_id}", end) or {}
-    return view.get("status") in ("consenting", "armed", "settled")
+def _moved_on(c: "Client", rfq_id: str, end: float, due: str = "signing") -> bool:
+    """Return False only when one read shows the round still waiting for this form, or ended: no signature
+    landed. A read that fails leaves it to the landing wait."""
+    view = _soft(c, 1.0, f"/rfqs/{rfq_id}", end)
+    return view is None or view.get("status") not in (due, *ENDED)
 
 
 def _template(c: "Client", rfq_id: str, until: float) -> dict:
@@ -581,8 +582,7 @@ def close_trade(c: "Client", trade_id: Any, to: Any, wait: float, poll: float = 
                              to=None if to is None else incoming)
         sig = sign_form(c, t, "AllocationConsent", consent_message(w, t["commitment"], t["item"]["salt"]))
         until = min(end, _w("uint64", w["deadline"]))
-        if not _post_sign(c, rfq_id, sig, "consenting", until) and (
-                (_soft(c, poll, f"/rfqs/{rfq_id}", end) or {}).get("status") not in ("armed", "settled")):
+        if not _post_sign(c, rfq_id, sig, "consenting", until) and not _moved_on(c, rfq_id, end, "consenting"):
             return Close(trade_id=tid, rfq_id=rfq_id, to=str(t["item"].get("incoming", "")).lower(), rate=rate,
                          status="unsigned", item=None, tx=None, raw=t, counterparty=t.get("path") == "close")
     a = _arm(c, rfq_id, end, poll)
