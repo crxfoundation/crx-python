@@ -1018,6 +1018,7 @@ class Client:
 
         Raises:
             NoQuotes: No quote before the request ended.
+            RfqCancelled: The gateway cancelled the round. ``reason`` says why.
             RateOutOfBand: The winning rate is outside the price band.
             QuoteExpired: The winning maker did not sign in time.
             OwnRoundOpen: Another close of this seat is still open at the accept.
@@ -1053,7 +1054,8 @@ class Client:
         """Answer a request from ``close_requests()`` at ``rate``. When the answer wins, sign the close.
 
         An answer inside the price band wins over the quotes of other seats, and the trade ends for both
-        seats. The SDK checks the close against the trade and the rate, then signs it.
+        seats. The SDK checks the close against the trade and the rate, then signs it. A gateway that does not
+        offer closes with the counterparty sends no request.
 
         Args:
             rate: The close rate for the trade's pair, up to 6 decimals.
@@ -1720,9 +1722,10 @@ class Client:
         """Quote a close RFQ at ``rate``. When the quote wins, take over the closing seat's side of the trade.
 
         The quote is a price only. When the round picks it, the SDK checks the item against the RFQ and the
-        rate, then signs it within the round's sign window. On a close-out the seat enters at CRX's mark of the
-        round's fix and receives the fee of its rate against that mark, at most 2 % of the leg's gross. CRX sends
-        the transaction and pays the network fee.
+        rate, then signs it within the round's sign window. On a close-out the seat enters at the mark of the
+        hourly check that takes the close, and the closed-out seat owes it the fee of its rate against the
+        round's mark, at most 2 % of the leg's gross. The SDK checks the fee against the mark the gateway
+        serves; it cannot check that mark. CRX sends the transaction and pays the network fee.
 
         Args:
             rfq: A close ``Rfq`` from ``rfqs(kind="close")``, or its id.
