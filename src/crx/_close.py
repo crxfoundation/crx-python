@@ -262,8 +262,8 @@ def check_allocation(t: Any, *, role: str, seat: str, rfq_id: str, rate_e6: int,
     kind = ACCEPTANCE if role == "incoming" else CONSENT
     if t.get("role") != role or t.get("digest_kind") != kind:
         raise _refuse(f"the template is not the {role} seat's {kind}")
-    path = t.get("path", "novation")
-    if path not in {"exiting": ("novation", "close"), "remaining": ("close",)}.get(role, ("novation",)):
+    path = t.get("path", "take_over")
+    if path not in {"exiting": ("take_over", "close"), "remaining": ("close",)}.get(role, ("take_over",)):
         raise _refuse(f"the template's path is not the {role} seat's")
     if str(t.get("rfq_id", "")).lower() != rfq_id:
         raise _refuse("the template is for another round")
