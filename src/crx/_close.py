@@ -374,52 +374,54 @@ def _post_once_more(c: "Client", path: str, body: dict) -> dict:
     """Post ``body``. After a network error, post the same body once more: its client id makes the repeat safe."""
     try:
         return c._gw.request("POST", path, body=body)
-    except NetworkError as e:
+    except (NetworkError, ServerError) as e:
         log.info("POST %s: %s; sending the same body once more", path, e.code)
     c._sleep(1.0)
     return c._gw.request("POST", path, body=body)
 
 
-def _post_quote(c: "Client", path: str, body: dict, quote_id: str, until: float) -> None:
+def _post_quote(c: "Client", rfq_id: str, path: str, body: dict, quote_id: str, until: float) -> None:
     """Post a close quote or answer. After a transient error, post the same body again until ``until``: a
-    repeat under the same client id answers the quote that rests. A refusal of a repeat leaves it to the award."""
+    repeat under the same client id answers the quote that rests. A refused repeat raises unless the round
+    lists the quote."""
     first = True
     while True:
         try:
             q = c._gw.request("POST", path, body=body)
             break
         except TRANSIENT as e:
+            _backoff(c, e, 1.0, f"POST {path}", until)
             if c._clock() >= until:
                 log.info("POST %s: %s; the award decides whether the quote rests", path, e.code)
                 return
-            _backoff(c, e, 1.0, f"POST {path}", until)
             first = False
         except CrxError as e:
-            if first:
-                raise
-            log.info("POST %s again: %s; the award decides whether the quote rests", path, e.code)
-            return
+            view = None if first else _soft(c, 1.0, f"/rfqs/{rfq_id}", until)
+            rows = view.get("quotes") if isinstance(view, dict) and isinstance(view.get("quotes"), list) else []
+            if any(isinstance(x, dict) and _word(x.get("quote_id")) == quote_id for x in rows):
+                return
+            raise e
     if _word(q.get("quote_id")) != quote_id:
         raise BadAnswer("the gateway named another quote id for this quote")
 
 
-def _post_sign(c: "Client", rfq_id: str, sig: str, due: str, until: float) -> None:
+def _post_sign(c: "Client", rfq_id: str, sig: str, due: str, until: float) -> bool:
     """Post a signature. After a transient error, post it again while the round still waits for this seat's
     form (round status ``due``) and ``until`` has not passed: a repeat of the same signature is safe. A
-    refusal raises."""
+    refusal raises. Return False when ``until`` passed with no answer."""
     path = f"/rfqs/{rfq_id}/close/sign"
     while True:
+        if c._clock() >= until:
+            log.info("POST %s: the form's window ended; the round's status decides", path)
+            return False
         try:
             c._gw.request("POST", path, body={"sig": sig})
-            return
+            return True
         except TRANSIENT as e:
-            if c._clock() >= until:
-                log.info("POST %s: %s; the round's status decides", path, e.code)
-                return
             _backoff(c, e, 1.0, f"POST {path}", until)
         view = _soft(c, 1.0, f"/rfqs/{rfq_id}", until)
         if view is not None and view.get("status") != due:
-            return
+            return True
 
 
 def _backoff(c: "Client", e: CrxError, poll: float, what: str, until: float | None = None) -> None:
@@ -460,7 +462,7 @@ def _await_winner(c: "Client", rfq_id: str, end: float) -> dict:
     """Poll the round until the gateway names its winner. Raise NoQuotes when the round or the wait ends first."""
     from .client import _ended
     while True:
-        view = _soft(c, 1.0, f"/rfqs/{rfq_id}")
+        view = _soft(c, 1.0, f"/rfqs/{rfq_id}", end)
         if view is not None and view.get("status") in ENDED:
             raise _ended(view, rfq_id)
         q = view.get("quote") if view is not None else None
@@ -475,7 +477,7 @@ def _await_winner(c: "Client", rfq_id: str, end: float) -> dict:
 def _await_status(c: "Client", rfq_id: str, want: tuple, end: float, poll: float) -> dict:
     """Poll the round until its status is one of ``want``. Raise QuoteExpired when it ends first."""
     while True:
-        view = _soft(c, poll, f"/rfqs/{rfq_id}")
+        view = _soft(c, poll, f"/rfqs/{rfq_id}", end)
         if view is not None and view.get("status") in want:
             return view
         if view is not None and view.get("status") in ENDED:
@@ -492,13 +494,13 @@ def _arm(c: "Client", rfq_id: str, end: float, poll: float) -> dict:
     that ended with nothing sent reads ``refused``; a close not final by ``end`` reads ``pending``."""
     last: dict = {}
     while True:
-        a = _soft(c, poll, f"/rfqs/{rfq_id}/close/arm-tx")
+        a = _soft(c, poll, f"/rfqs/{rfq_id}/close/arm-tx", end)
         if a is not None:
             last = a
             if a.get("status") == "refused" or (a.get("status") == "closed" and a.get("final") is True):
                 return a
             if a.get("status") is None:
-                view = _soft(c, poll, f"/rfqs/{rfq_id}")
+                view = _soft(c, poll, f"/rfqs/{rfq_id}", end)
                 if view is not None and view.get("status") in ENDED:
                     return dict(a, status="refused")
         if c._clock() >= end:
@@ -567,7 +569,9 @@ def close_trade(c: "Client", trade_id: Any, to: Any, wait: float, poll: float = 
                              to=None if to is None else incoming)
         sig = sign_form(c, t, "AllocationConsent", consent_message(w, t["commitment"], t["item"]["salt"]))
         until = min(end, _w("uint64", w["deadline"]))
-        _post_sign(c, rfq_id, sig, "consenting", until)
+        if not _post_sign(c, rfq_id, sig, "consenting", until):
+            return Close(trade_id=tid, rfq_id=rfq_id, to=str(t["item"].get("incoming", "")).lower(), rate=rate,
+                         status="unsigned", item=None, tx=None, raw=t, counterparty=t.get("path") == "close")
     a = _arm(c, rfq_id, end, poll)
     item = t.get("item") if isinstance(t.get("item"), dict) else {}
     return Close(
@@ -581,9 +585,15 @@ def close_trade(c: "Client", trade_id: Any, to: Any, wait: float, poll: float = 
 
 
 def _tape(c: "Client", cursor: int) -> tuple[list, int]:
+    """Read the tape after ``cursor``. A transient error after the first page returns the pages read."""
     rows, out = [], cursor
     while True:
-        got, out = _page(c, out)
+        try:
+            got, out = _page(c, out)
+        except TRANSIENT:
+            if out == cursor:
+                raise
+            return rows, out
         rows += [r for r in got if isinstance(r, dict)]
         if len(got) < PAGE:
             return rows, out
@@ -591,13 +601,18 @@ def _tape(c: "Client", cursor: int) -> tuple[list, int]:
 
 def _head(c: "Client", end: float) -> int:
     """Return the tape's head seq, read through transient errors."""
+    cursor = 0
     while True:
         try:
-            return _tape(c, 0)[1]
+            rows, after = _tape(c, cursor)
         except TRANSIENT as e:
             if c._clock() >= end:
                 raise
             _backoff(c, e, 1.0, "close round tape", end)
+            continue
+        if after == cursor and not rows:
+            return cursor
+        cursor = after
 
 
 def _of(row: dict, rfq_id: str, key: str = "rfq_id") -> bool:
@@ -606,7 +621,10 @@ def _of(row: dict, rfq_id: str, key: str = "rfq_id") -> bool:
 
 
 def _await_award(c: "Client", rfq_id: str, quote_id: str, cursor: int, end: float, poll: float) -> tuple[dict, int]:
-    """Read the tape until the round awards this quote. Raise QuoteExpired when the round ends or the wait ends."""
+    """Read the tape until the round awards this quote. Raise QuoteExpired when the round ends or the wait ends.
+
+    The award's data carries ``_at``: the award frame's time, unix seconds, else the time it was read.
+    """
     while True:
         start = cursor
         try:
@@ -614,17 +632,21 @@ def _await_award(c: "Client", rfq_id: str, quote_id: str, cursor: int, end: floa
         except TRANSIENT as e:
             if c._clock() >= end:
                 raise QuoteExpired("the wait ended before the round picked a quote", details={"rfq_id": rfq_id}) from None
-            _backoff(c, e, poll, "close round tape")
+            _backoff(c, e, poll, "close round tape", end)
             continue
         for r in rows:
             if not _of(r, rfq_id):
                 continue
+            mine = str(r["data"].get("quote_id", "")).lower() == quote_id
             if r.get("type") == "rfq.awarded":
-                if str(r["data"].get("quote_id", "")).lower() == quote_id:
-                    seq = r.get("seq")
-                    return r["data"], seq if isinstance(seq, int) and not isinstance(seq, bool) and seq > start else start
+                if mine:
+                    seq, ts = r.get("seq"), r.get("ts")
+                    at = ts / 1000 if type(ts) is int and ts > 0 else c._clock()
+                    return dict(r["data"], _at=min(at, c._clock())), (
+                        seq if isinstance(seq, int) and not isinstance(seq, bool) and seq > start else start)
                 raise QuoteExpired("the round awarded another quote", details={"rfq_id": rfq_id})
-            if r.get("type") in ("rfq.expired", "rfq.cancelled", "quote.declined"):
+            if r.get("type") in ("rfq.expired", "rfq.cancelled") or (
+                    r.get("type") in ("quote.declined", "quote.dropped") and mine):
                 raise QuoteExpired("the round ended without this quote", details={"rfq_id": rfq_id})
         if c._clock() >= end:
             raise QuoteExpired("the wait ended before the round picked a quote", details={"rfq_id": rfq_id})
@@ -655,7 +677,7 @@ def _taken(c: "Client", rfq_id: str, cursor: int, elective: bool, end: float, po
         except TRANSIENT as e:
             if c._clock() >= end:
                 return "pending", None
-            _backoff(c, e, poll, "close round tape")
+            _backoff(c, e, poll, "close round tape", end)
             continue
         for r in rows:
             moved = r.get("type") == "trade.novated" and done == "open" and _of(r, rfq_id, "close_rfq_id")
@@ -665,11 +687,11 @@ def _taken(c: "Client", rfq_id: str, cursor: int, elective: bool, end: float, po
                 return done, _word(r["data"].get("trade_id"))
             if r.get("type") == "trade.closed_out" and _of(r, rfq_id, "close_rfq_id"):
                 return "refused", None
-        view = _soft(c, poll, f"/rfqs/{rfq_id}")
+        view = _soft(c, poll, f"/rfqs/{rfq_id}", end)
         if view is not None and view.get("status") in ENDED:
             return "refused", None
         if elective and view is not None and view.get("status") == "armed":
-            a = _soft(c, poll, f"/rfqs/{rfq_id}/close/arm-tx") or {}
+            a = _soft(c, poll, f"/rfqs/{rfq_id}/close/arm-tx", end) or {}
             if a.get("status") == "refused":
                 return "refused", None
             if a.get("status") == "closed" and a.get("final") is True:
@@ -712,10 +734,12 @@ def take_over(c: "Client", rfq: Any, rate: Any, wait: float, poll: float = 0.5,
         cursor = _head(c, end)
     cid = client_quote_id or "take-" + uuid.uuid4().hex
     quote_id = close_quote_id(r.rfq_id, seat, rate_e6, cid)
-    _post_quote(c, f"/rfqs/{r.rfq_id}/quotes", {"rate": _plain(rate_d), "client_quote_id": cid}, quote_id, end)
+    quote_by = min(end, r.closes_at.timestamp()) if r.closes_at is not None else end
+    _post_quote(c, r.rfq_id, f"/rfqs/{r.rfq_id}/quotes", {"rate": _plain(rate_d), "client_quote_id": cid}, quote_id,
+                quote_by)
     award, cursor = _await_award(c, r.rfq_id, quote_id, cursor, end, poll)
     kind = award.get("digest_kind")
-    sign_by = min(end, c._clock() + (FORCED_SIGN if kind == FAILOVER else ELECTIVE_SIGN))
+    sign_by = min(end, award["_at"] + (FORCED_SIGN if kind == FAILOVER else ELECTIVE_SIGN))
     t = _template(c, r.rfq_id, sign_by)
     terms = dict(seat=seat, rfq_id=r.rfq_id, rate_e6=rate_e6, pair=pair, side=side, notional_e6=notional_e6,
                  settlement_ms=settlement_ms, now=c._clock())
@@ -800,12 +824,14 @@ def answer(c: "Client", request: Any, rate: Any, wait: float, poll: float = 0.5,
     end = c._clock() + wait
     cid = client_quote_id or "answer-" + uuid.uuid4().hex
     quote_id = close_quote_id(rfq_id, seat, rate_e6, cid)
-    _post_quote(c, f"/rfqs/{rfq_id}/close/answer", {"rate": _plain(rate_d), "client_quote_id": cid}, quote_id, end)
+    answer_by = min(end, request.closes_at.timestamp()) if request.closes_at is not None else end
+    _post_quote(c, rfq_id, f"/rfqs/{rfq_id}/close/answer", {"rate": _plain(rate_d), "client_quote_id": cid},
+                quote_id, answer_by)
     cursor = request.seq if isinstance(request.seq, int) and request.seq > 0 else 0
     ends = d.get("round_ends_at")
     award_end = end if not isinstance(ends, int) else min(end, ends / 1000 + PICK_SLACK)
     award, cursor = _await_award(c, rfq_id, quote_id, cursor, award_end, poll)
-    sign_by = min(end, c._clock() + ELECTIVE_SIGN)
+    sign_by = min(end, award["_at"] + ELECTIVE_SIGN)
     t = _template(c, rfq_id, sign_by)
     try:
         if not isinstance(t, dict) or _word(t.get("trade_id")) != tid:

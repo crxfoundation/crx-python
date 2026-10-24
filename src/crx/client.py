@@ -1004,8 +1004,9 @@ class Client:
         """Close an open trade with its counterparty, or let another seat take over this seat's side.
 
         The request goes to the counterparty and to the makers, or to the one seat ``to`` names. An answer of
-        the counterparty inside the price band wins and the trade ends for both seats. Else the best quote of
-        another seat wins and that seat takes over this seat's side. The gateway refuses a rate outside its
+        the counterparty inside the price band and at least as good as the best other quote wins, and the
+        trade ends for both seats. Else the best quote of another seat wins and that seat takes over this
+        seat's side. The gateway refuses a rate outside its
         price band. The SDK checks the close against the trade, then signs it. CRX sends the transaction and
         pays the network fee.
 
@@ -1053,8 +1054,8 @@ class Client:
                      client_quote_id: str | None = None) -> Close:
         """Answer a request from ``close_requests()`` at ``rate``. When the answer wins, sign the close.
 
-        An answer inside the price band wins over the quotes of other seats, and the trade ends for both
-        seats. The SDK checks the close against the trade and the rate, then signs it. A gateway that does not
+        An answer inside the price band and at least as good as the best quote of another seat wins, and the
+        trade ends for both seats. The SDK checks the close against the trade and the rate, then signs it. A gateway that does not
         offer closes with the counterparty sends no request.
 
         Args:

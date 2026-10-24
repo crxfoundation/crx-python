@@ -413,7 +413,7 @@ class Close:
         to: The seat that takes the trade over, or the counterparty that closes it.
         rate: The close rate.
         status: ``sending`` while CRX sends the transaction, ``pending`` until the hourly check counts it,
-            ``closed``, or ``refused``.
+            ``closed``, or ``refused``. ``unsigned`` when the gateway took no signature before the wait ended.
         item: The chain's id of the signed close.
         tx: The transaction hash once it lands.
         final: True once the close is final.
