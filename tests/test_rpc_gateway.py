@@ -237,3 +237,24 @@ def test_a_5xx_to_a_send_is_tracked_by_its_hash(session, account, tmp_path):
     assert h.startswith("0x") and len(h) == 66 and h != TX and [r["hash"] for r in log.rows()] == [h]
     receipts = [json.loads(raw)["params"] for _, _, raw in node.seen if b"eth_getTransactionReceipt" in raw]
     assert receipts == [[h], [h]] and pauses == [4.0]
+
+
+def test_a_refused_receipt_read_after_the_send_raises_send_unknown(session, account):
+    node, sent = send_chain([None])
+    reads = []
+
+    def answer(req):
+        if json.loads(req["raw"])["method"] == "eth_getTransactionReceipt":
+            reads.append(1)
+            if len(reads) > 1:
+                return RPC_403
+        return node(req)
+
+    session.routes[("POST", "/rpc")] = answer
+    pauses = Pauses()
+    _, rpc = gateway_rpc(session, account, pauses)
+    with pytest.raises(crx.SendUnknown) as ei:
+        send_tx(rpc, account, 1, "approve", TOKEN, "0x", sleep=pauses)
+    d = ei.value.details
+    assert d["tx"] == TX and d["txs"] == [TX] and d["cause"] == "unauthorized"
+    assert len(sent) == 1 and pauses == [4.0]
