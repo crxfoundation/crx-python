@@ -1,5 +1,6 @@
 """Key-file mode rule (owner-only, set by the SDK) and CRX_* settings from a .env file."""
 
+from __future__ import annotations
 
 import os
 import stat
@@ -9,6 +10,7 @@ import pytest
 import crx
 from .conftest import BASE, RPC
 
+pytestmark = pytest.mark.skipif(os.name != "posix", reason="POSIX file modes")
 
 CRX_NAMES = ("CRX_WALLET_PK", "CRX_WALLET_PK_FILE", "CRX_BASE", "CRX_RPC", "CRX_STATE_DIR",
              "CRX_ALLOW_MAINNET")

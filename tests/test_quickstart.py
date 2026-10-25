@@ -1,5 +1,6 @@
 """python -m crx.quickstart: key handling, arguments and the six steps, with no network access."""
 
+from __future__ import annotations
 
 import re
 from types import SimpleNamespace
