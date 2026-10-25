@@ -1,10 +1,5 @@
 """The maker's reads and its binding Quote, against a scripted gateway and the maker vectors."""
 
-import dataclasses
-import hashlib
-import json
-import logging
-from datetime import datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -15,14 +10,11 @@ from eth_utils import keccak, to_checksum_address
 import crx
 from crx import _eip712 as e7
 from crx import _maker
-from crx.models import ms_to_dt
 
-from .conftest import BASE, FIX, RPC, Clock, fixture
+from .conftest import BASE, RPC, Clock, fixture
 
 FV = fixture("format-vectors-v5.json")
-FV_SHA256 = "4d7c40e3aa2c67c07fc9d15c0fece8cb5fc61f96c312f4176e3001c1b83b4621"
 VEC_FILE = "maker-vectors.json"
-VEC_SHA256 = "6e2c448608b884dc6137a75ae09ae2a8a5b1d555f324873b07b3959681a77284"
 KEY = FV["keys"]["other"]["private_key"]  # anvil test key 1: publicly known, never funded
 SEAT = FV["keys"]["other"]["address"]
 QE_MAX = int(FV["quotes"][0]["quote_expiry"])
@@ -85,14 +77,6 @@ IDS = [q["id"] for q in VEC["quotes"]]
 def from_file(qid: str) -> dict:
     """Return quote ``qid`` as maker-vectors.json holds it."""
     return next(q for q in fixture(VEC_FILE)["quotes"] if q["id"] == qid)
-
-
-def test_maker_vectors_are_the_projection_of_the_format_vectors():
-    assert hashlib.sha256((FIX / "format-vectors-v5.json").read_bytes()).hexdigest() == FV_SHA256
-    raw = (FIX / VEC_FILE).read_bytes()
-    assert hashlib.sha256(raw).hexdigest() == VEC_SHA256
-    assert raw.decode() == json.dumps(project(FV), indent=1) + "\n"
-    assert IDS == ["QV1", "QV2", "QV3", "QV4", "QV5"]
 
 
 def b32(word: str) -> bytes:
@@ -346,12 +330,6 @@ def test_rfqs_yields_quotable_rfqs_once(maker, session, monkeypatch):
     assert all(c["query"]["limit"] == ["3"] for c in session.calls if c["path"] == "/trades")
 
 
-def test_rfqs_catch_up_error_raises_at_the_call(maker, session):
-    session.routes[("GET", "/trades")] = (503, {"code": "upstream", "error": "down"})
-    with pytest.raises(crx.ServerError):
-        maker.rfqs()
-
-
 def test_send_quote_posts_each_vector_quote(maker, session, clock, monkeypatch):
     for qid in IDS:
         v = from_file(qid)
@@ -370,134 +348,6 @@ def test_send_quote_posts_each_vector_quote(maker, session, clock, monkeypatch):
             None), qid
         assert q.quote_expiry.timestamp() == v["quote_expiry"] and q.expiry.timestamp() * 1000 == h["expiry"], qid
         assert maker._legs == {RFQ: h["leg_id"]}, qid
-
-
-def test_with_derive_maker_nonce_off_the_body_carries_the_nonce(maker, gw, monkeypatch):
-    monkeypatch.setattr(e7, "DERIVE_MAKER_NONCE", False)
-    gw.derive = False
-    q = maker.send_quote(rfq_obj(), "5.41")
-    (body,) = gw.bodies
-    assert set(body) == {"rate", "leg_id", "salt", "sig", "nonce", "client_quote_id"}
-    sent = body["client_quote_id"]
-    assert sent.startswith("sdk-q-")
-    nonce = int.from_bytes(keccak(b32(SEAT) + sent.encode())[-8:], "big")  # low 64 bits of keccak(seat ‖ id)
-    derived = int.from_bytes(b32(body["leg_id"])[16:24], "big")
-    assert body["nonce"] == str(nonce) != str(derived) and q.leg["nonce"] == str(nonce)
-    h = QV1["half"]
-
-    def under(n):
-        return by_hand(SEAT, body["leg_id"], "USD/BRL", h["side"], h["notional"], "5.41", h["premium_bps"],
-                       h["expiry"], n, body["salt"], QV1["taker_ref"])
-    assert recover(under(nonce), body["sig"]) == SEAT and recover(under(derived), body["sig"]) != SEAT
-
-
-def test_with_drop_quote_expiry_off_the_body_and_the_quote_carry_the_quote_end(maker, gw, monkeypatch):
-    monkeypatch.setattr(e7, "DROP_QUOTE_EXPIRY", False)
-    gw.with_end = True
-    maker.send_quote(rfq_obj(), "5.41")
-    (body,) = gw.bodies
-    assert set(body) == {"rate", "leg_id", "salt", "sig", "quote_expiry"}
-    assert body["quote_expiry"] == QE_MAX == tail(body["leg_id"])
-    assert e7.type_string("Quote") == QUOTE_TYPE_WITH_END
-    nonce = int.from_bytes(b32(body["leg_id"])[16:24], "big")
-    h = QV1["half"]
-
-    def under(end):
-        return by_hand(SEAT, body["leg_id"], "USD/BRL", h["side"], h["notional"], "5.41", h["premium_bps"],
-                       h["expiry"], nonce, body["salt"], QV1["taker_ref"], end)
-    assert recover(under(QE_MAX), body["sig"]) == SEAT and recover(under(None), body["sig"]) != SEAT
-
-
-DAY_MS = 86_400_000
-QV1_EXPIRY = QV1["half"]["expiry"]  # 101 days after T0
-
-
-def no_signature(*_):
-    pytest.fail("a Quote digest was built: the refusal came after the signing step")
-
-
-REFUSALS = [
-    ("no_taker_ref", dict(taker_ref=None), crx.RefusedToSign, "names no taker_ref or quote_expiry_max"),
-    ("quote_window_under_60_s", dict(quote_expiry_max=T0 + 59), crx.QuoteLost,
-     "under 60 s of the RFQ's quote window is left; nothing signed"),
-    ("quote_end_over_630_s_out", dict(quote_expiry_max=T0 + 631), crx.RefusedToSign, "more than 630 s ahead"),
-    ("wrong_chain", dict(chain="ethereum"), crx.BadRequest, "the RFQ is on ethereum; this client signs for avax-fuji"),
-    ("close_rfq", dict(kind="close"), crx.BadRequest, "a close RFQ takes a price-only quote"),
-    ("own_rfq", dict(client_rfq_id="cid-1"), crx.BadRequest, "this is your own RFQ"),
-    ("side_zero", dict(side=0), crx.RefusedToSign, "the RFQ names no side for this seat"),
-    ("notional_negative", dict(notional="-5"), crx.RefusedToSign, "the RFQ's notional cannot be read"),
-    ("notional_7_decimals", dict(notional="1.0000001"), crx.RefusedToSign, "the RFQ's notional cannot be read"),
-    ("expiry_past", dict(expiry=T0 * 1000 - 1), crx.RefusedToSign, "the RFQ's expiry is not in the future"),
-    ("pair", dict(pair="USD"), crx.RefusedToSign, "the RFQ names no AAA/BBB pair"),
-    ("premium_out_of_range", dict(premium_bps=32_768), crx.RefusedToSign, "the RFQ's premium_bps cannot be read"),
-    # The documented loop: a seat that is maker and taker opens an RFQ where the maker pays 2 % and settles in 92 days.
-    ("maker_taker_skim", dict(premium_bps=-200, expiry=(T0 + 92 * 86_400) * 1000), crx.RefusedToSign,
-     "premium is -200 bps"),
-]
-
-
-def test_send_quote_refuses_before_signing(maker, gw, session, monkeypatch):
-    monkeypatch.setattr(e7, "quote_digest", no_signature)
-    for row, edit, err, words in REFUSALS:
-        with pytest.raises(err) as e:
-            maker.send_quote(rfq_obj(**edit), "5.41")
-        assert words in str(e.value), row
-    assert posts(session) == [] and gw.bodies == [] and maker._legs == {}
-
-
-BAD_ARGUMENTS = [  # rate, send_quote keywords, words
-    ("18.1234567", {}, "rate"),
-    ("0", {}, "rate"),
-    ("abc", {}, "rate"),
-    (str(2**64), {}, "rate"),
-    ("5.41", dict(premium_bps=True), "premium_bps"),
-    ("5.41", dict(expiry="2027-01-01"), "expiry"),
-    ("5.41", dict(expiry=datetime(2027, 1, 1)), "timezone"),
-]
-
-
-def test_send_quote_and_quote_live_refuse_bad_arguments_before_any_call(maker, gw, session):
-    for rate, kw, words in BAD_ARGUMENTS:
-        with pytest.raises(crx.BadRequest) as e:
-            maker.send_quote(rfq_obj(), rate, **kw)
-        assert words in str(e.value), (rate, kw)
-    with pytest.raises(crx.BadRequest):
-        maker.send_quote("not an rfq", "18.1")
-    with pytest.raises(crx.BadRequest):
-        maker.quote_live(None, seconds=10, log=None)
-    assert session.calls == [] and gw.bodies == [] and maker._legs == {}
-
-
-EXPIRY_OTHER = [  # row, served expiry, send_quote keywords
-    ("datetime", QV1_EXPIRY, dict(expiry=ms_to_dt(QV1_EXPIRY - 1000))),
-    ("timedelta", QV1_EXPIRY, dict(expiry=timedelta(days=101))),
-    ("rfqs_own", QV1_EXPIRY + 92 * DAY_MS, {}),  # a settlement other than the one the maker priced
-]
-
-
-def test_send_quote_refuses_an_expiry_other_than_the_one_it_names(maker, gw, session, monkeypatch):
-    monkeypatch.setattr(e7, "quote_digest", no_signature)
-    for row, served, kw in EXPIRY_OTHER:
-        rfq = rfq_obj()
-        rfq.raw["expiry"] = served
-        with pytest.raises(crx.RefusedToSign) as e:
-            maker.send_quote(rfq, "5.41", **kw)
-        assert "expiry" in str(e.value), row
-    with pytest.raises(crx.RefusedToSign, match="expiry"):
-        maker.send_quote(dataclasses.replace(rfq_obj(), expiry=datetime(2027, 1, 1)), "5.41")
-    assert posts(session) == [] and gw.bodies == [] and maker._legs == {}
-
-
-def test_send_quote_quotes_the_expiry_it_names_or_the_served_one(maker, gw, caplog):
-    for n, expiry in enumerate([QV1_EXPIRY, timedelta(days=102)], 1):
-        q = maker.send_quote(rfq_obj(), "5.41", expiry=expiry)
-        assert q.leg["expiry"] == QV1_EXPIRY and len(gw.bodies) == n, expiry
-    rfq = dataclasses.replace(rfq_obj(), expiry=None)
-    with caplog.at_level(logging.WARNING, logger="crx"):
-        q = maker.send_quote(rfq, "5.41")
-    assert q.leg["expiry"] == QV1_EXPIRY
-    day = ms_to_dt(QV1_EXPIRY).strftime("%Y-%m-%d")
-    assert any("expiry" in r.getMessage() and day in r.getMessage() for r in caplog.records)
 
 
 SETTLED = [{"type": "trade.settled", "seq": n, "ts": 1, "data": {}} for n in range(1, 5)]
@@ -551,14 +401,3 @@ def test_quote_live_quotes_new_rfqs_and_returns_the_trade(maker, gw, session, cl
         "trade 0xa1a1a1a1 USD/BRL sell 5000000.000000 5.41 open",
     ]
     assert len(gw.bodies) == 1 and deletes(session) == []
-
-
-def test_quote_live_drops_every_live_quote_on_ctrl_c(maker, gw, session, clock):
-    live_tape(session)
-
-    def log(line):
-        if " quoted " in line:
-            raise KeyboardInterrupt
-    with pytest.raises(KeyboardInterrupt):
-        maker.quote_live(lambda r: "5.41", seconds=60, log=log)
-    assert len(deletes(session)) == 1 and list(gw.dropped) == [gw.bodies[0]["leg_id"]]

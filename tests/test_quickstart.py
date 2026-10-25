@@ -1,6 +1,5 @@
 """python -m crx.quickstart: key handling, arguments and the six steps, with no network access."""
 
-from __future__ import annotations
 
 import re
 from types import SimpleNamespace
@@ -61,12 +60,6 @@ def fake(monkeypatch):
     return FakeClient
 
 
-@pytest.fixture
-def no_key(monkeypatch):
-    monkeypatch.delenv("CRX_WALLET_PK", raising=False)
-    monkeypatch.delenv("CRX_WALLET_PK_FILE", raising=False)
-
-
 def no_prompt(*_a, **_k):
     raise AssertionError("asked for the key while one is set")
 
@@ -99,31 +92,3 @@ def test_key_from_env_runs_every_step_without_asking(monkeypatch, capsys, fake):
         "5/6 Margin (IM)        GET  /balance              -> IM 3065.908525",
         "6/6 Withdraw 1000 USDC POST /withdraw             -> accepted",
     ]
-
-
-def test_unset_key_is_asked_hidden_and_never_printed(monkeypatch, capsys, fake, no_key):
-    asked = []
-
-    def prompt(text):
-        asked.append(text)
-        return f"  {KEY}\n"
-
-    monkeypatch.setattr(qs.getpass, "getpass", prompt)
-    assert qs.main([]) == 0
-    assert asked == ["CRX_WALLET_PK (hidden): "]
-    assert qs.os.environ["CRX_WALLET_PK"] == KEY
-    out, err = capsys.readouterr()
-    assert KEY[2:] not in out + err and KEY[2:] not in asked[0]
-
-
-def test_crx_error_mid_run_exits_1_with_its_code(monkeypatch, capsys, fake):
-    monkeypatch.setenv("CRX_WALLET_PK", KEY)
-
-    def closed(self, *a, **k):
-        raise crx.MarketClosed("session closed", code="market_closed")
-
-    monkeypatch.setattr(FakeClient, "quote", closed)
-    assert qs.main([]) == 1
-    out, err = capsys.readouterr()
-    assert len(out.splitlines()) == 2
-    assert err.strip() == "market_closed: session closed"

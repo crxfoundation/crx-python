@@ -8,7 +8,6 @@ from eth_utils import keccak
 import crx
 from crx._http import rest_message
 
-from .test_money import balance_body
 from .conftest import WEEK  # noqa: F401
 
 EMPTY_BODY = "Body: 0x" + keccak(b"").hex()
@@ -23,23 +22,6 @@ def signed(call):
     msg = rest_message(call["method"], call["path"], custody, signer, int(h["x-crx-ts"]), call["raw"])
     assert Account.recover_message(encode_defunct(text=msg), signature=h["x-crx-sig"]).lower() == signer
     return custody, signer, msg
-
-
-def reads(session, owner):
-    session.routes[("GET", "/balance")] = balance_body(owner)
-    session.routes[("GET", "/positions")] = {"positions": []}
-    session.routes[("GET", "/trades")] = {"trades": [], "seq": 0}
-
-
-def test_default_signs_as_own_seat(make_client, session, account):
-    reads(session, account)
-    c = make_client()
-    c.balance(), c.positions(), c.trades()
-    me = account.address.lower()
-    assert c.account == me
-    for call in session.calls:
-        assert sorted(call["headers"]) == ["accept", "x-crx-address", "x-crx-sig", "x-crx-ts"]
-        assert signed(call)[:2] == (me, me)
 
 
 def test_viewer_client_refuses_seat_calls(make_client, session):

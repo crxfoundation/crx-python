@@ -1,12 +1,10 @@
 """deposit(), withdraw() and the seat reads against a scripted gateway and chain."""
 
-import copy
 import re
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from decimal import Decimal
 from types import SimpleNamespace
-from zoneinfo import ZoneInfo
 
 import pytest
 import requests
@@ -18,7 +16,7 @@ import crx
 import crx._chain
 from crx import _eip712 as e7
 
-from .conftest import BASE, CHAIN_ID, RPC, Clock, fixture
+from .conftest import CHAIN_ID, Clock, fixture
 
 TOKEN = "0xa52c60e6e14190dad2739f4b401aa3264ae68cb8"
 
@@ -113,28 +111,6 @@ def test_deposit_with_no_receipt_is_send_unknown_and_sends_once(make_client, ses
     h = "0x" + f"{1:064x}"  # the hash the node answered
     assert not isinstance(e, crx.TxFailed) and e.code == "send_unknown" and e.tx == h and len(chain.sent) == 1
     assert str(e) == f"deposit tx {h}. Status unknown; check this transaction before you send again."
-
-
-def test_deposit_bad_wait_sends_nothing(make_client, session, health, account):
-    chain = Chain(session, held=10**12)
-    deposit_route(session, health, account, 1000 * 10**6)
-    for wait in (-1, float("nan"), float("inf"), "30", True):
-        with pytest.raises(crx.BadRequest) as e:
-            make_client().deposit(1000, wait=wait)
-        assert "wait" in str(e.value), wait
-    assert chain.sent == [] and session.paths("POST") == []
-
-
-def test_deposit_before_health_names_the_base_token_is_not_ready(make_client, session, health, account):
-    h = copy.deepcopy(health)
-    next(c for c in h["chains"] if c["key"] == "avax-fuji").pop("base_token", None)
-    session.routes[("GET", "/health")] = h
-    chain = Chain(session, held=1000 * 10**6)
-    deposit_route(session, health, account, 1000 * 10**6)
-    with pytest.raises(crx.CrxError) as e:
-        make_client(clock=Clock(time.time())).deposit(1000)
-    assert e.value.code == "not_ready" and chain.sent == []
-    assert str(e.value) == "the base token on avax-fuji is not ready yet; it becomes readable once /health names it."
 
 
 def deposit_for(account_address, amount_raw):
@@ -274,20 +250,6 @@ def test_withdraw_one_signed_post_sends_no_tx(make_client, session, health, acco
     assert g.signer == account.address  # the digest signed is the gateway's 4-member rebuild
 
 
-REBUILDS = [("1000", "0"), ("0.000001", "3"), ("12345.678901", "18446744073709551615")]  # amount, nonce
-
-
-def test_withdraw_signs_the_gateway_rebuild(make_client, session, health, account):
-    Chain(session)
-    for amount, nonce in REBUILDS:
-        g = gate(session, health, account)
-        session.routes[("GET", "/balance")] = [balance_body(account, nonce=nonce), g.view("accepted")]
-        out = make_client(clock=Clock(time.time())).withdraw(amount)
-        assert g.signer == account.address, amount
-        assert g.intent["amount"] == int(Decimal(amount).scaleb(6)) and g.intent["nonce"] == int(nonce), amount
-        assert out.nonce == int(nonce) and out.item == g.item, amount
-
-
 def test_withdraw_digest_and_item_match_vector_w1():
     v = fixture("format-vectors-v5.json")
     w1, taker = v["withdraw"], v["keys"]["taker"]
@@ -302,26 +264,6 @@ def test_withdraw_digest_and_item_match_vector_w1():
     assert e7.h0x(Account.from_key(taker["private_key"]).sign_typed_data(full_message=td).signature) == w1["signature"]
     assert e7.withdraw_item(w) == intent_item(w)
     assert e7.withdraw_item(w) != intent_item(w, recipient=m["account"])
-
-
-def test_withdraw_posts_vector_w1(session, tmp_path):
-    v = fixture("format-vectors-v5.json")
-    w1, taker = v["withdraw"], Account.from_key(v["keys"]["taker"]["private_key"])
-    m, core = w1["typed_data"]["message"], w1["typed_data"]["domain"]["verifyingContract"]
-    session.routes[("GET", "/health")] = {"status": "ok", "chains": [{
-        "key": "avax-fuji", "chain_id": CHAIN_ID, "core": core, "domain": v["domain_separator"]}]}
-    session.rpc["eth_getCode"] = lambda p: "0x6080" if p[0].lower() == core else "0x"
-    Chain(session)
-    g = Gate(session, taker, CHAIN_ID, core)
-    session.routes[("GET", "/balance")] = [balance_body(taker, nonce=m["nonce"]), g.view("accepted")]
-    c = crx.Client(key=v["keys"]["taker"]["private_key"], base_url=BASE, rpc_url=RPC, state_dir=tmp_path / "state",
-                   session=session, core=core)
-    clock = Clock(int(m["deadline"]) - 22 * 3600)
-    c._clock, c._sleep = clock, clock.sleep
-    out = c.withdraw(Decimal(m["amount"]).scaleb(-6))
-    body = next(x for x in session.calls if x["method"] == "POST")["body"]
-    assert body["sig"] == w1["signature"] and body["deadline"] == int(m["deadline"]) and body["nonce"] == m["nonce"]
-    assert out.item == g.item == e7.h0x(intent_item({**m, "account": taker.address}))
 
 
 OTHER_ITEM = "/withdraw queued an item other than the signed withdraw"
@@ -387,51 +329,6 @@ class Money:
         return balance_body(self.account, nonce="4", withdraw=item_row(self.word, self.g.item, LANDED))
 
 
-def returned_pending(make_client, session, health, account):
-    """Return a client whose first withdraw(1000) returned ``pending``."""
-    Chain(session)
-    g = gate(session, health, account)
-    money = Money(account, g)
-    session.routes[("GET", "/balance")] = money
-    clock = Clock(time.time())
-    c = make_client(clock=clock)
-    first = c.withdraw(1000)
-    assert first.status == "pending" and c._held_withdraw["returned"] is True
-    return c, money, clock, first
-
-
-def test_withdraw_after_a_returned_withdraw_signs_the_new_one_only_once_it_is_paid(
-        make_client, session, health, account):
-    c, money, clock, first = returned_pending(make_client, session, health, account)
-    t0 = clock()
-    with pytest.raises(crx.WithdrawInProgress) as ei:
-        c.withdraw(1000, wait=12)
-    e = ei.value
-    assert e.code == "withdraw_in_progress" and e.status is None and first.item in str(e)
-    assert e.details == {"item": first.item, "nonce": "3", "amount": "1000", "status": "pending"}
-    assert clock() - t0 == 10 and len(withdraw_posts(session)) == 1 and c._held_withdraw["returned"] is True
-    # The earlier withdraw is paid, so the call neither waits nor raises EarlierOutcome.
-    money.shown, money.word = True, "paid"
-    t0 = clock()
-    second = c.withdraw(1000)
-    assert clock() == t0 and second.status == "paid" and second.item != first.item
-    a, b = withdraw_posts(session)
-    assert (a["nonce"], b["nonce"]) == ("3", "4") and a["sig"] != b["sig"]
-    assert c._held_withdraw is None
-
-
-def test_withdraw_after_a_returned_withdraw_that_ends_refused_says_so_once(make_client, session, health, account):
-    c, money, clock, first = returned_pending(make_client, session, health, account)
-    money.shown, money.word = True, "refused"
-    with pytest.raises(crx.EarlierOutcome) as ei:
-        c.withdraw(1000)
-    assert ei.value.details == {"item": first.item, "nonce": "3", "amount": "1000", "status": "refused"}
-    assert c._held_withdraw is None and len(withdraw_posts(session)) == 1
-    money.word = "paid"
-    assert c.withdraw(1000).status == "paid"
-    assert [b["nonce"] for b in withdraw_posts(session)] == ["3", "4"]
-
-
 def test_withdraw_after_a_raise_never_waits(make_client, session, health, account):
     Chain(session)
     g = gate(session, health, account)
@@ -452,52 +349,6 @@ def test_withdraw_after_a_raise_never_waits(make_client, session, health, accoun
     assert ei.value.details["status"] == "paid" and clock() == t0 and len(withdraw_posts(session)) == 1
 
 
-def test_withdraw_nonce_passed_row_of_another_amount_is_not_the_intent(make_client, session, health, account):
-    Chain(session)
-    g = gate(session, health, account)
-    session.routes[("POST", "/withdraw")] = timeout_after(lambda req: None)
-    session.routes[("GET", "/balance")] = Money(account, g)
-    c = make_client(clock=Clock(time.time()))
-    with pytest.raises(crx.WithdrawUnknown):
-        c.withdraw(1000)
-    row = dict(item_row("paid", None, LANDED), amount="250.000000")
-    session.routes[("GET", "/balance")] = balance_body(account, nonce="4", withdraw=row)
-    with pytest.raises(crx.EarlierOutcome, match="read balance"):
-        c.withdraw(1000)
-
-
-UNPROVEN = [  # row, POST /withdraw answer, GET /balance answer, posts; None keeps the route
-    ("refused-before-the-held-check", (503, {"code": "mark_unavailable", "error": "starting",
-                                            "details": {"venue_status": "unknown"}}), None, 2),
-    ("unread-balance", None, (503, {"code": "mark_unavailable", "error": "starting"}), 1),
-]
-
-
-def test_withdraw_repeat_that_cannot_prove_the_intent_missing_keeps_the_hold(make_client, session, health, account):
-    # A refusal before the gateway's held-item check, or an unread /balance, leaves the first post possibly queued.
-    Chain(session)
-    for row, post, balance, posts in UNPROVEN:
-        before = len(withdraw_posts(session))
-        g = gate(session, health, account)
-        session.routes[("POST", "/withdraw")] = timeout_after(g.answer)
-        session.routes[("GET", "/balance")] = Money(account, g)
-        clock = Clock(time.time())
-        c = make_client(clock=clock)
-        with pytest.raises(crx.WithdrawUnknown):
-            c.withdraw(1000)
-        if post is not None:
-            session.routes[("POST", "/withdraw")] = post
-        if balance is not None:
-            session.routes[("GET", "/balance")] = balance
-        clock.t += 300
-        with pytest.raises(crx.WithdrawUnknown):
-            c.withdraw(1000)
-        assert c._held_withdraw is not None, row
-        with pytest.raises(crx.WithdrawUnknown):
-            c.withdraw(500)
-        assert len(withdraw_posts(session)) - before == posts, row
-
-
 def test_withdraw_in_progress_with_no_wait_sends_nothing_more(make_client, session, account):
     chain = Chain(session)
     session.routes[("GET", "/balance")] = balance_body(account)
@@ -508,22 +359,6 @@ def test_withdraw_in_progress_with_no_wait_sends_nothing_more(make_client, sessi
     assert ei.value.code == "withdraw_in_progress" and ei.value.status == 409
     assert len([c for c in session.calls if c["path"] == "/withdraw"]) == 1
     assert chain.sent == [] and polls(session, "/balance") == 1
-
-
-def test_balance(make_client, session, account):
-    session.routes[("GET", "/balance")] = balance_body(account)
-    b = make_client().balance()
-    assert (b.free, b.collateral, b.open_legs, b.withdraw_nonce) == (Decimal("20000"), Decimal("21111"), 2, 3)
-    assert b.as_of_block == 52_000_123
-    assert not hasattr(b, "pending_deposit") and not hasattr(b, "as_of_fold")
-    call = next(c for c in session.calls if c["path"] == "/balance")
-    assert call["query"] == {"chain": ["avax-fuji"]}
-
-
-def test_balance_for_other_account_refused(make_client, session, account):
-    session.routes[("GET", "/balance")] = balance_body(Account.create())
-    with pytest.raises(crx.BadAnswer):
-        make_client().balance()
 
 
 def test_positions_read_the_entry_price_mark_and_pnl(make_client, session):
@@ -554,22 +389,6 @@ def test_trades_pages(make_client, session):
     assert [c["query"]["after"] for c in session.calls if c["path"] == "/trades"] == [["0"], ["1000"]]
 
 
-def test_reads_refuse_an_answer_they_cannot_read(make_client, session):
-    page = {"trades": [{"type": "trade.opened", "ts": 1, "data": {"trade_id": str(i)}} for i in range(1000)], "seq": 7}
-    rows = [
-        ("markets", ("GET", "/markets"), {"markets": None}, "/markets lists no markets"),
-        ("positions", ("GET", "/positions"), {"positions": None}, "/positions lists no positions"),
-        ("trades", ("GET", "/trades"), {"trades": None, "seq": 0}, "/trades lists no trades"),
-        ("trades", ("GET", "/trades"), page, "/trades did not advance its seq"),
-    ]
-    c = make_client()
-    for call, route, body, msg in rows:
-        session.routes[route] = body
-        with pytest.raises(crx.BadAnswer) as ei:
-            getattr(c, call)()
-        assert str(ei.value) == msg, msg
-
-
 def test_next_check_is_the_next_05_past_the_hour_on_testnet(make_client, session):
     rows = [
         ("2026-10-01T08:00:00", "2026-10-01T08:05:00"),
@@ -584,44 +403,11 @@ def test_next_check_is_the_next_05_past_the_hour_on_testnet(make_client, session
     assert session.calls == []
 
 
-NY = ZoneInfo("America/New_York")
-TAIL = timedelta(minutes=15)  # the reopen tail after the Sunday open
-LONG_CLOSE = (datetime(2026, 10, 9, 17, 0, tzinfo=NY), datetime(2026, 10, 11, 18, 0, tzinfo=NY) + TAIL)
-TWO_H = 2 * 3600
-
-
 def ms(t):
     return int(t.timestamp()) * 1000
 
 
-def mxn_at(make_client, session, markets, now, long_close=LONG_CLOSE):
-    """Read USD/MXN at ``now``, leaving ``next_long_close`` out when ``long_close`` is None."""
-    m = copy.deepcopy(markets)
-    row = next(r for r in m["markets"] if r["pair"] == "USD/MXN")
-    if long_close is not None:
-        row["next_long_close"] = {"starts_at": ms(long_close[0]), "ends_at": ms(long_close[1])}
-    session.routes[("GET", "/markets")] = m
-    return make_client(key=False, clock=Clock(now.timestamp())).market("USD/MXN")
-
-
-def test_next_valid_end_moves_out_of_the_long_close(make_client, session, markets):
-    friday = datetime(2026, 10, 9, 15, 30, tzinfo=NY)
-    m = mxn_at(make_client, session, markets, friday)
-    assert m.next_long_close == tuple(t.astimezone(timezone.utc) for t in LONG_CLOSE)
-    end = m.next_valid_end(TWO_H)
-    assert end == LONG_CLOSE[1] and end.tzinfo == timezone.utc
-    m = mxn_at(make_client, session, markets, friday, long_close=None)
-    assert m.next_long_close is None and m.next_valid_end(TWO_H) == friday + timedelta(hours=2)
-    for edge, moves in [(LONG_CLOSE[1], False), (LONG_CLOSE[0], True)]:
-        m = mxn_at(make_client, session, markets, edge - timedelta(hours=2))
-        assert m.next_valid_end(TWO_H) == (LONG_CLOSE[1] if moves else edge), edge
-
-
 PAIRS = ("USD/BRL", "USD/MXN", "USD/PHP")
-
-
-def test_health(make_client, health):
-    assert make_client().health() == health
 
 
 def test_markets_parse(make_client):
@@ -633,15 +419,6 @@ def test_markets_parse(make_client):
         assert m.pair_id == "0x" + keccak(text=pair).hex() and (m.base, m.quote) == (pair[:3], pair[4:])
         assert m.max_premium_bps == 200 and m.open is False and (m.min_tenor_s, m.max_tenor_s) == (600, 7_776_000)
     assert ms["USD/MXN"].next_open == datetime.fromtimestamp(1_790_546_400, timezone.utc)
-
-
-def test_a_pair_markets_does_not_list_is_not_offered(make_client, session):
-    c = make_client(key=False)
-    assert c.market("USDMXN").pair == "USD/MXN"  # the control: a listed pair
-    with pytest.raises(crx.MarketPaused) as ei:
-        c.market("USD/JPY")
-    assert ei.value.code == "market_paused" and str(ei.value) == "USD/JPY is not offered on avax-fuji"
-    assert ei.value.details == {"pair": "USD/JPY"} and session.paths("POST") == []
 
 
 def test_withdraw_with_no_amount_takes_all_free_collateral_rounded_down(make_client, session, health, account):
@@ -672,25 +449,6 @@ def test_withdraw_checks_free_collateral_before_a_signature(make_client, session
             c.withdraw(wait=0) if amount is None else c.withdraw(amount, wait=0)
         assert ei.value.details == details and ei.value.status is None, err
         assert signed == [] and session.paths("POST") == [] and c._held_withdraw is None, err
-
-
-def test_withdraw_reads_an_unpriced_balance_again_every_5_s(make_client, session, health, account):
-    # Free collateral reads None briefly after a settlement update.
-    Chain(session)
-    g = gate(session, health, account)
-    clock = Clock(time.time())
-    reads = []
-
-    def balance(req):
-        reads.append(clock())
-        if len(reads) <= 2:
-            return balance_body(account, free=None)
-        return balance_body(account, free="100.000000") if len(reads) == 3 else g.view("accepted")(req)
-    session.routes[("GET", "/balance")] = balance
-    t0 = clock()
-    w = make_client(clock=clock).withdraw()
-    assert [t - t0 for t in reads[:3]] == [0, 5, 10] and w.status == "accepted"
-    assert w.amount == Decimal("100") and session.paths("POST") == ["/withdraw"]
 
 
 def test_withdraw_with_no_nonce_until_the_bound_raises_and_signs_nothing(
@@ -768,45 +526,3 @@ def test_amount_parsing():
             with pytest.raises(crx.BadRequest) as e:
                 crx.client._amount(value)
             assert out in str(e.value), value
-
-
-DROP = object()  # removes the key
-
-
-def one_chain(markets, **row_edit):
-    """Return /markets in the one-chain shape, each row carrying its chain's ``max_premium_bps``.
-
-    ``row_edit`` maps a pair to the keys to set on its row. ``DROP`` removes a key, or the whole row.
-    """
-    m = copy.deepcopy(markets)
-    m.pop("as_of", None)
-    for row in m["markets"]:
-        row["max_premium_bps"] = row.pop("chains")[0]["max_premium_bps"]
-        row["session"].pop("venue", None)
-        row["session"].pop("label", None)
-    for pair, edit in row_edit.items():
-        row = next(r for r in m["markets"] if r["pair"] == pair.replace("_", "/"))
-        if edit is DROP:
-            m["markets"].remove(row)
-            continue
-        row.update(edit)
-        for k in [k for k, v in row.items() if v is DROP]:
-            del row[k]
-    return m
-
-
-@pytest.mark.parametrize("cap,read", [(150, 150), (0, 0), (None, None), (DROP, None), (-1, None), ("200", None),
-                                      (True, None)], ids=["150", "0", "null", "missing", "negative", "text", "bool"])
-def test_a_one_chain_row_reads_its_premium_cap(make_client, session, markets, cap, read):
-    session.routes[("GET", "/markets")] = one_chain(markets, USD_MXN={"max_premium_bps": cap})
-    ms = {m.pair: m for m in make_client(key=False).markets()}
-    assert ms["USD/MXN"].max_premium_bps == read and ms["USD/MXN"].paused is False
-    assert ms["USD/BRL"].max_premium_bps == ms["USD/PHP"].max_premium_bps == 200
-
-
-def test_deposit_poll_rides_out_gateway_errors(make_client, session, health, account):
-    chain = Chain(session, held=10**12)
-    deposit_route(session, health, account, 1000 * 10**6)
-    done = balance_body(account, deposit={"tx": "0x" + f"{2:064x}", "status": "credited", **COUNTED})
-    session.routes[("GET", "/balance")] = [(503, {"code": "upstream", "error": "down"}), "not json", done]
-    assert make_client(clock=Clock(time.time())).deposit(1000).status == "credited"

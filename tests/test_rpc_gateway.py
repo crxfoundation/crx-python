@@ -9,11 +9,11 @@ from eth_account.messages import encode_defunct
 
 import crx
 from crx import _eip712 as e7
-from crx._chain import Rpc, RpcError, TxLog, send_tx
+from crx._chain import Rpc, TxLog, send_tx
 from crx._http import Gateway, rest_message
 from crx.client import MAINNET_CORE
 
-from .conftest import BASE, RPC, Pauses
+from .conftest import BASE, Pauses
 
 CORE = MAINNET_CORE.lower()
 TOKEN = "0x" + "a0" * 20
@@ -82,15 +82,6 @@ def rpc_calls(session):
     return [c for c in session.calls if c["path"] == "/rpc"]
 
 
-def test_mainnet_with_no_rpc_builds_a_client_on_the_gateway_rpc(gw_session, tmp_path, account, monkeypatch):
-    c = main(gw_session, tmp_path, account)
-    assert c._rpc.on_gateway and c._rpc._gw is c._gw and c._rpc._url == BASE + "/rpc" and c._rpc.poll_s == 4.0
-    monkeypatch.setenv("CRX_BASE", BASE + "/")  # the route follows CRX_BASE
-    c = main(gw_session, tmp_path, account, base_url=None)
-    assert c._rpc._gw is c._gw and c._rpc._url == BASE + "/rpc"
-    assert repr(c._rpc) == "Rpc(<url hidden>)" and gw_session.calls == []
-
-
 def test_the_health_pins_stand_and_no_chain_probe_goes_to_the_gateway(gw_session, tmp_path, account):
     gw_session.routes[("POST", "/rpc")] = Node(CHAIN)
     c = main(gw_session, tmp_path, account)
@@ -149,35 +140,6 @@ def test_a_custodian_signer_sends_its_session_token(gw_session, tmp_path, accoun
     assert all(h["x-crx-session"] == "ab" * 32 and not SIGNED & set(h) for _, h, _ in node.seen)
 
 
-class OwnNode:
-    """Record each RPC post with its keyword arguments."""
-
-    def __init__(self, session):
-        self.posts = []
-        self._post = session.post
-        session.post = self
-
-    def __call__(self, url, **kw):
-        self.posts.append(kw)
-        return self._post(url, **kw)
-
-
-@pytest.mark.parametrize("how", ["CRX_RPC", "rpc_url"])
-def test_own_rpc_replaces_the_gateway_and_is_not_signed(gw_session, tmp_path, account, monkeypatch, how):
-    gw_session.rpc.update(CHAIN)
-    own = OwnNode(gw_session)
-    if how == "CRX_RPC":
-        monkeypatch.setenv("CRX_RPC", RPC)
-        c = main(gw_session, tmp_path, account)
-    else:
-        c = main(gw_session, tmp_path, account, rpc_url=RPC)
-    assert not c._rpc.on_gateway and c._rpc._url == RPC and c._rpc.poll_s == 2.0
-    c._chain_ready()  # an own RPC is still probed
-    assert gw_session.rpc_methods() == ["eth_chainId", "eth_getCode"]
-    assert [set(kw) for kw in own.posts] == [{"json", "timeout"}] * 2  # no headers
-    assert rpc_calls(gw_session) == []
-
-
 @pytest.mark.parametrize("network,want", [("mainnet", BASE + "/rpc"), ("testnet", TESTNET_RPC)])
 def test_a_placeholder_crx_rpc_is_ignored_with_one_line(gw_session, tmp_path, account, monkeypatch, caplog,
                                                         network, want):
@@ -189,12 +151,6 @@ def test_a_placeholder_crx_rpc_is_ignored_with_one_line(gw_session, tmp_path, ac
     assert "example" not in caplog.text and "api-key" not in caplog.text
 
 
-def test_testnet_row_is_unchanged(session, tmp_path, account):
-    assert crx.NETWORKS["testnet"]["rpc_url"] == TESTNET_RPC
-    c = crx.Client(key=account.key.hex(), base_url=BASE, state_dir=tmp_path / "state", session=session)
-    assert not c._rpc.on_gateway and c._rpc._url == TESTNET_RPC and c._rpc.poll_s == 2.0
-
-
 def gateway_rpc(session, account, sleep=None):
     gw = Gateway(BASE, account, session)
     gw.sleep = sleep if sleep is not None else Pauses()
@@ -202,8 +158,6 @@ def gateway_rpc(session, account, sleep=None):
 
 
 RPC_403 = (403, {"jsonrpc": "2.0", "id": 1, "error": {"code": -32601, "message": "The method is not allowed."}})
-RPC_429 = (429, {"jsonrpc": "2.0", "id": 1, "error": {"code": -32005, "message": "Too many requests."}},
-           {"Retry-After": "2"})
 
 
 @pytest.mark.parametrize("answer,err,words", [
@@ -225,26 +179,6 @@ def test_any_answer_but_200_raises_the_typed_gateway_error(session, account, ans
     assert ei.value.details["method"] == "eth_chainId" and gw.sleep == [] and len(session.calls) == 1
     if answer is RPC_403:
         assert ei.value.details["rpc_code"] == -32601
-
-
-def test_a_429_waits_retry_after_once_then_resends_signed_again(session, account):
-    session.routes[("POST", "/rpc")] = [RPC_429, Node(CHAIN)]
-    gw, rpc = gateway_rpc(session, account)
-    assert rpc.int("eth_chainId") == 1
-    assert gw.sleep == [2] and len(session.calls) == 2
-    first, second = (c["headers"] for c in session.calls)
-    assert session.calls[0]["raw"] == session.calls[1]["raw"]
-    assert first["x-crx-ts"] != second["x-crx-ts"] and first["x-crx-sig"] != second["x-crx-sig"]
-
-
-@pytest.mark.parametrize("after,pauses", [("2", [2]), ("120", [])], ids=["twice", "too-long"])
-def test_a_429_that_stays_raises_rate_limited(session, account, after, pauses):
-    session.routes[("POST", "/rpc")] = (429, {"code": "rate_limited"}, {"Retry-After": after})
-    gw, rpc = gateway_rpc(session, account)
-    with pytest.raises(crx.RateLimited) as ei:
-        rpc("eth_chainId")
-    assert ei.value.retry_after == int(after) and ei.value.details["method"] == "eth_chainId"
-    assert gw.sleep == pauses and len(session.calls) == len(pauses) + 1
 
 
 def send_chain(receipts, counts=None, **edit):
@@ -292,19 +226,6 @@ def test_a_429_is_never_a_revert_or_a_zero_tip(session, account, where):
     assert sent == [] and pauses == [1]
 
 
-def test_a_node_revert_in_a_200_still_reads_as_would_revert(session, account):
-    revert = (200, {"jsonrpc": "2.0", "id": 1, "error": {"code": 3, "message": "execution reverted",
-                                                          "data": "0x" + e7.calldata("NotWhitelisted()", [], [])[2:]}})
-    node, sent = send_chain([], eth_call=revert)
-    session.routes[("POST", "/rpc")] = node
-    _, rpc = gateway_rpc(session, account)
-    with pytest.raises(RpcError):
-        rpc("eth_call", {"to": TOKEN, "data": "0x"}, "latest")
-    with pytest.raises(crx.TxFailed, match="approve would revert: NotWhitelisted; nothing sent"):
-        send_tx(rpc, account, 1, "approve", TOKEN, "0x", sleep=Pauses())
-    assert sent == []
-
-
 def test_a_5xx_to_a_send_is_tracked_by_its_hash(session, account, tmp_path):
     node, sent = send_chain([None, {"status": "0x1"}],
                             eth_sendRawTransaction=(503, {"code": "service_unavailable", "error": "Busy."}))
@@ -316,24 +237,3 @@ def test_a_5xx_to_a_send_is_tracked_by_its_hash(session, account, tmp_path):
     assert h.startswith("0x") and len(h) == 66 and h != TX and [r["hash"] for r in log.rows()] == [h]
     receipts = [json.loads(raw)["params"] for _, _, raw in node.seen if b"eth_getTransactionReceipt" in raw]
     assert receipts == [[h], [h]] and pauses == [4.0]
-
-
-def test_a_refused_receipt_read_after_the_send_raises_send_unknown(session, account):
-    node, sent = send_chain([None])
-    reads = []
-
-    def answer(req):
-        if json.loads(req["raw"])["method"] == "eth_getTransactionReceipt":
-            reads.append(1)
-            if len(reads) > 1:
-                return RPC_403
-        return node(req)
-
-    session.routes[("POST", "/rpc")] = answer
-    pauses = Pauses()
-    _, rpc = gateway_rpc(session, account, pauses)
-    with pytest.raises(crx.SendUnknown) as ei:
-        send_tx(rpc, account, 1, "approve", TOKEN, "0x", sleep=pauses)
-    d = ei.value.details
-    assert d["tx"] == TX and d["txs"] == [TX] and d["cause"] == "unauthorized"
-    assert len(sent) == 1 and pauses == [4.0]

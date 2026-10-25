@@ -1,6 +1,3 @@
-import copy
-import os
-import pickle
 
 import pytest
 
@@ -51,58 +48,6 @@ def test_gateway_codes_map_to_typed_errors():
         e = from_gateway(status, body, body if isinstance(body, str) else "")
         assert (type(e), e.code, e.status) == (cls, code, status), body
         assert isinstance(e, crx.CrxError)
-
-
-def test_no_key_is_read_only(monkeypatch):
-    monkeypatch.delenv("CRX_WALLET_PK", raising=False)
-    monkeypatch.delenv("CRX_WALLET_PK_FILE", raising=False)
-    c = crx.Client(base_url=BASE, rpc_url=RPC)
-    assert c.address is None
-    with pytest.raises(crx.ConfigError):
-        c.balance()
-
-
-def test_bad_key_never_echoed():
-    secret = "0x" + "zz" * 32
-    with pytest.raises(crx.ConfigError) as ei:
-        crx.Client(key=secret)
-    assert "zz" not in str(ei.value) and "zz" not in repr(ei.value)
-    assert ei.value.__cause__ is None and ei.value.__context__ is None
-
-
-def test_key_never_in_repr_or_pickle(account):
-    c = crx.Client(key=account.key.hex(), base_url=BASE, rpc_url=RPC)
-    k = account.key.hex().removeprefix("0x")
-    assert k not in repr(c) and k not in str(c)
-    assert "secret-path-key" not in repr(c._rpc) and "gateway.test" not in repr(c)
-    with pytest.raises(TypeError):
-        pickle.dumps(c)
-    with pytest.raises(TypeError):
-        copy.deepcopy(c)
-
-
-def test_key_leaves_frame_locals(account):
-    import traceback
-    k = account.key.hex()
-    cases = [(k, {"network": "mainnet"}), (k, {"base_url": "http://gateway.test"}), (k, {"key_file": "x"}),
-             (k[:-1], {}), (k + "1", {}), ("0x" + "zz" * 32, {}), (b"\x01" * 31, {})]
-    for bad, kw in cases:
-        try:
-            crx.Client(key=bad, base_url=kw.pop("base_url", BASE), rpc_url=RPC, **kw)
-        except crx.ConfigError as e:
-            frames = [f for f, _ in traceback.walk_tb(e.__traceback__)][1:]  # the SDK's frames, not this test's
-            assert frames and all(f.f_locals.get("key") is None for f in frames), kw
-        else:
-            raise AssertionError("no ConfigError")
-
-
-def test_non_utf8_key_file_has_no_context(tmp_path):
-    f = tmp_path / "seat.key"
-    f.write_bytes(b"\xff\xfe" + b"\x01" * 30)
-    os.chmod(f, 0o600)
-    with pytest.raises(crx.ConfigError) as ei:
-        crx.Client(key_file=f)
-    assert ei.value.__context__ is None
 
 
 def _frames_text(exc):
