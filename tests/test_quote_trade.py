@@ -310,6 +310,70 @@ def test_served_typed_data_must_equal_own(make_client, venue, session, clock, ac
         assert refused_unsigned(session, c, account), at
 
 
+TEMPLATE_EDITS = [  # Venue member, edit, words
+    ("template_edit", lambda t: {}, r"^refused to sign: the trade template is not \{typed_data\}$"),  # no typed_data
+    ("typed_edit", lambda td: td.pop("message"), "^refused to sign: the template cannot be read$"),
+]
+
+
+def test_template_holds_exactly_a_readable_typed_data(make_client, venue, session, clock, account):
+    for member, edit, words in TEMPLATE_EDITS:
+        venue.reset()
+        setattr(venue, member, edit)
+        c = make_client(clock=clock)
+        with pytest.raises(crx.RefusedToSign, match=words):
+            c.trade(c.quote("USD/MXN", "buy", 25_000, settles=WEEK))
+        assert refused_unsigned(session, c, account), member
+        setattr(venue, member, None)
+
+
+QUOTE_ENDS = [
+    (0, crx.QuoteExpired, "^the quote end has passed; not opened; request a new quote$"),
+    (631, crx.RefusedToSign, "^refused to sign: the quote end is more than 630 s ahead$"),
+]
+
+
+def test_quote_end_is_ahead_by_at_most_630_s(make_client, venue, session, clock, account):
+    for ahead, err, words in QUOTE_ENDS:
+        venue.reset()
+        venue.qe_ahead = ahead
+        c = make_client(clock=clock)
+        with pytest.raises(err, match=words) as ei:
+            c.trade(c.quote("USD/MXN", "buy", 25_000, settles=WEEK))
+        assert not isinstance(ei.value, crx.TradeUnknown), ahead
+        assert refused_unsigned(session, c, account), ahead
+
+
+def with_cap(markets, cap, pair="USD/MXN"):
+    """Return /markets with ``pair``'s ``max_premium_bps`` set to ``cap``, or removed when None."""
+    m = open_market(markets, pair)
+    for row in m["markets"]:
+        if row["pair"] == pair:
+            for ch in row["chains"]:
+                if cap is None:
+                    ch.pop("max_premium_bps", None)
+                else:
+                    ch["max_premium_bps"] = cap
+    return m
+
+
+PREMIUM_REFUSALS = [
+    (201, 200, r"^refused to sign: the premium 201 bps is above the cap \(200 bps\)$"),
+    (5, None, "^refused to sign: the premium is not 0 and the market serves no premium cap$"),
+]
+
+
+def test_premium_beyond_the_served_cap_is_refused(make_client, venue, session, markets, clock, account):
+    for premium, cap, words in PREMIUM_REFUSALS:
+        venue.reset()
+        session.routes[("GET", "/markets")] = with_cap(markets, cap)
+        c = make_client(clock=clock)
+        q = c.quote("USD/MXN", "buy", 25_000, premium_bps=premium, settles=WEEK)
+        with pytest.raises(crx.RefusedToSign, match=words):
+            c.trade(q)
+        assert refused_unsigned(session, c, account), premium
+
+
 EXPIRY_MS = 1_900_000_000_000
 
 
@@ -323,3 +387,36 @@ def test_ask_quote_is_the_winner_and_trades(make_client, venue, session, clock):
     assert accepts(session) == []
     t = c.trade(q)
     assert (t.status, t.tx) == ("open", TXH) and sent_nothing(session)
+
+
+def own_check(tmp_path, account, health, clock, **edit):
+    """Run Binder.check_trade on a matching template after ``edit`` changes the ask."""
+    from crx._bind import Binder
+    chain = next(c for c in health["chains"] if c["key"] == "avax-fuji")
+    sep = e7.domain_separator(CHAIN_ID, chain["core"])
+    qe = int(clock()) + 300
+    leg = e7.leg_id_for(HEAD, qe)
+    ask = {"pair": "USD/MXN", "side": 1, "notional": "25000", "expiry": int(clock() * 1000) + 30 * 86_400_000,
+           "premium_bps": 0, "rate": Decimal("18.7"), "quote_expiry_max": qe, "max_premium_bps": 200, "leg_id": leg}
+    msg = e7.trade_message("USD/MXN", 1, 25_000 * 10**6, 18_700_000, 0, ask["expiry"] // 1000, rnd(), leg,
+                           str(int(clock() * 1000)), rnd())
+    t = {"typed_data": e7.typed_data("Trade", CHAIN_ID, chain["core"], msg)}
+    ask.update(edit)
+    b = Binder(None, account, dict(chain, chain_id=CHAIN_ID), sep, tmp_path, clock=clock)
+    return b.check_trade(t, ask)
+
+
+OWN_REFUSALS = [
+    ({"pair": "usd/mxn"}, "pair is not AAA/BBB"),
+    ({"side": 2}, "side is not buy or sell"),
+    ({"notional": "340282366920938463463374607431768.211456"}, "notional is not a 6-decimal amount below 2\\^128"),
+    ({"rate": Decimal("18446744073709.551616")}, "rate is not a 6-decimal amount below 2\\^64"),
+    ({"expiry": -1}, "expiry is not unix ms"),
+]
+
+
+def test_own_trade_refusals(tmp_path, account, health, clock):
+    for edit, why in OWN_REFUSALS:
+        with pytest.raises(crx.RefusedToSign, match=why):
+            own_check(tmp_path, account, health, clock, **edit)
+        assert not (tmp_path / f"side-nonce-{account.address.lower()}").exists(), why  # no nonce kept, nothing signed
