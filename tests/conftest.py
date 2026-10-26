@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import dataclasses
+import hashlib
 import json
 import os
 import time
@@ -157,9 +158,13 @@ def markets():
     return fixture("markets.json")
 
 
+SEAT_SEED = b"crx-python tests: seat key"
+
+
 @pytest.fixture
 def account():
-    return Account.create()
+    """Return the seat account. Its key is the SHA-256 of ``SEAT_SEED``: each run signs with the same key."""
+    return Account.from_key(hashlib.sha256(SEAT_SEED).digest())
 
 
 @pytest.fixture
