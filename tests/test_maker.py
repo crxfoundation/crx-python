@@ -125,19 +125,11 @@ def frame(v=QV1, **edit):
     return {k: x for k, x in d.items() if x is not None}
 
 
-def rfq_obj(**edit):
-    return _maker.rfq_of(frame(**edit), 7)
-
-
 def refusal(code, status=409, error=None, **details):
     body = {"code": code, "error": error or code.replace("_", " ")}
     if details:
         body["details"] = details
     return (status, body)
-
-
-def posts(session, path=f"/rfqs/{RFQ}/quotes"):
-    return [c for c in session.calls if c["method"] == "POST" and c["path"] == path]
 
 
 def fake_random(monkeypatch, head: bytes, salt: bytes) -> None:

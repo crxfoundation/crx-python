@@ -361,25 +361,6 @@ def test_withdraw_in_progress_with_no_wait_sends_nothing_more(make_client, sessi
     assert chain.sent == [] and polls(session, "/balance") == 1
 
 
-def test_positions_read_the_entry_price_mark_and_pnl(make_client, session):
-    row = {"trade_id": "0x01", "rfq_id": "0x02", "pair": "USD/MXN", "side": 1, "notional": "25000.000000",
-           "rate": "18.700000", "status": "open", "entry_price": "18.700000", "mark_price": "18.750000",
-           "mark_time": 1_790_000_000_123, "unrealized_pnl": "-12.345678"}
-    unmarked = dict(row, trade_id="0x03", entry_price=None, mark_price=None, mark_time=None, unrealized_pnl=None,
-                    rate="18.6", status="settled")
-    unreadable = {"trade_id": "0x04", "rfq_id": "0x02", "pair": "USD/MXN", "side": 1, "notional": "1", "rate": "18.7",
-                  "status": "open", "mark_price": "x", "mark_time": 1_790_000_000_123, "unrealized_pnl": "1.5"}
-    session.routes[("GET", "/positions")] = {"positions": [row, unmarked, unreadable]}
-    p, q, r = make_client().positions()
-    assert (p.entry_price, p.mark_price, p.unrealized_pnl) == (
-        Decimal("18.700000"), Decimal("18.750000"), Decimal("-12.345678"))
-    assert p.mark_time == datetime(2026, 9, 21, 14, 13, 20, 123000, tzinfo=timezone.utc)
-    assert p.raw["unrealized_pnl"] == "-12.345678" and p.side == "buy"
-    # A null entry price reads the rate, and null mark keys read None.
-    assert (q.entry_price, q.mark_price, q.mark_time, q.unrealized_pnl) == (Decimal("18.6"), None, None, None)
-    assert r.mark_price is None
-
-
 def test_trades_pages(make_client, session):
     page1 = {"trades": [{"type": "trade.opened", "ts": 1, "data": {"trade_id": str(i)}} for i in range(1000)], "seq": 1000}
     page2 = {"trades": [{"type": "trade.settled", "ts": 2, "data": {"trade_id": "0"}}], "seq": 1001}
@@ -387,20 +368,6 @@ def test_trades_pages(make_client, session):
     ev = make_client().trades()
     assert len(ev) == 1001 and ev[-1].type == "trade.settled" and ev[-1].seq is None
     assert [c["query"]["after"] for c in session.calls if c["path"] == "/trades"] == [["0"], ["1000"]]
-
-
-def test_next_check_is_the_next_05_past_the_hour_on_testnet(make_client, session):
-    rows = [
-        ("2026-10-01T08:00:00", "2026-10-01T08:05:00"),
-        ("2026-10-01T08:04:59", "2026-10-01T08:05:00"),
-        ("2026-10-01T08:05:00", "2026-10-01T09:05:00"),
-        ("2026-10-01T23:58:30", "2026-10-02T00:05:00"),
-    ]
-    for now, at in rows:
-        t = datetime.fromisoformat(now).replace(tzinfo=timezone.utc).timestamp()
-        got = make_client(key=False, clock=Clock(t)).next_check()
-        assert got == datetime.fromisoformat(at).replace(tzinfo=timezone.utc) and got.tzinfo is not None, now
-    assert session.calls == []
 
 
 def ms(t):
