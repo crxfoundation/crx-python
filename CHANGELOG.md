@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.18
+
+- The test request worker (`python -m crx.test_request_worker`) accepts each test request on its own. A trade with no answer does not stop the accept of another request, and a scan does not wait for a trade status. Test requests from two makers at the same time each get an accept. `accept()` is unchanged: while an earlier accept has no answer, it raises `TradeUnknown`.
+
 ## 0.3.17
 
 - Mainnet needs no RPC of your own. With no `rpc_url=` and no `CRX_RPC`, the client sends its chain calls to `<base URL>/rpc` (`https://api.crxfx.com/rpc`, or the `base_url=` / `CRX_BASE` host) as gateway calls: the signed headers over the exact body bytes (`x-crx-address`, `x-crx-ts`, `x-crx-sig`, and `x-crx-signer` for a delegate), or the session token of a custodian signer. Redirects are not followed. `rpc_url=` or `CRX_RPC` replaces the route and gets no authentication. A `CRX_RPC` that holds `<` or `>` is ignored, with one log line. Testnet is unchanged.

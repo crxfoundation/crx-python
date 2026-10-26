@@ -26,8 +26,9 @@ class TestRequestWorker:
     """Accept the marked test requests of a dedicated taker client.
 
     Each scan reads the account's event history from the start and acts on each RFQ's current status.
-    A new accept passes the gateway's accept check, then signs like any trade. An accepted request is
-    posted again, unsigned, until it ends. Ended requests go to ``test-requests-done.json`` in the
+    A new accept passes the gateway's accept check, then signs like any trade. The scan does not wait for
+    the trade status, and a trade with no answer does not stop the accept of another request. An accepted
+    request is posted again, unsigned, until it ends. Ended requests go to ``test-requests-done.json`` in the
     client state directory, and later scans skip them.
 
     Args:
@@ -150,7 +151,7 @@ class TestRequestWorker:
         quote = c._quote_of(terms, dict(current, trade_template=check["trade_template"]))
         if not quote.rate.is_finite() or quote.rate <= 0:
             raise BadAnswer("the test quote rate is invalid")
-        return c.trade(quote, wait=c._settle_wait)
+        return c._accept(quote, 0.0, hold=False)
 
     def _recover(self, view: dict) -> None:
         """Ask the gateway to submit the stored accept. Sign nothing."""

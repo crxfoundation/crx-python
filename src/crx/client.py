@@ -963,7 +963,13 @@ class Client:
         self._need_seat()
         if not isinstance(quote, Quote):
             raise BadRequest("accept() takes the Quote that quote() returned")
-        wait = self._wait_of(wait)
+        return self._accept(quote, self._wait_of(wait), hold=True)
+
+    trade = accept
+
+    def _accept(self, quote: Quote, wait: float, *, hold: bool) -> Trade:
+        """Run ``accept()``. With ``hold`` False, an earlier accept with no answer does not stop an accept on
+        another RFQ: the test request worker takes each test request on its own."""
         with self._trade_mx:
             if quote.rfq_id in self._rejected:
                 raise QuoteRejected(f"rfq {quote.rfq_id} was rejected on this client; nothing signed. Request a "
@@ -971,7 +977,8 @@ class Client:
             rec = self._accepts.get(quote.rfq_id)
             if rec is not None:
                 return self._trade_again(rec, wait)
-            self._earlier_trades()
+            if hold:
+                self._earlier_trades()
             b = self._binder()
             rec = {"rfq_id": quote.rfq_id, "quote": quote, "end": quote.rfq["quote_expiry_max"], "final": False,
                    "told": False, "raw": {}, "word": "pending", "tx": None, "provisional": False}
@@ -991,8 +998,6 @@ class Client:
             rec.update(raw=t.raw, word=t.status, told=_answered(t.status), final=_final(view),
                        provisional=t.provisional, tx=t.tx)
             return t
-
-    trade = accept
 
     def reject(self, quote: Quote) -> None:
         """Reject a quote's RFQ on this client. Nothing is sent to the gateway.
