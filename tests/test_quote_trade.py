@@ -42,8 +42,8 @@ class Venue:
     ``{quote_id, sig}`` it opens the round when ``sig`` recovers to the seat.
     """
 
-    def __init__(self, session, health, markets, clock, pair="USD/MXN"):
-        self.s, self.clock = session, clock
+    def __init__(self, session, health, markets, clock, pair="USD/MXN", rfq=RFQ):
+        self.s, self.clock, self.rfq = session, clock, rfq
         self.chain = next(c for c in health["chains"] if c["key"] == "avax-fuji")
         self.sep = e7.domain_separator(CHAIN_ID, self.chain["core"])
         self.rfq_body = None
@@ -75,15 +75,15 @@ class Venue:
         self.script = [("sending", None), ("open", TXH)]
         session.routes[("GET", "/markets")] = open_market(markets, pair)
         session.routes[("POST", "/rfqs")] = self.open_rfq
-        session.routes[("GET", f"/rfqs/{RFQ}")] = self.view
-        session.routes[("POST", f"/rfqs/{RFQ}/accept")] = self.accept
+        session.routes[("GET", f"/rfqs/{rfq}")] = self.view
+        session.routes[("POST", f"/rfqs/{rfq}/accept")] = self.accept
 
     def open_rfq(self, req):
         b = self.rfq_body = req["body"]
         now = int(self.clock())
         self.qe = now + self.qe_ahead
         self.leg = e7.leg_id_for(HEAD, self.qe + self.tail_delta)
-        opened = {"rfq_id": RFQ, "leg_id": self.leg, "side": 1 if b["side"] == "buy" else -1, "expiry": b["expiry"],
+        opened = {"rfq_id": self.rfq, "leg_id": self.leg, "side": 1 if b["side"] == "buy" else -1, "expiry": b["expiry"],
                   "closes_at": now * 1000 + 120_000, "quote_expiry_max": self.qe, "status": "open", "kind": "open",
                   "client_rfq_id": b["client_rfq_id"]}
         for k, v in self.open_edit.items():
@@ -149,7 +149,7 @@ class Venue:
         if Account._recover_hash(typed_hash(self.draft["typed_data"]), signature=body["sig"]).lower() != seat:
             return (400, {"code": "invalid_signature", "error": "the signature does not recover to the seat"})
         self.sig, self.template = body["sig"], self.draft
-        return {"rfq_id": RFQ, "quote_id": qid, "client_quote_id": None}
+        return {"rfq_id": self.rfq, "quote_id": qid, "client_quote_id": None}
 
     def stale_answer(self, qid):
         named = qid if self.stale_quote_id is None else self.stale_quote_id
