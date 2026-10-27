@@ -140,6 +140,26 @@ def test_a_custodian_signer_sends_its_session_token(gw_session, tmp_path, accoun
     assert all(h["x-crx-session"] == "ab" * 32 and not SIGNED & set(h) for _, h, _ in node.seen)
 
 
+def test_a_401_on_the_session_token_mints_one_new_token_and_sends_once_more(gw_session, tmp_path, account):
+    me = account.address.lower()
+    tokens = [{"token": t * 32, "custody": me, "signer": me, "ttl_ms": 3_600_000} for t in ("ab", "cd", "ef", "01")]
+    gw_session.routes[("POST", "/session")] = tokens
+    node, refused = Node(CHAIN), {"ab" * 32, "ef" * 32, "01" * 32}
+
+    def rpc(req):
+        if req["headers"]["x-crx-session"] in refused:
+            return (401, {"code": "unauthorized", "error": "session token expired"})
+        return node(req)
+    gw_session.routes[("POST", "/rpc")] = rpc
+    c = main(gw_session, tmp_path, account, key=None, signer=Custodian(account))
+    assert c._rpc.int("eth_chainId") == 1
+    assert [x["headers"]["x-crx-session"] for x in rpc_calls(gw_session)] == ["ab" * 32, "cd" * 32]
+    gw_session.calls.clear()
+    with pytest.raises(crx.AuthError):  # the new token is refused too: no third post
+        main(gw_session, tmp_path, account, key=None, signer=Custodian(account))._rpc("eth_chainId")
+    assert gw_session.paths("POST") == ["/session", "/rpc", "/session", "/rpc"]
+
+
 @pytest.mark.parametrize("network,want", [("mainnet", BASE + "/rpc"), ("testnet", TESTNET_RPC)])
 def test_a_placeholder_crx_rpc_is_ignored_with_one_line(gw_session, tmp_path, account, monkeypatch, caplog,
                                                         network, want):
