@@ -3,6 +3,7 @@
 import dataclasses
 import re
 import time
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -11,6 +12,7 @@ from eth_account.messages import encode_typed_data
 from eth_utils import keccak
 
 import crx
+import crx._settle
 from .conftest import WEEK  # noqa: F401
 from crx import _eip712 as e7
 
@@ -420,3 +422,36 @@ def test_own_trade_refusals(tmp_path, account, health, clock):
         with pytest.raises(crx.RefusedToSign, match=why):
             own_check(tmp_path, account, health, clock, **edit)
         assert not (tmp_path / f"side-nonce-{account.address.lower()}").exists(), why  # no nonce kept, nothing signed
+
+
+def test_no_quote_in_the_window_raises_no_quotes_with_the_gateway_words(make_client, venue, session, clock):
+    venue.waited_view = lambda: {"quote": None, "quotes": [], "outcome": "no_quotes", "message": "No maker quoted."}
+    c = make_client(clock=clock)
+    with pytest.raises(crx.NoQuotes) as ei:
+        c.quote("USD/MXN", "buy", 25_000, settles=WEEK)
+    e = ei.value
+    assert type(e) is crx.NoQuotes and (e.code, e.outcome, e.served_message, e.details["rfq_id"]) == (
+        "no_quotes", "no_quotes", "No maker quoted.", RFQ)
+    assert str(e).endswith("(no_quotes: No maker quoted.)")
+    assert accepts(session) == [] and sent_nothing(session)
+
+
+SETTLES_AT = 1_793_721_600  # 2026-11-03 16:00 UTC
+SETTLES_FORMS = [  # settles, the instant or the words of the refusal
+    ("2026-11-03T16:00:00Z", SETTLES_AT), ("2026-11-03T17:00+01:00", SETTLES_AT), (SETTLES_AT, SETTLES_AT),
+    (datetime(2026, 11, 3, 13, tzinfo=timezone(timedelta(hours=-3))), SETTLES_AT),
+    ("2026-11-03T16:00:00", "needs a timezone"), (datetime(2026, 11, 3, 16), "needs a timezone"),
+    ("next Tuesday", "an exact UTC time"), (None, "settles is required"),
+]
+
+
+def test_settles_reads_iso_text_unix_seconds_and_aware_datetimes(make_client, markets):
+    m = make_client(key=False).market("USD/MXN")
+    now = datetime.fromtimestamp(SETTLES_AT - 7 * 86_400, timezone.utc)
+    for settles, out in SETTLES_FORMS:
+        if isinstance(out, int):
+            assert crx._settle.settlement(settles, m, now) == datetime.fromtimestamp(out, timezone.utc), settles
+        else:
+            with pytest.raises(crx.BadRequest, match=out) as ei:
+                crx._settle.settlement(settles, m, now)
+            assert ei.value.details == {"field": "settles"}, settles
