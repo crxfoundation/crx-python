@@ -1,8 +1,14 @@
 
+import copy
+import pickle
+from datetime import datetime, timezone
+from types import SimpleNamespace
+
 import pytest
 
 import crx
-from crx.errors import from_gateway
+from crx.errors import RETRY_AFTER_MAX, from_gateway, retry_after_secs
+from crx.signer import LocalSigner
 
 from .conftest import BASE, RPC
 
@@ -24,6 +30,7 @@ CODES = [
     (410, {"code": "quote_expired", "error": "gone"}, crx.QuoteExpired, "quote_expired"),
     (410, {"error": "gone"}, crx.QuoteExpired, "quote_expired"),
     (429, {"code": "rate_limited", "error": "slow", "details": {"retry_after_secs": 2}}, crx.RateLimited, "rate_limited"),
+    (429, {"error": "slow down"}, crx.RateLimited, "rate_limited"),
     (409, {"code": "quote_dropped", "error": "dropped", "details": {"best": None}}, crx.QuoteDropped, "quote_dropped"),
     (409, {"code": "quote_not_yours", "error": "not yours"}, crx.QuoteNotYours, "quote_not_yours"),
     (409, {"error": "quote_not_yours"}, crx.QuoteNotYours, "quote_not_yours"),
@@ -78,3 +85,28 @@ def test_client_init_refusals_hold_no_key(session, tmp_path, account, monkeypatc
         with pytest.raises(crx.ConfigError, match=words) as ei:
             crx.Client(key=key, base_url=BASE, rpc_url=RPC, session=session, state_dir=tmp_path / "s", **kw)
         assert key.removeprefix("0x") not in _frames_text(ei.value), kw
+
+
+NOW = datetime(2026, 9, 23, 14, 13, 20, tzinfo=timezone.utc)
+RETRY_AFTER = [  # Retry-After value, seconds
+    ("7", 7), ("Wed, 23 Sep 2026 14:13:50 GMT", 30), ("Wed, 23 Sep 2026 16:13:50 +0200", 30),
+    ("Wed, 23 Sep 2026 14:13:50", 30), ("Wed, 23 Sep 2026 14:00:00 GMT", 0), ("9999999999", RETRY_AFTER_MAX),
+    ("soon", None), (None, None),
+]
+
+
+def test_retry_after_reads_seconds_and_http_dates(monkeypatch):
+    """A Retry-After date is read against the clock; a date with no zone is UTC."""
+    monkeypatch.setattr(crx.errors, "time", SimpleNamespace(time=NOW.timestamp))
+    for value, secs in RETRY_AFTER:
+        assert retry_after_secs(value) == secs, value
+    e = from_gateway(429, {"error": "slow down"}, retry_after="Wed, 23 Sep 2026 14:13:50 GMT")
+    assert (type(e), e.retry_after, e.details["retry_after_secs"]) == (crx.RateLimited, 30, 30)
+
+
+def test_a_local_signer_shows_its_address_only_and_cannot_be_copied(account):
+    s = LocalSigner(account)
+    assert repr(s) == f"LocalSigner({account.address.lower()})"
+    for leak in (pickle.dumps, copy.deepcopy, copy.copy):
+        with pytest.raises(TypeError, match="holds a key"):
+            leak(s)
