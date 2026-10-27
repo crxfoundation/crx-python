@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import inspect
 import re
+import runpy
+from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 import pytest
 
@@ -93,3 +97,45 @@ def test_key_from_env_runs_every_step_without_asking(monkeypatch, capsys, fake):
         "5/6 Margin (IM)        GET  /balance              -> IM 3065.908525",
         "6/6 Withdraw 1000 USDC POST /withdraw             -> accepted",
     ]
+
+
+def test_no_key_exits_2_and_a_crx_error_exits_1(monkeypatch, capsys, tmp_path, fake):
+    monkeypatch.chdir(tmp_path)  # no .env file
+    monkeypatch.delenv("CRX_WALLET_PK", raising=False)
+    monkeypatch.delenv("CRX_WALLET_PK_FILE", raising=False)
+    monkeypatch.setattr(qs.getpass, "getpass", lambda prompt: "")
+    assert qs.main([]) == 2 and FakeClient.last is None
+    assert "No key." in capsys.readouterr().err
+    monkeypatch.setenv("CRX_WALLET_PK", KEY)
+
+    def short(self, amount):
+        raise crx.InsufficientCollateral("free collateral does not cover the call")
+    monkeypatch.setattr(FakeClient, "deposit", short)
+    assert qs.main([]) == 1
+    assert capsys.readouterr().err == "insufficient_collateral: free collateral does not cover the call\n"
+
+
+EXAMPLE = Path(__file__).resolve().parent.parent / "examples" / "quickstart.py"
+
+
+def test_the_example_calls_the_client_within_its_signatures(monkeypatch, capsys):
+    c = mock.create_autospec(crx.Client, instance=True)
+    c.address = "0x7638c8075e517393fa62008b5faa6c1ea832fe71"
+    c.deposit.return_value = SimpleNamespace(status="credited")
+    c.balance.return_value = SimpleNamespace(free="20000.000000", im="3065.908525")
+    c.quote.return_value = SimpleNamespace(pair="USD/BRL", rate="5.2562", rfq_id=RFQ)
+    c.accept.return_value = SimpleNamespace(status="open", rfq_id=RFQ)
+    c.positions.return_value = [SimpleNamespace(rfq_id=RFQ, pair="USD/BRL", side="buy", notional=25000,
+                                                entry_price="5.2562", status="open", unrealized_pnl="-1.204512")]
+    c.withdraw.return_value = SimpleNamespace(status="accepted")
+    made, real = [], inspect.signature(crx.Client)
+
+    def client(*args, **kwargs):
+        made.append(real.bind(*args, **kwargs).arguments)  # TypeError on an unknown name
+        return c
+    monkeypatch.setattr(crx, "Client", client)
+    runpy.run_path(str(EXAMPLE), run_name="__main__")
+    assert made == [{"network": "mainnet", "allow_mainnet": True, "base_url": "https://api.crxfx.com"}]
+    assert [name for name, *_ in c.mock_calls] == [
+        "deposit", "balance", "quote", "accept", "positions", "balance", "withdraw"]
+    assert len(capsys.readouterr().out.splitlines()) == 7
