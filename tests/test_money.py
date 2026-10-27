@@ -493,3 +493,77 @@ def test_amount_parsing():
             with pytest.raises(crx.BadRequest) as e:
                 crx.client._amount(value)
             assert out in str(e.value), value
+
+
+def utc(text):
+    return datetime.fromisoformat(text).replace(tzinfo=timezone.utc)
+
+
+def test_next_check_is_the_next_05_past_the_hour_on_testnet(make_client, session):
+    for now, at in [("2026-10-01T08:04:59", "2026-10-01T08:05:00"), ("2026-10-01T08:05:00", "2026-10-01T09:05:00"),
+                    ("2026-10-01T23:58:30", "2026-10-02T00:05:00")]:
+        assert make_client(key=False, clock=Clock(utc(now).timestamp())).next_check() == utc(at), now
+    assert session.calls == []
+
+
+def test_market_reads_one_pair_and_refuses_a_pair_not_offered_here(make_client, session, markets):
+    for row in markets["markets"]:
+        if row["pair"] == "USD/PHP":
+            row["chains"] = [{"chain": "ethereum", "max_premium_bps": 200}]
+    session.routes[("GET", "/markets")] = markets
+    c = make_client(key=False)
+    m = c.market("usdmxn")
+    assert (m.pair, m.min_notional, m.paused) == ("USD/MXN", Decimal(10000), False)
+    for pair in ("USD/PHP", "EUR/USD"):  # listed on another chain only; not listed
+        with pytest.raises(crx.MarketPaused) as ei:
+            c.market(pair)
+        assert ei.value.details == {"pair": pair}, pair
+
+
+def test_next_valid_end_moves_an_end_inside_the_long_close_to_its_end(make_client, session, markets):
+    t0 = 1_790_000_000
+    for row in markets["markets"]:
+        row["next_long_close"] = {"starts_at": (t0 + 3_600) * 1000, "ends_at": (t0 + 7_200) * 1000}
+    session.routes[("GET", "/markets")] = markets
+    m = make_client(key=False, clock=Clock(t0)).market("USD/MXN")
+    at = lambda s: datetime.fromtimestamp(t0 + s, timezone.utc)  # noqa: E731
+    assert m.next_long_close == (at(3_600), at(7_200))
+    assert [m.next_valid_end(s) for s in (600, 3_600, 7_199, 7_300)] == [at(600), at(7_200), at(7_200), at(7_300)]
+
+
+def test_balance_reads_the_seat_and_refuses_another_account(make_client, session, account, tmp_path, monkeypatch):
+    other = dict(balance_body(account), account="0x" + "12" * 20)
+    session.routes[("GET", "/balance")] = [balance_body(account), other]
+    c = make_client()
+    b = c.balance()
+    assert (b.account, b.state, b.free, b.im, b.open_legs, b.withdraw_live, b.withdraw_nonce, b.as_of_block) == (
+        account.address.lower(), "live", Decimal("20000.000000"), Decimal("100.000000"), 2, False, 3, 52_000_123)
+    assert b.as_of == datetime.fromtimestamp(1_790_000_000, timezone.utc)
+    with pytest.raises(crx.BadAnswer, match="another account"):
+        c.balance()
+    assert [x["query"] for x in session.calls] == [{"chain": ["avax-fuji"]}] * 2
+    monkeypatch.chdir(tmp_path)  # no .env file
+    monkeypatch.delenv("CRX_WALLET_PK", raising=False)
+    monkeypatch.delenv("CRX_WALLET_PK_FILE", raising=False)
+    with pytest.raises(crx.ConfigError, match="needs the seat key"):
+        make_client(key=False).balance()
+    assert len(session.calls) == 2
+
+
+def test_positions_read_the_entry_price_mark_and_pnl(make_client, session):
+    row = {"trade_id": "0x01", "rfq_id": "0x02", "pair": "USD/MXN", "side": 1, "notional": "25000.000000",
+           "rate": "18.700000", "status": "open", "entry_price": "18.700000", "mark_price": "18.750000",
+           "mark_time": 1_790_000_000_123, "unrealized_pnl": "-12.345678", "settlement": 1_790_600_000_000}
+    unmarked = dict(row, trade_id="0x03", entry_price=None, mark_price=None, mark_time=None, unrealized_pnl=None,
+                    rate="18.6", status="settled")
+    session.routes[("GET", "/positions")] = [{"positions": [row, unmarked]}, {"positions": None}]
+    c = make_client()
+    p, q = c.positions()
+    assert (p.side, p.entry_price, p.mark_price, p.unrealized_pnl) == (
+        "buy", Decimal("18.700000"), Decimal("18.750000"), Decimal("-12.345678"))
+    assert (p.mark_time, p.settles_at) == (datetime.fromtimestamp(1_790_000_000.123, timezone.utc),
+                                           datetime.fromtimestamp(1_790_600_000, timezone.utc))
+    # A null entry price reads the rate, and null mark keys read None.
+    assert (q.entry_price, q.mark_price, q.mark_time, q.unrealized_pnl) == (Decimal("18.6"), None, None, None)
+    with pytest.raises(crx.BadAnswer, match="lists no positions"):
+        c.positions()
