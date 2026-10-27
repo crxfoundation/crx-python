@@ -33,3 +33,17 @@ def test_viewers_and_remove_viewer(make_client, session, account):
     assert c.remove_viewer(v) is None
     assert [(call["method"], call["path"]) for call in session.calls] == [("GET", "/viewers")] * 2 + [
         ("DELETE", f"/viewers/{v}")]
+
+
+def test_add_viewer_grants_read_access_with_one_signed_put(make_client, session, account):
+    v, me = Account.create().address.lower(), account.address.lower()
+    grant = {"account": me, "viewer": v, "granted_by": me, "granted_at": 1_790_000_000_000}
+    session.routes[("PUT", f"/viewers/{v}")] = [(201, grant), (200, grant)]
+    c = make_client()
+    first, again = c.add_viewer(v.upper().replace("0X", "0x")), c.add_viewer(v)
+    assert first == again and (first.address, first.granted_by, first.granted_at.timestamp()) == (v, me, 1_790_000_000)
+    assert [(x["method"], x["path"], x["raw"]) for x in session.calls] == [("PUT", f"/viewers/{v}", b"")] * 2
+    assert all(x["headers"]["x-crx-address"] == me and "x-crx-sig" in x["headers"] for x in session.calls)
+    with pytest.raises(crx.BadRequest, match="viewer is not a wallet address"):
+        c.add_viewer("0x12")
+    assert len(session.calls) == 2

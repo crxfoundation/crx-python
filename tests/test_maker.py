@@ -393,3 +393,16 @@ def test_quote_live_quotes_new_rfqs_and_returns_the_trade(maker, gw, session, cl
         "trade 0xa1a1a1a1 USD/BRL sell 5000000.000000 5.41 open",
     ]
     assert len(gw.bodies) == 1 and deletes(session) == []
+
+
+def test_drop_quote_ends_the_leg_and_the_next_quote_takes_a_new_one(maker, gw, session):
+    sent = maker.send_quote(_maker.rfq_of(frame(), 7), "5.41")
+    d = maker.drop_quote(sent)
+    assert (d.rfq_id, d.leg_id, d.at.timestamp(), maker._legs) == (RFQ, sent.leg_id, T0, {})
+    assert [x["path"] for x in deletes(session)] == [f"/rfqs/{RFQ}/quotes/{sent.leg_id}"]
+    again = maker.send_quote(_maker.rfq_of(frame(), 7), "5.41")
+    assert again.leg_id != sent.leg_id and gw.rows[-1]["status"] == "quoted"
+    session.routes[("DELETE", f"/rfqs/{RFQ}/quotes/{again.leg_id}")] = {"dropped": True, "leg_id": sent.leg_id}
+    with pytest.raises(crx.BadAnswer, match="does not name this leg"):
+        maker.drop_quote(again)
+    assert maker._legs == {RFQ: again.leg_id}
