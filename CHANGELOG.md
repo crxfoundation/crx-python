@@ -3,6 +3,8 @@
 ## 0.3.18
 
 - The test request worker (`python -m crx.test_request_worker`) accepts each test request on its own. A trade with no answer does not stop the accept of another request, and a scan does not wait for a trade status. Test requests from two makers at the same time each get an accept. `accept()` is unchanged: while an earlier accept has no answer, it raises `TradeUnknown`.
+- `crx.RelayUnavailable` is removed. It was a second name for `crx.ServiceUnavailable`: catch that class. The SDK no longer reads the gateway code `relay_unavailable`. The gateway sends `service_unavailable`.
+- `examples/quickstart.py` is the script of the API Quickstart page. It deposits 100 USDC and requests a quote for 100 USD of USD/MXN. It accepts the quote at 19.5 or lower, reads the positions and withdraws 50 USDC. Before, it deposited 20,000 USDC and traded 25,000 USD of USD/BRL. `python -m crx.quickstart` on testnet is unchanged.
 
 ## 0.3.17
 
