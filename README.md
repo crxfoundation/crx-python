@@ -29,7 +29,7 @@ One `NAME=VALUE` per line; `#` starts a comment; quotes are optional. Nothing is
 CRX_WALLET_PK=0x... python -m crx.quickstart
 ```
 
-The script runs the API Quickstart on testnet: deposit, request a quote, accept, read positions and margin, withdraw. With no key set, it asks for the key and hides the input. `examples/quickstart.py` runs the same steps on mainnet. Each step prints the route it calls and its result:
+The script runs the API Quickstart on testnet: deposit, request a quote, accept, read positions and margin, withdraw. With no key set, it asks for the key and hides the input. Each step prints the route it calls and its result:
 
 ```text
 15:40:18 0x656e3a8c4f1d2b07e9a65c3d4b8f2e1a90c76bed
@@ -40,6 +40,8 @@ The script runs the API Quickstart on testnet: deposit, request a quote, accept,
 15:41:10 5/6 Margin (IM)        GET  /balance              -> IM 3059.657629
 15:41:34 6/6 Withdraw 1000 USDC POST /withdraw             -> accepted
 ```
+
+On mainnet, start with the script of the [API Quickstart](https://discover.crxfx.com/api-docs/api-overview) page on Discover. `examples/quickstart.py` is the same script. It deposits 100 USDC and requests a quote for 100 USD of USD/MXN. It accepts the quote at 19.5 or lower, reads the positions and withdraws 50 USDC.
 
 ## Tasks
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 import re
 import runpy
+from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -120,14 +121,15 @@ EXAMPLE = Path(__file__).resolve().parent.parent / "examples" / "quickstart.py"
 
 def test_the_example_calls_the_client_within_its_signatures(monkeypatch, capsys):
     c = mock.create_autospec(crx.Client, instance=True)
-    c.address = "0x7638c8075e517393fa62008b5faa6c1ea832fe71"
-    c.deposit.return_value = SimpleNamespace(status="credited")
-    c.balance.return_value = SimpleNamespace(free="20000.000000", im="3065.908525")
-    c.quote.return_value = SimpleNamespace(pair="USD/BRL", rate="5.2562", rfq_id=RFQ)
+    c.deposit.return_value = SimpleNamespace(status="credited", counted=True)
+    c.balance.return_value = SimpleNamespace(free=Decimal("100.000000"))
+    c.quote.return_value = SimpleNamespace(pair="USD/MXN", side="buy", notional=Decimal("100"), rate=Decimal("18.4521"),
+                                           settles_at=None, closes_at=None, rfq_id=RFQ)
     c.accept.return_value = SimpleNamespace(status="open", rfq_id=RFQ)
-    c.positions.return_value = [SimpleNamespace(rfq_id=RFQ, pair="USD/BRL", side="buy", notional=25000,
-                                                entry_price="5.2562", status="open", unrealized_pnl="-1.204512")]
-    c.withdraw.return_value = SimpleNamespace(status="accepted")
+    c.positions.return_value = [SimpleNamespace(pair="USD/MXN", side="buy", notional=Decimal("100"),
+                                                entry_price=Decimal("18.4521"), settles_at=None,
+                                                unrealized_pnl=Decimal("-0.012345"))]
+    c.withdraw.return_value = SimpleNamespace(amount=Decimal("50"), status="accepted")
     made, real = [], inspect.signature(crx.Client)
 
     def client(*args, **kwargs):
@@ -135,7 +137,8 @@ def test_the_example_calls_the_client_within_its_signatures(monkeypatch, capsys)
         return c
     monkeypatch.setattr(crx, "Client", client)
     runpy.run_path(str(EXAMPLE), run_name="__main__")
-    assert made == [{"network": "mainnet", "allow_mainnet": True, "base_url": "https://api.crxfx.com"}]
-    assert [name for name, *_ in c.mock_calls] == [
-        "deposit", "balance", "quote", "accept", "positions", "balance", "withdraw"]
-    assert len(capsys.readouterr().out.splitlines()) == 7
+    assert made == [{"network": "mainnet", "allow_mainnet": True}]
+    assert [name for name, *_ in c.mock_calls] == ["deposit", "balance", "quote", "accept", "positions", "withdraw"]
+    assert c.deposit.call_args == mock.call(100) and c.withdraw.call_args == mock.call(50)
+    assert c.quote.call_args.args == ("USD/MXN", "buy", 100)
+    assert capsys.readouterr().out.splitlines()[0] == "Validated 100.000000"
