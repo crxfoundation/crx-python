@@ -46,10 +46,15 @@ def stamp(now_ms: int) -> int:
         return _last_stamp
 
 
-def rest_message(method: str, path: str, custody: str, signer: str, ts: int, raw: bytes) -> str:
-    """Build the CRX-REST-LOGIN message. ``Body`` is the keccak256 of the exact body bytes."""
-    lines = ["CRX-REST-LOGIN", "Audience: crx-gateway", f"Method: {method}", f"Path: {path}",
-             f"Custody: {custody.lower()}"]
+def rest_message(
+    method: str, path: str, custody: str, signer: str, ts: int, raw: bytes, chain_id: int | None = None,
+) -> str:
+    """Build the CRX-REST-LOGIN message. ``Body`` is the keccak256 of the exact body bytes.
+    With ``chain_id``, ``Chain: <id>`` follows ``Audience``."""
+    lines = ["CRX-REST-LOGIN", "Audience: crx-gateway"]
+    if chain_id is not None:
+        lines.append(f"Chain: {int(chain_id)}")
+    lines += [f"Method: {method}", f"Path: {path}", f"Custody: {custody.lower()}"]
     if AUTH_SHAPE == "signer_line":
         lines.append(f"Signer: {signer.lower()}")
     lines += [f"Timestamp: {ts}", f"Body: 0x{keccak(raw).hex()}"]
@@ -77,6 +82,7 @@ class Gateway:
         self.base_url = base_url.rstrip("/")
         self._signer = as_signer(account)
         self.custody: str | None = None  # account read as a viewer, None for the signer's own seat
+        self.chain_id: int | None = None  # the signed Chain line and x-crx-chain; None on chain 1
         self._session = session
         self._timeout = timeout
         self.login = login
@@ -99,14 +105,17 @@ class Gateway:
         return host_of(self.base_url)
 
     def headers(self, method: str, path: str, raw: bytes = b"") -> dict[str, str]:
-        """Return the signed auth headers, with ``x-crx-signer`` when the signer is not the custody."""
+        """Return the signed auth headers, with ``x-crx-signer`` when the signer is not the custody and
+        ``x-crx-chain`` when ``chain_id`` is set."""
         if self._signer is None:
             raise ConfigError("this call needs the seat key: set CRX_WALLET_PK or pass key=")
         signer = self._signer.address.lower()
         custody = self.custody or signer
         ts = stamp(int(self._clock() * 1000))
-        msg = rest_message(method, path, custody, signer, ts, raw)
+        msg = rest_message(method, path, custody, signer, ts, raw, self.chain_id)
         out = {"x-crx-address": custody, "x-crx-ts": str(ts)}
+        if self.chain_id is not None:
+            out["x-crx-chain"] = str(int(self.chain_id))
         if signer != custody:
             out["x-crx-signer"] = signer
         out["x-crx-sig"] = sign_login(self._signer, msg)

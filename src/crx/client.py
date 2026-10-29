@@ -447,6 +447,8 @@ class Client:
         except ConfigError:
             key = None
             raise
+        # Off chain 1 each signed call names its chain; on chain 1 the message has no Chain line.
+        self._gw.chain_id = None if net["chain_id"] == 1 else net["chain_id"]
         if not own_rpc and rpc == GATEWAY_RPC:
             self._rpc = Rpc(self._gw.base_url + GATEWAY_PATH, self._session, max(timeout, 20.0), gateway=self._gw)
         else:

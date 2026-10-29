@@ -80,7 +80,9 @@ def test_the_gateway_over_a_socket_signs_reads_and_follows_no_redirect(server, h
     assert c.balance().free == Decimal("12.500000")
     method, path, h, body = server.seen[0]
     assert (method, path, body, h["x-crx-address"]) == ("GET", "/balance?chain=avax-fuji", b"", me)
-    msg = rest_message("GET", "/balance", me, me, int(h["x-crx-ts"]), b"")
+    assert h["x-crx-chain"] == "43113"
+    msg = rest_message("GET", "/balance", me, me, int(h["x-crx-ts"]), b"", 43113)
+    assert msg.split("\n")[2] == "Chain: 43113"
     assert Account.recover_message(encode_defunct(text=msg), signature=h["x-crx-sig"]).lower() == me
     with pytest.raises(crx.CrxError) as ei:
         c.positions()
