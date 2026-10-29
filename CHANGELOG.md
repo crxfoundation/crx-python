@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.19
+
+- On testnet, each signed gateway call names its chain. The signed message carries `Chain: 43113` after `Audience: crx-gateway`, and the call sends the header `x-crx-chain: 43113`. The Sandbox gateway refuses a signed call that names no chain (401). On mainnet (chain 1) the signed message and the headers are unchanged.
+
 ## 0.3.18
 
 - The test request worker (`python -m crx.test_request_worker`) accepts each test request on its own. A trade with no answer does not stop the accept of another request, and a scan does not wait for a trade status. Test requests from two makers at the same time each get an accept. `accept()` is unchanged: while an earlier accept has no answer, it raises `TradeUnknown`.
