@@ -34,8 +34,8 @@ from .errors import (
     WithdrawInProgress, WithdrawUnknown, clean,
 )
 from .models import (
-    Ask, Balance, Close, Deposit, Drop, Event, MakerQuote, Market, Position, Quote, Rfq, TakeOver, Trade, Viewer,
-    Withdraw, dec, _final, _provisional, ms_to_dt, side_word,
+    Ask, Balance, Close, Deposit, Drop, Event, MakerQuote, Market, Position, Quote, Rfq, Trade, Viewer, Withdraw,
+    dec, _final, _provisional, ms_to_dt, side_word,
 )
 
 log = logging.getLogger("crx")
@@ -1086,8 +1086,10 @@ class Client:
             client_quote_id: Label for the answer. Defaults to a new id.
 
         Raises:
-            QuoteExpired: The round ended without this answer.
+            QuoteExpired: The round ended without this answer, or took its last answer before this one.
             RefusedToSign: The close differs from the trade or the rate. The SDK declines it. Nothing is signed.
+            CrxError: Code ``conflict`` when the round already picked its quote, or the seat is due a forced
+                close-out; code ``unknown_rfq`` when the request is not this seat's.
         """
         self._need_seat()
         return _close.answer(self, request, rate, self._wait_of(wait), client_quote_id=client_quote_id)
@@ -1636,7 +1638,7 @@ class Client:
 
     def rfqs(
         self, *, after: int | None = None, wait: float | None = None, poll: float = 1.0,
-        stop: threading.Event | None = None, only: Ask | str | None = None, kind: str = "open",
+        stop: threading.Event | None = None, only: Ask | str | None = None,
     ) -> Iterator[Rfq]:
         """Yield the open RFQs this seat can quote, as they arrive.
 
@@ -1649,16 +1651,13 @@ class Client:
             poll: Seconds between reads. Defaults to 1. Reads share a limit of 5 requests a second per IP.
             stop: A ``threading.Event`` that ends the stream when set.
             only: An ``Ask`` or RFQ id. Yield that RFQ alone, then end.
-            kind: ``"open"`` (default), or ``"close"`` for the close RFQs ``take_over()`` quotes.
 
         Raises:
             NoQuotes: With ``only``, ``wait`` ends before the RFQ arrives.
         """
         self._need_seat()
-        if kind not in ("open", "close"):
-            raise BadRequest('kind is "open" or "close"')
         self._keep_live()
-        return _maker.stream(self, after, wait, poll, stop, only, kind)
+        return _maker.stream(self, after, wait, poll, stop, only)
 
     def rfq(self, rfq_id: str) -> Rfq:
         """Return one RFQ as this seat sees it.
@@ -1739,31 +1738,6 @@ class Client:
         self._need_seat()
         self._keep_live()
         return _maker.drop(self, quote, leg_id)
-
-    def take_over(self, rfq: Rfq | str, rate: Any, *, wait: float | None = None,
-                  client_quote_id: str | None = None) -> TakeOver:
-        """Quote a close RFQ at ``rate``. When the quote wins, take over the closing seat's side of the trade.
-
-        The quote is a price only. When the round picks it, the SDK checks the item against the RFQ and the
-        rate, then signs it within the round's sign window. On a close-out the seat enters at the mark of the
-        hourly check that takes the close, and the closed-out seat owes it the fee of its rate against the
-        round's mark, at most 2 % of the leg's gross. The SDK checks the fee against the mark the gateway
-        serves; it cannot check that mark. CRX sends the transaction and pays the network fee.
-
-        Args:
-            rfq: A close ``Rfq`` from ``rfqs(kind="close")``, or its id.
-            rate: The rate for ``rfq.pair``, up to 6 decimals.
-            wait: Seconds to wait for ``open`` or ``refused``. Default 30 minutes on testnet, 15 on mainnet.
-            client_quote_id: Label for the quote. Defaults to a new id.
-
-        Raises:
-            QuoteExpired: The round picked another quote, or ended.
-            RefusedToSign: The item differs from the RFQ or the rate. The SDK declines it. Nothing is signed.
-            InsufficientCollateral: Free collateral does not cover the trade at ``rate``.
-        """
-        self._need_seat()
-        self._keep_live()
-        return _close.take_over(self, rfq, rate, self._wait_of(wait), client_quote_id=client_quote_id)
 
     def quote_live(self, price: Callable[[Rfq], Any], seconds: float = 3600, *,
                    log: Callable[[str], None] | None = print) -> list[Trade]:

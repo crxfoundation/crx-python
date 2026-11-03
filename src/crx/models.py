@@ -431,25 +431,3 @@ class Close:
     final: bool = False
     counterparty: bool = False
 
-
-@dataclass(frozen=True)
-class TakeOver:
-    """The result of ``Client.take_over``.
-
-    Attributes:
-        trade_id: The trade the seat takes over, once the tape names it. ``positions()`` lists it once ``open``.
-        side: The seat's side in the base currency.
-        rate: The seat's quoted rate.
-        status: ``pending`` until the trade moves to the seat, ``open``, or ``refused``. ``unsigned`` when the
-            gateway took no signature inside the round's sign window.
-    """
-
-    rfq_id: str
-    quote_id: str
-    trade_id: str | None
-    pair: str
-    side: str
-    notional: Decimal
-    rate: Decimal
-    status: str
-    raw: dict = field(repr=False, compare=False)

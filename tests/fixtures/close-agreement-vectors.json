@@ -1,0 +1,666 @@
+{
+ "about": "One close with the counterparty, both seats on this SDK, against crx-api branch mutual-close 9e3ec66d served on 127.0.0.1 (2026-11-03). Each body is as the gateway served it; each sig is the one the gateway took (200). Keys: format-vectors-v5.json taker (exiting) and other (remaining).",
+ "health": {
+  "boot_checks": "passed",
+  "chains": [
+   {
+    "base_token": null,
+    "chain_id": 43113,
+    "core": "0xe0d1140908ee9622f7e4f5a43849bff28fe5c2c4",
+    "deploy_block": null,
+    "domain": "0x2a21112d69c50af6f48caa18b41a5cf6d3bdeae8fce0a94041cbfb12dc29ff04",
+    "domain_verified": true,
+    "enabled": true,
+    "fold_im_vkey": null,
+    "guest_drift": null,
+    "im_vkey": null,
+    "key": "avax-fuji",
+    "lens": "0xe0d1140908ee9622f7e4f5a43849bff28fe5c2c4"
+   }
+  ],
+  "decode_stalled_at": null,
+  "draining": false,
+  "hard_pause_lifted_at": null,
+  "healthy": true,
+  "status": "ok",
+  "terms_typehash": "0xa5d56fb3daa45b30008eca264550485b872be3e5ec8a8d447e65e725b7ffbf38",
+  "trade_type": "Trade(string summary,string pair,string side,uint256 notionalE6,uint64 rateE6,int16 premiumBps,uint40 maturity,bytes32 pairC,bytes32 ownLegId,uint64 ownNonce,bytes32 ownSalt)",
+  "trade_typehash": "0x2a4f432dd51178481baaacab72453a149e29560e5d366c2ebb93bb767fab4630"
+ },
+ "positions": {
+  "exiting": {
+   "positions": [
+    {
+     "as_of_block": null,
+     "awaiting_fixing": false,
+     "chain": "avax-fuji",
+     "entry_price": "156.432100",
+     "final": false,
+     "leg_id": "0x8ee5e5ba0e6e1f2f77c6a68c4740b1d8c0be8a52cfa41eee000000006ae9b508",
+     "mark_price": null,
+     "mark_time": null,
+     "notional": "1500000.00",
+     "pair": "USD/JPY",
+     "pair_status": "active",
+     "premium_bps": 0,
+     "proven": false,
+     "rate": "156.432100",
+     "rfq_id": "0x93ebe81784d9a207055031d94dd34b74b3444d125e9100fed9683c53ab3ecc72",
+     "settlement": 1796292558000,
+     "side": 1,
+     "status": "pending",
+     "trade_id": "0xc7af32f8cdcdaf125aa591800e8c377dc0da9bfe5dd9c2a6011dafc524978497",
+     "unrealized_pnl": null
+    }
+   ]
+  },
+  "remaining": {
+   "positions": [
+    {
+     "as_of_block": null,
+     "awaiting_fixing": false,
+     "chain": "avax-fuji",
+     "entry_price": "156.432100",
+     "final": false,
+     "leg_id": "0x29131202a86ae6bb3de73ceeebf8dee5c88188f2320c550869f30f6d3a363b95",
+     "mark_price": null,
+     "mark_time": null,
+     "notional": "1500000.00",
+     "pair": "USD/JPY",
+     "pair_status": "active",
+     "premium_bps": 0,
+     "proven": false,
+     "rate": "156.432100",
+     "rfq_id": "0x93ebe81784d9a207055031d94dd34b74b3444d125e9100fed9683c53ab3ecc72",
+     "settlement": 1796292558000,
+     "side": -1,
+     "status": "pending",
+     "trade_id": "0xc7af32f8cdcdaf125aa591800e8c377dc0da9bfe5dd9c2a6011dafc524978497",
+     "unrealized_pnl": null
+    }
+   ]
+  }
+ },
+ "tape_remaining": [
+  {
+   "data": {
+    "chain": "avax-fuji",
+    "closes_at": 1793700678554,
+    "expiry": 1796292558000,
+    "im_estimate": null,
+    "notional": "1500000.00",
+    "pair": "USDJPY",
+    "premium_bps": 0,
+    "quote_expiry_max": 1793701128,
+    "rfq_id": "0x93ebe81784d9a207055031d94dd34b74b3444d125e9100fed9683c53ab3ecc72",
+    "side": -1,
+    "taker_ref": "0x6d80d217b3d83d5890c0f01ef4f7493de18ab89c96b00d6fde7fe4a1e53e9f4a"
+   },
+   "seq": 1,
+   "ts": 1793700558554,
+   "type": "rfq.opened"
+  },
+  {
+   "data": {
+    "client_quote_id": "o-m-209",
+    "expires_at": 1793701158554,
+    "leg_hash": "0x29131202a86ae6bb3de73ceeebf8dee5c88188f2320c550869f30f6d3a363b95",
+    "leg_id": "0x29131202a86ae6bb3de73ceeebf8dee5c88188f2320c550869f30f6d3a363b95",
+    "quote_id": "0x29131202a86ae6bb3de73ceeebf8dee5c88188f2320c550869f30f6d3a363b95",
+    "rate": "156.432100",
+    "rfq_id": "0x93ebe81784d9a207055031d94dd34b74b3444d125e9100fed9683c53ab3ecc72",
+    "side": -1,
+    "status": "quoted"
+   },
+   "seq": 2,
+   "ts": 1793700558555,
+   "type": "rfq.quoted"
+  },
+  {
+   "data": {
+    "client_quote_id": "o-m-209",
+    "quote_id": "0x29131202a86ae6bb3de73ceeebf8dee5c88188f2320c550869f30f6d3a363b95",
+    "rfq_id": "0x93ebe81784d9a207055031d94dd34b74b3444d125e9100fed9683c53ab3ecc72"
+   },
+   "seq": 3,
+   "ts": 1793700558556,
+   "type": "rfq.accepted"
+  },
+  {
+   "data": {
+    "expiry": 1796292558000,
+    "final": false,
+    "leg_id": "0x29131202a86ae6bb3de73ceeebf8dee5c88188f2320c550869f30f6d3a363b95",
+    "notional": "1500000.00",
+    "premium_bps": 0,
+    "quote_expiry": 1793704158554,
+    "rate": "156.432100",
+    "rfq_id": "0x93ebe81784d9a207055031d94dd34b74b3444d125e9100fed9683c53ab3ecc72",
+    "side": -1,
+    "trade_id": "0xc7af32f8cdcdaf125aa591800e8c377dc0da9bfe5dd9c2a6011dafc524978497"
+   },
+   "seq": 4,
+   "ts": 1793700558557,
+   "type": "trade.opened"
+  },
+  {
+   "data": {
+    "answer_by": 1793700597371,
+    "expiry": 1796292558000,
+    "notional": "1500000.00",
+    "pair": "USDJPY",
+    "quote_expiry": 1793786367372,
+    "rfq_id": "0x06bafccd8d7658742951018d92785c48977600dde7225696c7b9260fd670206f",
+    "trade_id": "0xc7af32f8cdcdaf125aa591800e8c377dc0da9bfe5dd9c2a6011dafc524978497"
+   },
+   "seq": 5,
+   "ts": 1793700567382,
+   "type": "trade.close_requested"
+  },
+  {
+   "data": {
+    "client_quote_id": "rt-answer-1",
+    "expires_at": 1793786367372,
+    "leg_id": "0xb2f2c5c7d9ce96398bd0cb0e825134736d8b2927551ae9e8c8d451520c744b3b",
+    "quote_id": "0xd027fb8cd515a6112f426d9fe9b61c6f3f2b6b2e4c562316dc9ecf8c471aab45",
+    "rate": "156.5",
+    "rfq_id": "0x06bafccd8d7658742951018d92785c48977600dde7225696c7b9260fd670206f",
+    "status": "quoted"
+   },
+   "seq": 6,
+   "ts": 1793700567427,
+   "type": "rfq.quoted"
+  },
+  {
+   "data": {
+    "deadline": 1793701167,
+    "digest_kind": "allocation_consent",
+    "leg_id": "0xb2f2c5c7d9ce96398bd0cb0e825134736d8b2927551ae9e8c8d451520c744b3b",
+    "novation_id": "0xa5904626b1ab0226af195c5c2d918ccb64bd479650ea45e92fd7cfe6ac39e567",
+    "quote_id": "0xd027fb8cd515a6112f426d9fe9b61c6f3f2b6b2e4c562316dc9ecf8c471aab45",
+    "rfq_id": "0x06bafccd8d7658742951018d92785c48977600dde7225696c7b9260fd670206f",
+    "role": "remaining"
+   },
+   "seq": 7,
+   "ts": 1793700597892,
+   "type": "rfq.awarded"
+  },
+  {
+   "data": {
+    "leg_id": "0xb2f2c5c7d9ce96398bd0cb0e825134736d8b2927551ae9e8c8d451520c744b3b",
+    "novation_id": "0xa5904626b1ab0226af195c5c2d918ccb64bd479650ea45e92fd7cfe6ac39e567",
+    "rfq_id": "0x06bafccd8d7658742951018d92785c48977600dde7225696c7b9260fd670206f"
+   },
+   "seq": 8,
+   "ts": 1793700599354,
+   "type": "rfq.armed"
+  },
+  {
+   "data": {
+    "close_rate": "156.500000",
+    "ended": true,
+    "rfq_id": "0x06bafccd8d7658742951018d92785c48977600dde7225696c7b9260fd670206f",
+    "trade_id": "0xc7af32f8cdcdaf125aa591800e8c377dc0da9bfe5dd9c2a6011dafc524978497"
+   },
+   "seq": 9,
+   "ts": 1793700601463,
+   "type": "trade.closed"
+  }
+ ],
+ "open": {
+  "sent": {
+   "kind": "close",
+   "position_id": "0xc7af32f8cdcdaf125aa591800e8c377dc0da9bfe5dd9c2a6011dafc524978497",
+   "client_rfq_id": "close-8019d6cf99904abe8566c65c8f764abb"
+  },
+  "body": {
+   "client_rfq_id": "close-8019d6cf99904abe8566c65c8f764abb",
+   "closes_at": 1793700687372,
+   "expiry": 1796292558000,
+   "kind": "close",
+   "position_id": "0xc7af32f8cdcdaf125aa591800e8c377dc0da9bfe5dd9c2a6011dafc524978497",
+   "rfq_id": "0x06bafccd8d7658742951018d92785c48977600dde7225696c7b9260fd670206f",
+   "side": -1,
+   "status": "open"
+  }
+ },
+ "views_exiting": [
+  {
+   "chain": "avax-fuji",
+   "client_rfq_id": "close-8019d6cf99904abe8566c65c8f764abb",
+   "closes_at": 1793700687372,
+   "expiry": 1796292558000,
+   "kind": "close",
+   "leg_id": "0xf6e93d13f9e2f3a1cfb0cacf039448d96b85ab1b9586f4e2000000006ae9b511",
+   "notional": "1500000.00",
+   "pair": "USDJPY",
+   "position_id": "0xc7af32f8cdcdaf125aa591800e8c377dc0da9bfe5dd9c2a6011dafc524978497",
+   "premium_bps": 0,
+   "quote": null,
+   "quotes": [],
+   "rfq_id": "0x06bafccd8d7658742951018d92785c48977600dde7225696c7b9260fd670206f",
+   "side": -1,
+   "status": "open"
+  },
+  {
+   "chain": "avax-fuji",
+   "client_rfq_id": "close-8019d6cf99904abe8566c65c8f764abb",
+   "closes_at": 1793700687372,
+   "expiry": 1796292558000,
+   "kind": "close",
+   "leg_id": "0xf6e93d13f9e2f3a1cfb0cacf039448d96b85ab1b9586f4e2000000006ae9b511",
+   "notional": "1500000.00",
+   "pair": "USDJPY",
+   "position_id": "0xc7af32f8cdcdaf125aa591800e8c377dc0da9bfe5dd9c2a6011dafc524978497",
+   "premium_bps": 0,
+   "quote": null,
+   "quotes": [],
+   "rfq_id": "0x06bafccd8d7658742951018d92785c48977600dde7225696c7b9260fd670206f",
+   "side": -1,
+   "status": "quoted"
+  },
+  {
+   "chain": "avax-fuji",
+   "client_rfq_id": "close-8019d6cf99904abe8566c65c8f764abb",
+   "closes_at": 1793700687372,
+   "expiry": 1796292558000,
+   "kind": "close",
+   "leg_id": "0xf6e93d13f9e2f3a1cfb0cacf039448d96b85ab1b9586f4e2000000006ae9b511",
+   "notional": "1500000.00",
+   "pair": "USDJPY",
+   "position_id": "0xc7af32f8cdcdaf125aa591800e8c377dc0da9bfe5dd9c2a6011dafc524978497",
+   "premium_bps": 0,
+   "quote": {
+    "expires_at": 1793786367372,
+    "quote_id": "0xd027fb8cd515a6112f426d9fe9b61c6f3f2b6b2e4c562316dc9ecf8c471aab45",
+    "rate": "156.5",
+    "status": "quoted"
+   },
+   "quotes": [
+    {
+     "expires_at": 1793786367372,
+     "quote_id": "0xd027fb8cd515a6112f426d9fe9b61c6f3f2b6b2e4c562316dc9ecf8c471aab45",
+     "rate": "156.5",
+     "status": "quoted"
+    }
+   ],
+   "rfq_id": "0x06bafccd8d7658742951018d92785c48977600dde7225696c7b9260fd670206f",
+   "side": -1,
+   "status": "quoted"
+  },
+  {
+   "chain": "avax-fuji",
+   "client_rfq_id": "close-8019d6cf99904abe8566c65c8f764abb",
+   "closes_at": 1793700687372,
+   "expiry": 1796292558000,
+   "kind": "close",
+   "leg_id": "0xf6e93d13f9e2f3a1cfb0cacf039448d96b85ab1b9586f4e2000000006ae9b511",
+   "notional": "1500000.00",
+   "pair": "USDJPY",
+   "position_id": "0xc7af32f8cdcdaf125aa591800e8c377dc0da9bfe5dd9c2a6011dafc524978497",
+   "premium_bps": 0,
+   "quote": {
+    "expires_at": 1793786367372,
+    "quote_id": "0xd027fb8cd515a6112f426d9fe9b61c6f3f2b6b2e4c562316dc9ecf8c471aab45",
+    "rate": "156.5",
+    "status": "accepted"
+   },
+   "quotes": [
+    {
+     "expires_at": 1793786367372,
+     "quote_id": "0xd027fb8cd515a6112f426d9fe9b61c6f3f2b6b2e4c562316dc9ecf8c471aab45",
+     "rate": "156.5",
+     "status": "accepted"
+    }
+   ],
+   "rfq_id": "0x06bafccd8d7658742951018d92785c48977600dde7225696c7b9260fd670206f",
+   "side": -1,
+   "status": "signing"
+  },
+  {
+   "chain": "avax-fuji",
+   "client_rfq_id": "close-8019d6cf99904abe8566c65c8f764abb",
+   "closes_at": 1793700687372,
+   "expiry": 1796292558000,
+   "kind": "close",
+   "leg_id": "0xf6e93d13f9e2f3a1cfb0cacf039448d96b85ab1b9586f4e2000000006ae9b511",
+   "notional": "1500000.00",
+   "pair": "USDJPY",
+   "position_id": "0xc7af32f8cdcdaf125aa591800e8c377dc0da9bfe5dd9c2a6011dafc524978497",
+   "premium_bps": 0,
+   "quote": {
+    "expires_at": 1793786367372,
+    "quote_id": "0xd027fb8cd515a6112f426d9fe9b61c6f3f2b6b2e4c562316dc9ecf8c471aab45",
+    "rate": "156.5",
+    "status": "accepted"
+   },
+   "quotes": [
+    {
+     "expires_at": 1793786367372,
+     "quote_id": "0xd027fb8cd515a6112f426d9fe9b61c6f3f2b6b2e4c562316dc9ecf8c471aab45",
+     "rate": "156.5",
+     "status": "accepted"
+    }
+   ],
+   "rfq_id": "0x06bafccd8d7658742951018d92785c48977600dde7225696c7b9260fd670206f",
+   "side": -1,
+   "status": "consenting"
+  }
+ ],
+ "answer": {
+  "sent": {
+   "rate": "156.5",
+   "client_quote_id": "rt-answer-1"
+  },
+  "body": {
+   "client_quote_id": "rt-answer-1",
+   "expires_at": 1793786367372,
+   "quote_id": "0xd027fb8cd515a6112f426d9fe9b61c6f3f2b6b2e4c562316dc9ecf8c471aab45",
+   "rate": "156.5",
+   "rfq_id": "0x06bafccd8d7658742951018d92785c48977600dde7225696c7b9260fd670206f",
+   "status": "quoted"
+  }
+ },
+ "accept": {
+  "sent": {
+   "quote_id": "0xd027fb8cd515a6112f426d9fe9b61c6f3f2b6b2e4c562316dc9ecf8c471aab45"
+  },
+  "body": {
+   "quote_id": "0xd027fb8cd515a6112f426d9fe9b61c6f3f2b6b2e4c562316dc9ecf8c471aab45",
+   "rfq_id": "0x06bafccd8d7658742951018d92785c48977600dde7225696c7b9260fd670206f",
+   "status": "signing"
+  }
+ },
+ "template": {
+  "remaining": {
+   "chain": "avax-fuji",
+   "commitment": "0x73301d007198738af91d706befaf0b85084655d9bd029a012644fdc84704a38a",
+   "digest": "0xeff87eb3503d6e0a16ebd37431273d61f3a152e766f644d181c23015112d547f",
+   "digest_kind": "allocation_consent",
+   "domain_separator": "0x2a21112d69c50af6f48caa18b41a5cf6d3bdeae8fce0a94041cbfb12dc29ff04",
+   "incoming_c": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "item": {
+    "close_rate": "156500000",
+    "deadline": 1793701167,
+    "exiting_side": "0xd1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1",
+    "incoming": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+    "incoming_side": "0xdc07961bdadb8a12d89efd2247bba8402a2ac512e1e3805495979c69be7f259c",
+    "nonce": "0",
+    "notional": "0",
+    "old_id": "0x9ec3d53b6db70542ce1d4c8d903329a220a554e6838e26a575ce66c26af90f43",
+    "pair_id": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "remaining_side": "0xdc07961bdadb8a12d89efd2247bba8402a2ac512e1e3805495979c69be7f259c",
+    "salt": "0x94bafa0b733b354d29b06a83e0676e692704847fc98cb06d222134a9a14e8dcf",
+    "settlement": 0,
+    "side": 0,
+    "spread": "0"
+   },
+   "novation_id": "0xa5904626b1ab0226af195c5c2d918ccb64bd479650ea45e92fd7cfe6ac39e567",
+   "old": {
+    "nonce": 41,
+    "notional": "1500000000000",
+    "pair": "0x35b8bafff3570683af968b8d36b91b1a19465141d9712425e9f76c68ff8cb152",
+    "premium_bps": 0,
+    "rate": "156432100",
+    "settlement": 1796292558,
+    "side": 1
+   },
+   "path": "close",
+   "rfq_id": "0x06bafccd8d7658742951018d92785c48977600dde7225696c7b9260fd670206f",
+   "role": "remaining",
+   "signed": false,
+   "state": "signing",
+   "status": {
+    "armed": false,
+    "deadline": 1793701167,
+    "exiting_signed": false,
+    "incoming_signed": false,
+    "novation_id": "0xa5904626b1ab0226af195c5c2d918ccb64bd479650ea45e92fd7cfe6ac39e567",
+    "ready": false
+   },
+   "trade_id": "0xc7af32f8cdcdaf125aa591800e8c377dc0da9bfe5dd9c2a6011dafc524978497",
+   "typed_data": {
+    "domain": {
+     "chainId": 43113,
+     "name": "CRX",
+     "verifyingContract": "0xe0d1140908ee9622f7e4f5a43849bff28fe5c2c4",
+     "version": "rulebook-1.0"
+    },
+    "message": {
+     "commitment": "0x73301d007198738af91d706befaf0b85084655d9bd029a012644fdc84704a38a",
+     "deadline": "1793701167",
+     "exitingSide": "0xd1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1",
+     "incomingSide": "0xdc07961bdadb8a12d89efd2247bba8402a2ac512e1e3805495979c69be7f259c",
+     "nonce": "0",
+     "oldId": "0x9ec3d53b6db70542ce1d4c8d903329a220a554e6838e26a575ce66c26af90f43",
+     "remainingSide": "0xdc07961bdadb8a12d89efd2247bba8402a2ac512e1e3805495979c69be7f259c",
+     "salt": "0x94bafa0b733b354d29b06a83e0676e692704847fc98cb06d222134a9a14e8dcf"
+    },
+    "primaryType": "AllocationConsent",
+    "types": {
+     "AllocationConsent": [
+      {
+       "name": "oldId",
+       "type": "bytes32"
+      },
+      {
+       "name": "exitingSide",
+       "type": "bytes32"
+      },
+      {
+       "name": "remainingSide",
+       "type": "bytes32"
+      },
+      {
+       "name": "incomingSide",
+       "type": "bytes32"
+      },
+      {
+       "name": "nonce",
+       "type": "uint64"
+      },
+      {
+       "name": "deadline",
+       "type": "uint64"
+      },
+      {
+       "name": "commitment",
+       "type": "bytes32"
+      },
+      {
+       "name": "salt",
+       "type": "bytes32"
+      }
+     ],
+     "EIP712Domain": [
+      {
+       "name": "name",
+       "type": "string"
+      },
+      {
+       "name": "version",
+       "type": "string"
+      },
+      {
+       "name": "chainId",
+       "type": "uint256"
+      },
+      {
+       "name": "verifyingContract",
+       "type": "address"
+      }
+     ]
+    }
+   }
+  },
+  "exiting": {
+   "chain": "avax-fuji",
+   "commitment": "0x73301d007198738af91d706befaf0b85084655d9bd029a012644fdc84704a38a",
+   "digest": "0xeff87eb3503d6e0a16ebd37431273d61f3a152e766f644d181c23015112d547f",
+   "digest_kind": "allocation_consent",
+   "domain_separator": "0x2a21112d69c50af6f48caa18b41a5cf6d3bdeae8fce0a94041cbfb12dc29ff04",
+   "incoming_c": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "item": {
+    "close_rate": "156500000",
+    "deadline": 1793701167,
+    "exiting_side": "0xd1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1",
+    "incoming": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+    "incoming_side": "0xdc07961bdadb8a12d89efd2247bba8402a2ac512e1e3805495979c69be7f259c",
+    "nonce": "0",
+    "notional": "0",
+    "old_id": "0x9ec3d53b6db70542ce1d4c8d903329a220a554e6838e26a575ce66c26af90f43",
+    "pair_id": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "remaining_side": "0xdc07961bdadb8a12d89efd2247bba8402a2ac512e1e3805495979c69be7f259c",
+    "salt": "0x94bafa0b733b354d29b06a83e0676e692704847fc98cb06d222134a9a14e8dcf",
+    "settlement": 0,
+    "side": 0,
+    "spread": "0"
+   },
+   "novation_id": "0xa5904626b1ab0226af195c5c2d918ccb64bd479650ea45e92fd7cfe6ac39e567",
+   "old": {
+    "nonce": 41,
+    "notional": "1500000000000",
+    "pair": "0x35b8bafff3570683af968b8d36b91b1a19465141d9712425e9f76c68ff8cb152",
+    "premium_bps": 0,
+    "rate": "156432100",
+    "settlement": 1796292558,
+    "side": 1
+   },
+   "path": "close",
+   "rfq_id": "0x06bafccd8d7658742951018d92785c48977600dde7225696c7b9260fd670206f",
+   "role": "exiting",
+   "signed": false,
+   "state": "consenting",
+   "status": {
+    "armed": false,
+    "deadline": 1793701167,
+    "exiting_signed": false,
+    "incoming_signed": true,
+    "novation_id": "0xa5904626b1ab0226af195c5c2d918ccb64bd479650ea45e92fd7cfe6ac39e567",
+    "ready": false
+   },
+   "trade_id": "0xc7af32f8cdcdaf125aa591800e8c377dc0da9bfe5dd9c2a6011dafc524978497",
+   "typed_data": {
+    "domain": {
+     "chainId": 43113,
+     "name": "CRX",
+     "verifyingContract": "0xe0d1140908ee9622f7e4f5a43849bff28fe5c2c4",
+     "version": "rulebook-1.0"
+    },
+    "message": {
+     "commitment": "0x73301d007198738af91d706befaf0b85084655d9bd029a012644fdc84704a38a",
+     "deadline": "1793701167",
+     "exitingSide": "0xd1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1",
+     "incomingSide": "0xdc07961bdadb8a12d89efd2247bba8402a2ac512e1e3805495979c69be7f259c",
+     "nonce": "0",
+     "oldId": "0x9ec3d53b6db70542ce1d4c8d903329a220a554e6838e26a575ce66c26af90f43",
+     "remainingSide": "0xdc07961bdadb8a12d89efd2247bba8402a2ac512e1e3805495979c69be7f259c",
+     "salt": "0x94bafa0b733b354d29b06a83e0676e692704847fc98cb06d222134a9a14e8dcf"
+    },
+    "primaryType": "AllocationConsent",
+    "types": {
+     "AllocationConsent": [
+      {
+       "name": "oldId",
+       "type": "bytes32"
+      },
+      {
+       "name": "exitingSide",
+       "type": "bytes32"
+      },
+      {
+       "name": "remainingSide",
+       "type": "bytes32"
+      },
+      {
+       "name": "incomingSide",
+       "type": "bytes32"
+      },
+      {
+       "name": "nonce",
+       "type": "uint64"
+      },
+      {
+       "name": "deadline",
+       "type": "uint64"
+      },
+      {
+       "name": "commitment",
+       "type": "bytes32"
+      },
+      {
+       "name": "salt",
+       "type": "bytes32"
+      }
+     ],
+     "EIP712Domain": [
+      {
+       "name": "name",
+       "type": "string"
+      },
+      {
+       "name": "version",
+       "type": "string"
+      },
+      {
+       "name": "chainId",
+       "type": "uint256"
+      },
+      {
+       "name": "verifyingContract",
+       "type": "address"
+      }
+     ]
+    }
+   }
+  }
+ },
+ "sign": {
+  "remaining": {
+   "sent": {
+    "sig": "0xd8b05b8a47943a41cbf05b155bd00eaaa358615fbc22d20eb8d66b5f66eeaecc4156f5125d4975d6ccf7ced84a4a82b161531d89663da1ef01374327d3cd2c7c1b"
+   },
+   "body": {
+    "armed": false,
+    "deadline": 1793701167,
+    "exiting_signed": false,
+    "incoming_signed": true,
+    "novation_id": "0xa5904626b1ab0226af195c5c2d918ccb64bd479650ea45e92fd7cfe6ac39e567",
+    "ready": false,
+    "rfq_id": "0x06bafccd8d7658742951018d92785c48977600dde7225696c7b9260fd670206f",
+    "state": "consenting"
+   }
+  },
+  "exiting": {
+   "sent": {
+    "sig": "0xe0d8b3fe763938f0a12eee7e691eb6ca74ddcfefafa7733d2fc6dbb56b255aec43e8b2227c4dc7a8ab9354dddf7881ad1ee7c07fd02fd42437422e73d2f6c4221c"
+   },
+   "body": {
+    "armed": false,
+    "deadline": 1793701167,
+    "exiting_signed": true,
+    "incoming_signed": true,
+    "novation_id": "0xa5904626b1ab0226af195c5c2d918ccb64bd479650ea45e92fd7cfe6ac39e567",
+    "ready": true,
+    "rfq_id": "0x06bafccd8d7658742951018d92785c48977600dde7225696c7b9260fd670206f",
+    "state": "armed"
+   }
+  }
+ },
+ "arm_tx": [
+  {
+   "final": false,
+   "item": "0x23f10771dd5034b62530624ea035dc247f857f074bf0f518be7a060b12714470",
+   "proven": false,
+   "status": "sending",
+   "tx": null
+  },
+  {
+   "final": true,
+   "item": "0x23f10771dd5034b62530624ea035dc247f857f074bf0f518be7a060b12714470",
+   "proven": false,
+   "status": "closed",
+   "tx": null
+  }
+ ]
+}

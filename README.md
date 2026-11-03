@@ -149,7 +149,6 @@ The script exits with success only when the trade is `open` and final. A deposit
 | `send_quote(rfq, rate)` | Signs and posts a binding quote, and returns a `MakerQuote`. |
 | `confirm(quote, timeout=None)` | Waits for the accept up to `timeout` (default: the quote window), then up to `wait` for the trade. |
 | `drop_quote(quote)` | Ends the binding quote at once. |
-| `take_over(rfq, rate)` | Quotes a close RFQ from `rfqs(kind="close")`. When the quote wins, signs and takes over the closing seat's side, then waits up to `wait` for `open` or `refused`. |
 | `quote_live(price, seconds=3600)` | Quotes each new RFQ at `price(rfq)`, drops every live quote on exit and returns the trades that opened. |
 
 ```python
