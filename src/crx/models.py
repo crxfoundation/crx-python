@@ -403,3 +403,53 @@ class Drop:
     leg_id: str
     at: datetime | None
     raw: dict = field(repr=False, compare=False)
+
+
+@dataclass(frozen=True)
+class Close:
+    """The result of ``Client.close_trade``.
+
+    Attributes:
+        to: The seat that takes the trade over, or the counterparty that closes it.
+        rate: The close rate.
+        status: ``sending`` while CRX sends the transaction, ``pending`` until the hourly check counts it,
+            ``closed``, or ``refused``. ``unsigned`` when the gateway took no signature before the wait ended.
+        item: The chain's id of the signed close.
+        tx: The transaction hash once it lands.
+        final: True once the close is final.
+        counterparty: True when the trade closes with its counterparty and ends for both seats.
+    """
+
+    trade_id: str
+    rfq_id: str
+    to: str
+    rate: Decimal
+    status: str
+    item: str | None
+    tx: str | None
+    raw: dict = field(repr=False, compare=False)
+    final: bool = False
+    counterparty: bool = False
+
+
+@dataclass(frozen=True)
+class TakeOver:
+    """The result of ``Client.take_over``.
+
+    Attributes:
+        trade_id: The trade the seat takes over, once the tape names it. ``positions()`` lists it once ``open``.
+        side: The seat's side in the base currency.
+        rate: The seat's quoted rate.
+        status: ``pending`` until the trade moves to the seat, ``open``, or ``refused``. ``unsigned`` when the
+            gateway took no signature inside the round's sign window.
+    """
+
+    rfq_id: str
+    quote_id: str
+    trade_id: str | None
+    pair: str
+    side: str
+    notional: Decimal
+    rate: Decimal
+    status: str
+    raw: dict = field(repr=False, compare=False)
