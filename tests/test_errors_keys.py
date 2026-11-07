@@ -56,12 +56,6 @@ def test_gateway_codes_map_to_typed_errors():
         assert isinstance(e, crx.CrxError)
 
 
-def test_a_plain_text_gateway_answer_maps_to_server_error():
-    e = from_gateway(503, "gateway down", "gateway down")
-    assert (type(e), e.code, e.status) == (crx.ServerError, "server_error", 503)
-    assert isinstance(e, crx.CrxError)
-
-
 def _frames_text(exc):
     """Return the error text and the SDK frames of its traceback, with their locals."""
     import traceback

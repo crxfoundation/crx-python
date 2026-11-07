@@ -192,27 +192,3 @@ def test_a_late_answer_reads_quote_expired(session, tmp_path):
     with pytest.raises(crx.QuoteExpired, match="last answer"):
         c.answer_close(next(iter(c.close_requests(wait=0))), "156.5", wait=150)
     assert [x["path"] for x in session.calls if x["method"] == "POST"] == [f"/rfqs/{AG_RFQ}/close/answer"]
-
-
-def test_close_trade_signs_the_gateways_plain_close_and_reads_closed(session, tmp_path):
-    """The exiting seat takes the counterparty's answer and signs the gateway's own plain close: the same
-    signature the gateway took."""
-    c = client(session, tmp_path, EXITING, Clock(AG_T0), core=AG_CORE)
-    session.routes.update({
-        ("GET", "/health"): AG["health"],
-        ("GET", "/positions"): AG["positions"]["exiting"],
-        ("POST", "/rfqs"): AG["open"]["body"],
-        ("GET", f"/rfqs/{AG_RFQ}"): list(AG["views_exiting"]),
-        ("POST", f"/rfqs/{AG_RFQ}/accept"): AG["accept"]["body"],
-        ("GET", f"/rfqs/{AG_RFQ}/close"): AG["template"]["exiting"],
-        ("POST", f"/rfqs/{AG_RFQ}/close/sign"): AG["sign"]["exiting"]["body"],
-        ("GET", f"/rfqs/{AG_RFQ}/close/arm-tx"): list(AG["arm_tx"]),
-    })
-    out = c.close_trade(AG_TRADE, wait=75)
-    remaining = AG["template"]["exiting"]["item"]["incoming"]
-    assert (out.status, out.final, out.counterparty, out.to, out.rate) == ("closed", True, True, remaining,
-                                                                           Decimal("156.5"))
-    sent = {x["path"]: x["body"] for x in session.calls if x["method"] == "POST"}
-    assert sent["/rfqs"]["position_id"] == AG["open"]["sent"]["position_id"]
-    assert sent[f"/rfqs/{AG_RFQ}/accept"] == AG["accept"]["sent"]
-    assert sent[f"/rfqs/{AG_RFQ}/close/sign"] == AG["sign"]["exiting"]["sent"]

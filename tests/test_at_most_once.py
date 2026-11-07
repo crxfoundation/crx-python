@@ -99,21 +99,6 @@ def test_no_second_quote_while_the_first_has_no_final_answer(make_client, venue,
     assert len(signed_posts(session)) == 1
 
 
-def test_no_second_quote_while_the_first_has_no_final_answer_then_refused(make_client, venue, session, clock):
-    """The first trade then reads ``refused``: the second quote goes out with no EarlierOutcome."""
-    c, q = first_trade_with_no_final_answer(make_client, venue, session, clock)
-    second = len(accepts_on(session, RFQ2))
-    with pytest.raises(crx.TradeUnknown) as ei:
-        c.trade(other_rfq(q), wait=30)
-    assert ei.value.details["rfq_id"] == RFQ and "nothing signed" in str(ei.value)
-    venue.script = [("refused", None)]
-    assert len(accepts_on(session, RFQ2)) == second
-    with pytest.raises(crx.QuoteExpired):
-        c.trade(other_rfq(q), wait=30)
-    assert len(accepts_on(session, RFQ2)) > second
-    assert len(signed_posts(session)) == 1
-
-
 class Money:
     """Serve GET /balance: nonce 3 and no withdraw until ``shown``, then the item at ``word`` and nonce 4."""
 

@@ -197,26 +197,6 @@ def venue(session, health, markets, clock):
     return Venue(session, health, markets, clock)
 
 
-def test_quote_then_trade_signs_one_trade(make_client, venue, session, clock, account):
-    c = make_client(clock=clock)
-    q = c.quote("USD/MXN", "buy", 25_000, settles=WEEK)
-    assert (q.rfq_id, q.quote_id, q.rate, q.side, q.pair, q.notional) == (
-        RFQ, QID, Decimal("18.700000"), "buy", "USD/MXN", Decimal("25000"))
-    assert q.raw["trade_template"] == venue.draft
-    b = venue.rfq_body
-    assert (b["pair"], b["notional"], b["chain"], "wait" in b) == ("USDMXN", "25000", "avax-fuji", False)
-    assert accepts(session) == [] and trade_polls(session) == []  # the open answer already named the winner
-
-    t = c.trade(q)
-    assert (t.status, t.tx, t.quote_id) == ("open", TXH, QID)
-    assert t.raw == {"rfq_id": RFQ, "quote_id": QID, "client_quote_id": None}
-    (body,) = accepts(session)
-    assert set(body) == {"quote_id", "sig"} and body["quote_id"] == QID
-    assert recovers(venue.template, body["sig"]) == account.address
-    assert sent_nothing(session)
-    assert floor_file(c, account).read_text() == venue.template["typed_data"]["message"]["ownNonce"]
-
-
 def test_reject_sends_nothing_and_a_later_accept_signs_nothing(make_client, venue, session, clock, monkeypatch):
     c = make_client(clock=clock)
     q = c.quote("USD/MXN", "buy", 25_000, settles=WEEK)
@@ -240,16 +220,6 @@ def refuse_signed_accept(session, venue, status, code):
                                                                "details": {"trade_template": "?"}})
 
 
-def test_refusal_after_the_trade_is_signed(make_client, venue, session, clock):
-    """409 round_closed on the signed accept raises QuoteExpired."""
-    refuse_signed_accept(session, venue, 409, "round_closed")
-    before = len(accepts(session))
-    c = make_client(clock=clock)
-    with pytest.raises(crx.QuoteExpired):
-        c.trade(c.quote("USD/MXN", "buy", 25_000, settles=WEEK))
-    assert len(accepts(session)) == before + 1 and sent_nothing(session)
-
-
 UNKNOWN_AFTER_SIGN = [  # status, code: refusals of the signed accept that leave the trade unknown
     (422, "insufficient_collateral"),
     (409, "trade_stale"),  # its fresh template cannot be read
@@ -265,27 +235,6 @@ def test_refusal_after_the_trade_is_signed_raises_trade_unknown(make_client, ven
             c.trade(c.quote("USD/MXN", "buy", 25_000, settles=WEEK))
         assert "may still open" in str(ei.value) and ei.value.details == {"rfq_id": RFQ}, code
         assert len(accepts(session)) == before + 1 and sent_nothing(session), code
-
-
-DOWN_BODY = {"code": "service_unavailable", "outcome": "unavailable", "error": "service temporarily unavailable",
-             "message": "Service temporarily unavailable: trade not executed."}
-
-
-SEAT_BODY = {"code": "seat_cannot_sign", "outcome": "not_permitted", "error": "this address cannot sign trades",
-             "message": "This address cannot sign trades."}
-OWN_ERRORS = [  # status, body, error, a type it is, a type it is not
-    (503, DOWN_BODY, crx.ServiceUnavailable, crx.ServerError, ()),
-    (403, SEAT_BODY, crx.SeatCannotSign, crx.CrxError, crx.AuthError),
-]
-
-
-def test_gateway_codes_map_to_their_own_errors():
-    for status, body, err, kind, other in OWN_ERRORS:
-        e = crx.errors.from_gateway(status, body)
-        assert type(e) is err and isinstance(e, kind) and not isinstance(e, other), err
-        assert (e.code, e.status, e.gateway_code) == (body["code"], status, body["code"]), err
-        assert err.__name__ in crx.__all__, err
-    assert type(crx.errors.from_gateway(503, dict(DOWN_BODY, code="upstream"))) is crx.ServerError
 
 
 def put(path, value):

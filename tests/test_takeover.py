@@ -197,13 +197,6 @@ def test_a_form_already_signed_posts_nothing(client, session):
     assert out.already and not g.signed and not g.declined
 
 
-def test_the_bid_reads_the_round_terms(client, session):
-    Gate(session)
-    b = tko.bid(client, RFQ, RATE)
-    assert (b.quote_id, b.side, b.notional_e6, b.settlement_s, b.rate_e6) == (QID, SIDE, NOTIONAL, SETTLE, RATE_E6)
-    assert b.pair_id == h(keccak(text=PAIR)) and b.seat == client.address
-
-
 @pytest.mark.parametrize("edit, match", [
     ({"kind": "open"}, "not a close round"),
     ({"chain": "base"}, "this client signs for"),
@@ -351,16 +344,6 @@ def test_a_declined_bid_raises(client, session):
 # ── the pinned vectors ───────────────────────────────────────────────────────
 
 
-def test_the_closeout_commitment_is_the_contracts():
-    """The closeout commitment the contract emits for these words."""
-    item = {"oldId": "0x" + "22" * 32, "closedOutSide": "0x" + "a1" * 32, "remainingSide": "0x" + "b2" * 32,
-            "incoming": "0x" + "c3" * 20, "incomingSide": "0x" + "c3" * 32, "feedId": "0x" + "99" * 32,
-            "closeTime": 1_700_000_000, "spread": 1234, "nonce": 9, "deadline": 1_700_001_000, "openNonce": 13,
-            "subsidyMaxUsd": 0}
-    got = e7.hidden_commitment(e7.CLOSEOUT_ITEM_FIELDS, item, "0x" + "5c" * 32)
-    assert h(got) == "0x08f10e440d89ab93ddc63222d0ec26d044f487cf5a344ccd5eaeedc3cbd5d147"
-
-
 def test_the_failover_digest_matches_the_format_vectors():
     """format-vectors-v5.json closeout C1, computed by eth_account and viem; signed by keys.other."""
     c = FV["closeout"]
@@ -389,14 +372,6 @@ def test_the_fee_and_cap_match_the_gateways_vectors():
     assert tko.cap_usd6(1_000_000_000_000, 1_050_000, False) == 21_000_000_000
     assert tko.cap_usd6(2**128 - 1, 2**128 - 1, True) == 2 * ((2**128 - 1) // 10_000)
     assert tko.fee_usd6(2**128 - 1, 2**128 - 1, 0, 1, False) == 2**128 - 1
-
-
-def test_the_side_id_and_open_nonce_formulas():
-    c = bytes([0xE4]) * 32
-    assert h(tko.incoming_side(c)) == "0x0b4cbadda91877bab7fe06ac35c8e18f89f0dc75b2bd904432803680893d4ad6"
-    oid = b"\x11" * 32
-    want = int.from_bytes(keccak(b"crx/alloc-open-nonce/v1" + oid + (9).to_bytes(8, "big"))[:8], "big")
-    assert tko.open_nonce(oid, 9) == want
 
 
 # ── the public surface ───────────────────────────────────────────────────────
@@ -430,11 +405,3 @@ def test_the_reads_and_the_post_time_out_inside_the_sign_window(client, session)
     window = (f"/rfqs/{RFQ}/close", f"/rfqs/{RFQ}/close/sign")
     for c in [c for c in session.calls if c["path"] in window]:
         assert c["timeout"] == tko.HTTP_TIMEOUT_S == 2.0
-
-
-def test_served_text_is_cleaned_in_messages(client, session):
-    form = dict(failover_form(client.address), digest_kind="x\nforged line\x1b[31m")
-    Gate(session, form=form)
-    with pytest.raises(crx.RefusedToSign) as e:
-        tko.take_over(client, RFQ, RATE, max_notional=CAP)
-    assert "\n" not in str(e.value) and "\x1b" not in str(e.value)

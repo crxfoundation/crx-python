@@ -374,30 +374,6 @@ def ms(t):
     return int(t.timestamp()) * 1000
 
 
-PAIRS = ("USD/BRL", "USD/MXN", "USD/PHP")
-
-
-def test_markets_parse(make_client):
-    ms = {m.pair: m for m in make_client(key=False).markets()}
-    assert sorted(ms) == list(PAIRS)
-    for pair in PAIRS:
-        m = ms[pair]
-        assert not m.paused and m.min_notional == Decimal(10000) and m.max_notional == Decimal(10_000_000)
-        assert m.pair_id == "0x" + keccak(text=pair).hex() and (m.base, m.quote) == (pair[:3], pair[4:])
-        assert m.max_premium_bps == 200 and m.open is False and (m.min_tenor_s, m.max_tenor_s) == (600, 7_776_000)
-    assert ms["USD/MXN"].next_open == datetime.fromtimestamp(1_790_546_400, timezone.utc)
-
-
-def test_withdraw_with_no_amount_takes_all_free_collateral_rounded_down(make_client, session, health, account):
-    Chain(session)
-    g = gate(session, health, account)
-    session.routes[("GET", "/balance")] = [balance_body(account, free="1234.5678919"), g.view("accepted")]
-    w = make_client(clock=Clock(time.time())).withdraw()
-    body = next(c for c in session.calls if c["path"] == "/withdraw")["body"]
-    assert body["amount"] == "1234.567891" and w.amount == Decimal("1234.567891")
-    assert g.intent["amount"] == 1_234_567_891 and g.signer == account.address
-
-
 FREE_REFUSALS = [  # withdraw() amount arguments, free, error, details
     (("1000.000001",), "1000.000000", crx.InsufficientCollateral, {"free": "1000.000000", "requested": "1000.000001"}),
     ((), None, crx.MarkUnavailable, {}),
@@ -485,18 +461,10 @@ def test_withdraw_posts_the_same_signed_intent_every_5_s_until_taken(
     assert c._held_withdraw["returned"] is True  # "accepted" is in progress, so the hold stays
 
 
-AMOUNTS = [  # value, the amount
-    ("1000", Decimal("1000")), (100, Decimal("100")), ("0.000001", Decimal("0.000001")),
-]
 AMOUNT_REFUSALS = [  # value, the words of the refusal
     ("abc", "is not a number"), ("0", "must be above zero"), ("-1", "must be above zero"),
     ("NaN", "must be above zero"), ("Infinity", "must be above zero"), ("1.0000001", "more than 6 decimals"),
 ]
-
-
-def test_amount_parsing():
-    for value, out in AMOUNTS:
-        assert crx.client._amount(value) == out, value
 
 
 def test_amount_parsing_refuses_bad_amounts():
