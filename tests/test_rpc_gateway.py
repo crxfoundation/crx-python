@@ -92,6 +92,30 @@ def test_the_health_pins_stand_and_no_chain_probe_goes_to_the_gateway(gw_session
         main(gw_session, tmp_path, account)._chain_ready()
 
 
+def test_gateway_calls_are_signed_over_the_bytes_sent(gw_session, tmp_path, account):
+    node = Node(CHAIN)
+    gw_session.routes[("POST", "/rpc")] = node
+    c = main(gw_session, tmp_path, account)
+    assert c._rpc.int("eth_chainId") == 1 and c._rpc("eth_getCode", CORE, "latest") == "0x6080"
+    calls = rpc_calls(gw_session)
+    assert [json.loads(k["raw"])["method"] for k in calls] == ["eth_chainId", "eth_getCode"]
+    assert gw_session.rpc_calls == []  # nothing went to an RPC of the user's own
+    me = account.address.lower()
+    for (signer, h, raw), call in zip(node.seen, calls):
+        assert SIGNED <= set(h) and "x-crx-signer" not in h and "x-crx-session" not in h
+        assert signer == me and h["x-crx-address"] == me
+        assert call["method"] == "POST" and h["content-type"] == "application/json"
+        body = json.loads(raw)
+        assert raw == json.dumps(body, separators=(",", ":")).encode()
+        assert list(body) == ["jsonrpc", "id", "method", "params"] and body["jsonrpc"] == "2.0"
+        assert type(body["id"]) is int and 1 <= body["id"] < 2**31
+        # The signature covers the body: one changed byte recovers another address.
+        assert recover(h, raw.replace(b'"2.0"', b'"2.1"')) != me
+    assert json.loads(node.seen[1][2])["params"] == [CORE, "latest"]
+    assert len({json.loads(raw)["id"] for _, _, raw in node.seen}) == 2  # a random id per call
+    assert len({h["x-crx-ts"] for _, h, _ in node.seen}) == 2
+
+
 class Custodian:
     """A custodian signer: EIP-191 messages only."""
 

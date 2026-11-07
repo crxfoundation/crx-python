@@ -197,6 +197,26 @@ def venue(session, health, markets, clock):
     return Venue(session, health, markets, clock)
 
 
+def test_quote_then_trade_signs_one_trade(make_client, venue, session, clock, account):
+    c = make_client(clock=clock)
+    q = c.quote("USD/MXN", "buy", 25_000, settles=WEEK)
+    assert (q.rfq_id, q.quote_id, q.rate, q.side, q.pair, q.notional) == (
+        RFQ, QID, Decimal("18.700000"), "buy", "USD/MXN", Decimal("25000"))
+    assert q.raw["trade_template"] == venue.draft
+    b = venue.rfq_body
+    assert (b["pair"], b["notional"], b["chain"], "wait" in b) == ("USDMXN", "25000", "avax-fuji", False)
+    assert accepts(session) == [] and trade_polls(session) == []  # the open answer already named the winner
+
+    t = c.trade(q)
+    assert (t.status, t.tx, t.quote_id) == ("open", TXH, QID)
+    assert t.raw == {"rfq_id": RFQ, "quote_id": QID, "client_quote_id": None}
+    (body,) = accepts(session)
+    assert set(body) == {"quote_id", "sig"} and body["quote_id"] == QID
+    assert recovers(venue.template, body["sig"]) == account.address
+    assert sent_nothing(session)
+    assert floor_file(c, account).read_text() == venue.template["typed_data"]["message"]["ownNonce"]
+
+
 def test_reject_sends_nothing_and_a_later_accept_signs_nothing(make_client, venue, session, clock, monkeypatch):
     c = make_client(clock=clock)
     q = c.quote("USD/MXN", "buy", 25_000, settles=WEEK)
@@ -218,6 +238,16 @@ def refuse_signed_accept(session, venue, status, code):
     venue.reset()
     session.routes[("POST", f"/rfqs/{RFQ}/accept")] = (status, {"code": code, "error": code,
                                                                "details": {"trade_template": "?"}})
+
+
+def test_refusal_after_the_trade_is_signed(make_client, venue, session, clock):
+    """409 round_closed on the signed accept raises QuoteExpired."""
+    refuse_signed_accept(session, venue, 409, "round_closed")
+    before = len(accepts(session))
+    c = make_client(clock=clock)
+    with pytest.raises(crx.QuoteExpired):
+        c.trade(c.quote("USD/MXN", "buy", 25_000, settles=WEEK))
+    assert len(accepts(session)) == before + 1 and sent_nothing(session)
 
 
 UNKNOWN_AFTER_SIGN = [  # status, code: refusals of the signed accept that leave the trade unknown

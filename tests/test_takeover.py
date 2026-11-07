@@ -374,6 +374,14 @@ def test_the_fee_and_cap_match_the_gateways_vectors():
     assert tko.fee_usd6(2**128 - 1, 2**128 - 1, 0, 1, False) == 2**128 - 1
 
 
+def test_the_side_id_and_open_nonce_formulas():
+    c = bytes([0xE4]) * 32
+    assert h(tko.incoming_side(c)) == "0x0b4cbadda91877bab7fe06ac35c8e18f89f0dc75b2bd904432803680893d4ad6"
+    oid = b"\x11" * 32
+    want = int.from_bytes(keccak(b"crx/alloc-open-nonce/v1" + oid + (9).to_bytes(8, "big"))[:8], "big")
+    assert tko.open_nonce(oid, 9) == want
+
+
 # ── the public surface ───────────────────────────────────────────────────────
 
 
