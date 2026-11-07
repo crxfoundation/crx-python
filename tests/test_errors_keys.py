@@ -45,16 +45,21 @@ CODES = [
     (403, {"code": "viewer_is_maker", "error": "no"}, crx.BadRequest, "bad_request"),
     (503, {"code": "viewers_unavailable", "error": "off"}, crx.ServerError, "server_error"),
     (502, {"code": "upstream", "error": "down"}, crx.ServerError, "server_error"),
-    (503, "gateway down", crx.ServerError, "server_error"),
     (409, {"code": "brand_new", "error": "x\x1b[31m"}, crx.CrxError, "brand_new"),
 ]
 
 
 def test_gateway_codes_map_to_typed_errors():
     for status, body, cls, code in CODES:
-        e = from_gateway(status, body, body if isinstance(body, str) else "")
+        e = from_gateway(status, body, "")
         assert (type(e), e.code, e.status) == (cls, code, status), body
         assert isinstance(e, crx.CrxError)
+
+
+def test_a_plain_text_gateway_answer_maps_to_server_error():
+    e = from_gateway(503, "gateway down", "gateway down")
+    assert (type(e), e.code, e.status) == (crx.ServerError, "server_error", 503)
+    assert isinstance(e, crx.CrxError)
 
 
 def _frames_text(exc):

@@ -41,10 +41,10 @@ def at(case):
     return ts
 
 
-@pytest.mark.parametrize("cid,key,custody", [
-    ("A1", TAKER, None), ("A2", TAKER, None), ("A3", OTHER, TAKER["address"]),
+@pytest.mark.parametrize("cid,key,custody,delegate_headers", [
+    ("A1", TAKER, None, set()), ("A2", TAKER, None, set()), ("A3", OTHER, TAKER["address"], {"x-crx-signer"}),
 ], ids=["A1-self-custody", "A2-no-body", "A3-delegate"])
-def test_case_reproduced(cid, key, custody):
+def test_case_reproduced(cid, key, custody, delegate_headers):
     c = CASES[cid]
     raw = c["body"].encode()
     assert "0x" + keccak(raw).hex() == c["body_hash"]
@@ -52,8 +52,7 @@ def test_case_reproduced(cid, key, custody):
     gw = gateway(key, ts, custody)
     h = gw.headers(c["method"], c["path"], raw)
     assert h == c["headers"]
-    want = SIGNED_HEADERS | ({"x-crx-signer"} if custody else set())
-    assert set(h) == want
+    assert set(h) == SIGNED_HEADERS | delegate_headers
     msg = rest_message(c["method"], c["path"], h["x-crx-address"], key["address"], ts, raw)
     assert msg == c["message"] and len(msg.split("\n")) == c["message_lines"] == 8 and not msg.endswith("\n")
     assert msg.split("\n")[5] == f"Signer: {c['signer_line']}" and c["signer_line"] == key["address"]

@@ -322,6 +322,11 @@ def test_rfqs_yields_quotable_rfqs_once(maker, session, monkeypatch):
     assert all(c["query"]["limit"] == ["3"] for c in session.calls if c["path"] == "/trades")
 
 
+def side_word(side) -> str:
+    """Return the word of a vector's int8 ``side``: 1 is buy, any other value is sell."""
+    return "buy" if side == 1 else "sell"
+
+
 def test_send_quote_posts_each_vector_quote(maker, session, clock, monkeypatch):
     for qid in IDS:
         v = from_file(qid)
@@ -336,8 +341,7 @@ def test_send_quote_posts_each_vector_quote(maker, session, clock, monkeypatch):
         assert gw.digests == [b32(v["digest"])], qid
         assert e7.leg_words(q.leg) == e7.leg_words(h) and q.leg["nonce"] == h["nonce"] and "salt" not in q.leg, qid
         assert (q.quote_id, q.rate, q.notional, q.side, q.client_quote_id) == (
-            gw.rows[0]["quote_id"], Decimal(h["rate"]), Decimal(h["notional"]), "buy" if h["side"] == 1 else "sell",
-            None), qid
+            gw.rows[0]["quote_id"], Decimal(h["rate"]), Decimal(h["notional"]), side_word(h["side"]), None), qid
         assert q.quote_expiry.timestamp() == v["quote_expiry"] and q.expiry.timestamp() * 1000 == h["expiry"], qid
         assert maker._legs == {RFQ: h["leg_id"]}, qid
 

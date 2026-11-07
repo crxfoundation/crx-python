@@ -46,9 +46,11 @@ class Maker:
         self.clock.sleep(kwargs["wait"])
         return SimpleNamespace(status=self.unfinished, counted=False)
 
-    def test_request(self):
+    def request_test_rfq(self):
         self.calls.append("test_request")
         return self.rfq
+
+    test_request = request_test_rfq  # the Client method name that quickstart_maker calls
 
     def send_quote(self, rfq, rate):
         assert rfq is self.rfq and rate == Decimal("18.123456")

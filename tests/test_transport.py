@@ -94,13 +94,17 @@ def test_the_gateway_over_a_socket_signs_reads_and_follows_no_redirect(server, h
     assert pauses == [0.5]  # one GET resend, no redirect followed
 
 
-RPC_REFUSALS = [  # status, content type, body, error
-    (200, "application/json", {"jsonrpc": "2.0", "id": 1, "error": {"code": 3, "message": "execution reverted"}},
+def js(value) -> bytes:
+    return json.dumps(value).encode()
+
+
+RPC_REFUSALS = [  # status, content type, body bytes, error
+    (200, "application/json", js({"jsonrpc": "2.0", "id": 1, "error": {"code": 3, "message": "execution reverted"}}),
      RpcError),
-    (502, "application/json", {"error": "bad gateway"}, crx.BadAnswer),  # a proxy's error is no node revert
-    (200, "text/plain", "not json", crx.BadAnswer),
-    (200, "application/json", ["not", "an", "object"], crx.BadAnswer),
-    (200, "application/json", {"jsonrpc": "2.0", "id": 1}, crx.BadAnswer),
+    (502, "application/json", js({"error": "bad gateway"}), crx.BadAnswer),  # a proxy's error is no node revert
+    (200, "text/plain", b"not json", crx.BadAnswer),
+    (200, "application/json", js(["not", "an", "object"]), crx.BadAnswer),
+    (200, "application/json", js({"jsonrpc": "2.0", "id": 1}), crx.BadAnswer),
 ]
 
 
@@ -110,8 +114,7 @@ def test_the_rpc_over_a_socket_sends_json_rpc_and_types_each_failure(server, htt
     assert rpc.int("eth_chainId") == 43113
     call = json.loads(server.seen[0][3])
     assert (call["jsonrpc"], call["method"], call["params"], type(call["id"])) == ("2.0", "eth_chainId", [], int)
-    for status, kind, body, err in RPC_REFUSALS:
-        raw = body.encode() if isinstance(body, str) else json.dumps(body).encode()
+    for status, kind, raw, err in RPC_REFUSALS:
         server.answers[("POST", "/rpc")] = (status, kind, raw)
         with pytest.raises(err):
             rpc("eth_call", {"to": "0x" + "00" * 20}, "latest")

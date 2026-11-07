@@ -140,17 +140,20 @@ def test_a_custodian_signer_sends_its_session_token(gw_session, tmp_path, accoun
     assert all(h["x-crx-session"] == "ab" * 32 and not SIGNED & set(h) for _, h, _ in node.seen)
 
 
-def test_a_401_on_the_session_token_mints_one_new_token_and_sends_once_more(gw_session, tmp_path, account):
-    me = account.address.lower()
-    tokens = [{"token": t * 32, "custody": me, "signer": me, "ttl_ms": 3_600_000} for t in ("ab", "cd", "ef", "01")]
-    gw_session.routes[("POST", "/session")] = tokens
-    node, refused = Node(CHAIN), {"ab" * 32, "ef" * 32, "01" * 32}
-
+def refusing_tokens(node, refused):
+    """Return a POST /rpc route that answers 401 to a session token in ``refused`` and passes others to ``node``."""
     def rpc(req):
         if req["headers"]["x-crx-session"] in refused:
             return (401, {"code": "unauthorized", "error": "session token expired"})
         return node(req)
-    gw_session.routes[("POST", "/rpc")] = rpc
+    return rpc
+
+
+def test_a_401_on_the_session_token_mints_one_new_token_and_sends_once_more(gw_session, tmp_path, account):
+    me = account.address.lower()
+    tokens = [{"token": t * 32, "custody": me, "signer": me, "ttl_ms": 3_600_000} for t in ("ab", "cd", "ef", "01")]
+    gw_session.routes[("POST", "/session")] = tokens
+    gw_session.routes[("POST", "/rpc")] = refusing_tokens(Node(CHAIN), {"ab" * 32, "ef" * 32, "01" * 32})
     c = main(gw_session, tmp_path, account, key=None, signer=Custodian(account))
     assert c._rpc.int("eth_chainId") == 1
     assert [x["headers"]["x-crx-session"] for x in rpc_calls(gw_session)] == ["ab" * 32, "cd" * 32]
@@ -180,25 +183,24 @@ def gateway_rpc(session, account, sleep=None):
 RPC_403 = (403, {"jsonrpc": "2.0", "id": 1, "error": {"code": -32601, "message": "The method is not allowed."}})
 
 
-@pytest.mark.parametrize("answer,err,words", [
-    ((401, {"code": "unauthorized", "error": "bad signature"}), crx.AuthError, "bad signature"),
-    (RPC_403, crx.AuthError, "The method is not allowed."),
+@pytest.mark.parametrize("answer,err,words,details", [
+    ((401, {"code": "unauthorized", "error": "bad signature"}), crx.AuthError, "bad signature", {}),
+    (RPC_403, crx.AuthError, "The method is not allowed.", {"rpc_code": -32601}),
     ((403, {"code": "not_whitelisted", "error": "The seat is not whitelisted."}), crx.NotWhitelisted,
-     "The seat is not whitelisted."),
-    ((404, {"code": "not_found", "error": "no route"}), crx.CrxError, "no route"),
-    ((302, "", {"Location": "https://elsewhere.test/rpc"}), crx.CrxError, "HTTP 302 from gateway.test"),
+     "The seat is not whitelisted.", {}),
+    ((404, {"code": "not_found", "error": "no route"}), crx.CrxError, "no route", {}),
+    ((302, "", {"Location": "https://elsewhere.test/rpc"}), crx.CrxError, "HTTP 302 from gateway.test", {}),
     ((503, {"jsonrpc": "2.0", "id": 1, "error": {"code": -32005, "message": "Busy."}}, {"Retry-After": "5"}),
-     crx.ServerError, "Busy."),
+     crx.ServerError, "Busy.", {}),
 ], ids=["401", "403-rpc", "403-whitelist", "404", "302", "503"])
-def test_any_answer_but_200_raises_the_typed_gateway_error(session, account, answer, err, words):
+def test_any_answer_but_200_raises_the_typed_gateway_error(session, account, answer, err, words, details):
     session.routes[("POST", "/rpc")] = answer
     gw, rpc = gateway_rpc(session, account)
     with pytest.raises(err) as ei:
         rpc("eth_chainId")
     assert type(ei.value) is err and str(ei.value) == words and ei.value.status == answer[0]
     assert ei.value.details["method"] == "eth_chainId" and gw.sleep == [] and len(session.calls) == 1
-    if answer is RPC_403:
-        assert ei.value.details["rpc_code"] == -32601
+    assert details.items() <= ei.value.details.items()
 
 
 def send_chain(receipts, counts=None, **edit):
@@ -259,8 +261,8 @@ def test_a_5xx_to_a_send_is_tracked_by_its_hash(session, account, tmp_path):
     assert receipts == [[h], [h]] and pauses == [4.0]
 
 
-def test_a_refused_receipt_read_after_the_send_raises_send_unknown(session, account):
-    node, sent = send_chain([None])
+def refusing_later_receipt_reads(node):
+    """Return a POST /rpc route that answers RPC_403 to each receipt read after the first; ``node`` answers the rest."""
     reads = []
 
     def answer(req):
@@ -269,8 +271,12 @@ def test_a_refused_receipt_read_after_the_send_raises_send_unknown(session, acco
             if len(reads) > 1:
                 return RPC_403
         return node(req)
+    return answer
 
-    session.routes[("POST", "/rpc")] = answer
+
+def test_a_refused_receipt_read_after_the_send_raises_send_unknown(session, account):
+    node, sent = send_chain([None])
+    session.routes[("POST", "/rpc")] = refusing_later_receipt_reads(node)
     pauses = Pauses()
     _, rpc = gateway_rpc(session, account, pauses)
     with pytest.raises(crx.SendUnknown) as ei:

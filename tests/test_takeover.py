@@ -405,31 +405,31 @@ def test_the_side_id_and_open_nonce_formulas():
 SKIP_DIRS = {".git", ".venv", "venv", "__pycache__", ".pytest_cache", "build", "dist"}
 
 
+def tree_files():
+    """Yield each file under ROOT, outside SKIP_DIRS and the egg-info directories."""
+    for top, dirs, files in os.walk(ROOT):
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS and not d.endswith(".egg-info")]
+        for f in files:
+            yield Path(top) / f
+
+
 def test_the_helper_is_unlisted():
     """No file in the repo tree names the module, apart from the module and this test."""
     assert not [n for n in crx.__all__ if re.search(r"take_?over", n, re.I)]
     own = {ROOT / "src" / "crx" / "_takeover.py", Path(__file__).resolve()}
     names = re.compile(rb"take_?over", re.I)
-    hits, read = [], 0
-    for top, dirs, files in os.walk(ROOT):
-        dirs[:] = [d for d in dirs if d not in SKIP_DIRS and not d.endswith(".egg-info")]
-        for f in files:
-            path = Path(top) / f
-            if path in own:
-                continue
-            read += 1
-            if names.search(path.read_bytes()):
-                hits.append(str(path.relative_to(ROOT)))
-    assert read > 20 and hits == []
+    read = [path for path in tree_files() if path not in own]
+    hits = [str(path.relative_to(ROOT)) for path in read if names.search(path.read_bytes())]
+    assert len(read) > 20 and hits == []
 
 
 def test_the_reads_and_the_post_time_out_inside_the_sign_window(client, session):
     form = failover_form(client.address)
     Gate(session, form=form)
     tko.take_over(client, RFQ, RATE, max_notional=CAP)
-    for c in session.calls:
-        if c["path"] in (f"/rfqs/{RFQ}/close", f"/rfqs/{RFQ}/close/sign"):
-            assert c["timeout"] == tko.HTTP_TIMEOUT_S == 2.0
+    window = (f"/rfqs/{RFQ}/close", f"/rfqs/{RFQ}/close/sign")
+    for c in [c for c in session.calls if c["path"] in window]:
+        assert c["timeout"] == tko.HTTP_TIMEOUT_S == 2.0
 
 
 def test_served_text_is_cleaned_in_messages(client, session):

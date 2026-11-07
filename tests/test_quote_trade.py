@@ -233,24 +233,37 @@ def test_reject_sends_nothing_and_a_later_accept_signs_nothing(make_client, venu
     c.reject(q)  # a repeat is a no-op
 
 
-SIGNED_REFUSALS = [
-    ((409, "round_closed"), crx.QuoteExpired),
-    ((422, "insufficient_collateral"), crx.TradeUnknown),
-    ((409, "trade_stale"), crx.TradeUnknown),  # its fresh template cannot be read
-]
+def refuse_signed_accept(session, venue, status, code):
+    """Start a new round whose signed accept the gateway refuses with ``status`` and ``code``."""
+    venue.reset()
+    session.routes[("POST", f"/rfqs/{RFQ}/accept")] = (status, {"code": code, "error": code,
+                                                               "details": {"trade_template": "?"}})
 
 
 def test_refusal_after_the_trade_is_signed(make_client, venue, session, clock):
-    for (status, code), err in SIGNED_REFUSALS:
-        venue.reset()
-        session.routes[("POST", f"/rfqs/{RFQ}/accept")] = (status, {"code": code, "error": code,
-                                                                   "details": {"trade_template": "?"}})
+    """409 round_closed on the signed accept raises QuoteExpired."""
+    refuse_signed_accept(session, venue, 409, "round_closed")
+    before = len(accepts(session))
+    c = make_client(clock=clock)
+    with pytest.raises(crx.QuoteExpired):
+        c.trade(c.quote("USD/MXN", "buy", 25_000, settles=WEEK))
+    assert len(accepts(session)) == before + 1 and sent_nothing(session)
+
+
+UNKNOWN_AFTER_SIGN = [  # status, code: refusals of the signed accept that leave the trade unknown
+    (422, "insufficient_collateral"),
+    (409, "trade_stale"),  # its fresh template cannot be read
+]
+
+
+def test_refusal_after_the_trade_is_signed_raises_trade_unknown(make_client, venue, session, clock):
+    for status, code in UNKNOWN_AFTER_SIGN:
+        refuse_signed_accept(session, venue, status, code)
         before = len(accepts(session))
         c = make_client(clock=clock)
-        with pytest.raises(err) as ei:
+        with pytest.raises(crx.TradeUnknown) as ei:
             c.trade(c.quote("USD/MXN", "buy", 25_000, settles=WEEK))
-        if err is crx.TradeUnknown:
-            assert "may still open" in str(ei.value) and ei.value.details == {"rfq_id": RFQ}, code
+        assert "may still open" in str(ei.value) and ei.value.details == {"rfq_id": RFQ}, code
         assert len(accepts(session)) == before + 1 and sent_nothing(session), code
 
 
@@ -305,8 +318,8 @@ def test_served_typed_data_must_equal_own(make_client, venue, session, clock, ac
         venue.reset()
         venue.typed_edit = edit
         c = make_client(clock=clock)
-        with pytest.raises(crx.RefusedToSign,
-                           match=f"^refused to sign: the served typed_data differs at {re.escape(at)}$"):
+        words = f"^refused to sign: the served typed_data differs at {re.escape(at)}$"
+        with pytest.raises(crx.RefusedToSign, match=words):
             c.trade(c.quote("USD/MXN", "buy", 25_000, settles=WEEK))
         assert refused_unsigned(session, c, account), at
 
@@ -436,21 +449,26 @@ def test_no_quote_in_the_window_raises_no_quotes_with_the_gateway_words(make_cli
 
 
 SETTLES_AT = 1_793_721_600  # 2026-11-03 16:00 UTC
-SETTLES_FORMS = [  # settles, the instant or the words of the refusal
+SETTLES_FORMS = [  # settles, the instant
     ("2026-11-03T16:00:00Z", SETTLES_AT), ("2026-11-03T17:00+01:00", SETTLES_AT), (SETTLES_AT, SETTLES_AT),
     (datetime(2026, 11, 3, 13, tzinfo=timezone(timedelta(hours=-3))), SETTLES_AT),
+]
+SETTLES_REFUSALS = [  # settles, the words of the refusal
     ("2026-11-03T16:00:00", "needs a timezone"), (datetime(2026, 11, 3, 16), "needs a timezone"),
     ("next Tuesday", "an exact UTC time"), (None, "settles is required"),
 ]
+SETTLES_NOW = datetime.fromtimestamp(SETTLES_AT - 7 * 86_400, timezone.utc)
 
 
 def test_settles_reads_iso_text_unix_seconds_and_aware_datetimes(make_client, markets):
     m = make_client(key=False).market("USD/MXN")
-    now = datetime.fromtimestamp(SETTLES_AT - 7 * 86_400, timezone.utc)
     for settles, out in SETTLES_FORMS:
-        if isinstance(out, int):
-            assert crx._settle.settlement(settles, m, now) == datetime.fromtimestamp(out, timezone.utc), settles
-        else:
-            with pytest.raises(crx.BadRequest, match=out) as ei:
-                crx._settle.settlement(settles, m, now)
-            assert ei.value.details == {"field": "settles"}, settles
+        assert crx._settle.settlement(settles, m, SETTLES_NOW) == datetime.fromtimestamp(out, timezone.utc), settles
+
+
+def test_settles_refuses_naive_vague_or_missing_times(make_client, markets):
+    m = make_client(key=False).market("USD/MXN")
+    for settles, words in SETTLES_REFUSALS:
+        with pytest.raises(crx.BadRequest, match=words) as ei:
+            crx._settle.settlement(settles, m, SETTLES_NOW)
+        assert ei.value.details == {"field": "settles"}, settles

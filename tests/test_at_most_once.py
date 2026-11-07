@@ -37,61 +37,81 @@ def accepts_on(session, rfq_id):
     return [x for x in session.calls if x["method"] == "POST" and x["path"] == f"/rfqs/{rfq_id}/accept"]
 
 
-RETRIES = [  # fault after the gateway takes the signed accept, error of the first call
-    ("timeout", None),
-    ("mark_unavailable", crx.MarkUnavailable),  # the gateway may keep the round after this answer
-]
+def faulted_quote(make_client, venue, session, clock, fault):
+    """Return a client and its quote; the gateway takes the signed accept, then fails with ``fault``."""
+    venue.script = [("sending", None)]  # no final answer within the wait
+    faulty_accept(venue, session, fault)
+    c = make_client(clock=clock)
+    return c, c.quote("USD/MXN", "buy", 25_000, settles=WEEK)
 
 
 def test_trade_retry_after_a_fault_signs_and_posts_nothing(make_client, venue, session, clock):
-    venue.script = [("sending", None)]  # no final answer within the wait
-    for fault, err in RETRIES:
-        venue.reset()
-        faulty_accept(venue, session, fault)
-        before = len(accepts(session))
-        c = make_client(clock=clock)
-        q = c.quote("USD/MXN", "buy", 25_000, settles=WEEK)
-        if err is None:
-            assert c.trade(q, wait=30).status == "sending"
-        else:
-            with pytest.raises(err):
-                c.trade(q, wait=30)
-        t = c.trade(q, wait=30)
-        assert t.status == "sending" and (t.rfq_id, t.quote_id) == (RFQ, QID), fault
-        (body,) = accepts(session)[before:]
-        assert "sig" in body, fault
+    """The fault is a read timeout: the first call reads ``sending``."""
+    c, q = faulted_quote(make_client, venue, session, clock, "timeout")
+    assert c.trade(q, wait=30).status == "sending"
+    t = c.trade(q, wait=30)
+    assert t.status == "sending" and (t.rfq_id, t.quote_id) == (RFQ, QID)
+    (body,) = accepts(session)
+    assert "sig" in body
 
 
-FIRST_ENDS = [  # the first trade's final word after its call ended, error of the second quote until it is read
-    ("open", crx.EarlierOutcome),
-    ("refused", None),
-]
+def test_trade_retry_after_mark_unavailable_signs_and_posts_nothing(make_client, venue, session, clock):
+    """The fault is 503 mark_unavailable: the first call raises it, and the gateway may keep the round."""
+    c, q = faulted_quote(make_client, venue, session, clock, "mark_unavailable")
+    with pytest.raises(crx.MarkUnavailable):
+        c.trade(q, wait=30)
+    t = c.trade(q, wait=30)
+    assert t.status == "sending" and (t.rfq_id, t.quote_id) == (RFQ, QID)
+    (body,) = accepts(session)
+    assert "sig" in body
+
+
+def first_trade_with_no_final_answer(make_client, venue, session, clock):
+    """Return a client and its quote after one trade call that ends with no final answer.
+
+    The gateway takes the signed accept and the read times out. The second RFQ answers each accept 409.
+    """
+    faulty_accept(venue, session, "timeout")
+    session.routes[("POST", f"/rfqs/{RFQ2}/accept")] = (409, {"code": "round_closed", "error": "closed"})
+    venue.script = [("sending", None)]
+    c = make_client(clock=clock)
+    q = c.quote("USD/MXN", "buy", 25_000, settles=WEEK)
+    c.trade(q, wait=30)
+    return c, q
 
 
 def test_no_second_quote_while_the_first_has_no_final_answer(make_client, venue, session, clock):
-    faulty_accept(venue, session, "timeout")
-    session.routes[("POST", f"/rfqs/{RFQ2}/accept")] = (409, {"code": "round_closed", "error": "closed"})
-    for word, err in FIRST_ENDS:
-        venue.reset()
-        venue.script = [("sending", None)]
-        c = make_client(clock=clock)
-        q = c.quote("USD/MXN", "buy", 25_000, settles=WEEK)
-        c.trade(q, wait=30)
-        second = len(accepts_on(session, RFQ2))
-        with pytest.raises(crx.TradeUnknown) as ei:
-            c.trade(other_rfq(q), wait=30)
-        assert ei.value.details["rfq_id"] == RFQ and "nothing signed" in str(ei.value), word
-        venue.script = [(word, TXH if word == "open" else None)]
-        if err is not None:
-            with pytest.raises(err) as ei:
-                c.trade(other_rfq(q), wait=30)
-            assert ei.value.details == {"rfq_id": RFQ, "status": word}
-        assert len(accepts_on(session, RFQ2)) == second, word
-        # The earlier outcome blocks the second quote only until it is read.
-        with pytest.raises(crx.QuoteExpired):
-            c.trade(other_rfq(q), wait=30)
-        assert len(accepts_on(session, RFQ2)) > second, word
-    assert len(signed_posts(session)) == len(FIRST_ENDS)
+    """The first trade then reads ``open``: the second quote raises EarlierOutcome once."""
+    c, q = first_trade_with_no_final_answer(make_client, venue, session, clock)
+    second = len(accepts_on(session, RFQ2))
+    with pytest.raises(crx.TradeUnknown) as ei:
+        c.trade(other_rfq(q), wait=30)
+    assert ei.value.details["rfq_id"] == RFQ and "nothing signed" in str(ei.value)
+    venue.script = [("open", TXH)]
+    with pytest.raises(crx.EarlierOutcome) as ei:
+        c.trade(other_rfq(q), wait=30)
+    assert ei.value.details == {"rfq_id": RFQ, "status": "open"}
+    assert len(accepts_on(session, RFQ2)) == second
+    # The earlier outcome blocks the second quote only until it is read.
+    with pytest.raises(crx.QuoteExpired):
+        c.trade(other_rfq(q), wait=30)
+    assert len(accepts_on(session, RFQ2)) > second
+    assert len(signed_posts(session)) == 1
+
+
+def test_no_second_quote_while_the_first_has_no_final_answer_then_refused(make_client, venue, session, clock):
+    """The first trade then reads ``refused``: the second quote goes out with no EarlierOutcome."""
+    c, q = first_trade_with_no_final_answer(make_client, venue, session, clock)
+    second = len(accepts_on(session, RFQ2))
+    with pytest.raises(crx.TradeUnknown) as ei:
+        c.trade(other_rfq(q), wait=30)
+    assert ei.value.details["rfq_id"] == RFQ and "nothing signed" in str(ei.value)
+    venue.script = [("refused", None)]
+    assert len(accepts_on(session, RFQ2)) == second
+    with pytest.raises(crx.QuoteExpired):
+        c.trade(other_rfq(q), wait=30)
+    assert len(accepts_on(session, RFQ2)) > second
+    assert len(signed_posts(session)) == 1
 
 
 class Money:

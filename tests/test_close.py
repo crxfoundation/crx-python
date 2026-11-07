@@ -158,6 +158,14 @@ def test_answer_close_signs_the_gateways_plain_close_and_reads_closed(session, t
     assert sent[f"/rfqs/{AG_RFQ}/close/sign"] == AG["sign"]["remaining"]["sent"]
 
 
+def edited(template, edit):
+    """Return a copy of ``template`` with ``edit`` set; a key ``item.<name>`` sets the item's ``<name>``."""
+    t = copy.deepcopy(template)
+    for k, v in edit.items():
+        (t["item"] if k.startswith("item.") else t)[k.removeprefix("item.")] = v
+    return t
+
+
 @pytest.mark.parametrize("edit,why", [
     ({"path": "move"}, "path is not the remaining seat's"),
     ({"item.close_rate": "156400000"}, "close rate is not 156.5"),
@@ -165,9 +173,7 @@ def test_answer_close_signs_the_gateways_plain_close_and_reads_closed(session, t
     ({"item.notional": "1500000000000"}, "carries leg words"),
 ])
 def test_answer_close_declines_a_plain_close_off_its_answer(session, tmp_path, edit, why):
-    t = copy.deepcopy(AG["template"]["remaining"])
-    for k, v in edit.items():
-        (t["item"] if k.startswith("item.") else t)[k.removeprefix("item.")] = v
+    t = edited(AG["template"]["remaining"], edit)
     c = client(session, tmp_path, INCOMING, Clock(AG_T0), core=AG_CORE)
     counterparty_routes(session, t)
     with pytest.raises(crx.RefusedToSign, match=why):

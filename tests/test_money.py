@@ -398,9 +398,9 @@ def test_withdraw_with_no_amount_takes_all_free_collateral_rounded_down(make_cli
     assert g.intent["amount"] == 1_234_567_891 and g.signer == account.address
 
 
-FREE_REFUSALS = [  # amount, free, error, details
-    ("1000.000001", "1000.000000", crx.InsufficientCollateral, {"free": "1000.000000", "requested": "1000.000001"}),
-    (None, None, crx.MarkUnavailable, {}),
+FREE_REFUSALS = [  # withdraw() amount arguments, free, error, details
+    (("1000.000001",), "1000.000000", crx.InsufficientCollateral, {"free": "1000.000000", "requested": "1000.000001"}),
+    ((), None, crx.MarkUnavailable, {}),
 ]
 
 
@@ -409,11 +409,11 @@ def test_withdraw_checks_free_collateral_before_a_signature(make_client, session
     gate(session, health, account)
     signed = []
     monkeypatch.setattr(crx.client, "sign_typed", lambda *a, **k: signed.append(1))
-    for amount, free, err, details in FREE_REFUSALS:
+    for args, free, err, details in FREE_REFUSALS:
         session.routes[("GET", "/balance")] = balance_body(account, free=free)
         c = make_client()
         with pytest.raises(err) as ei:
-            c.withdraw(wait=0) if amount is None else c.withdraw(amount, wait=0)
+            c.withdraw(*args, wait=0)
         assert ei.value.details == details and ei.value.status is None, err
         assert signed == [] and session.paths("POST") == [] and c._held_withdraw is None, err
 
@@ -453,6 +453,17 @@ def test_withdraw_short_of_free_collateral_for_120_s_raises(make_client, session
 IN_FLIGHT = {"code": "trade_in_flight", "error": "a trade of this account is still opening; withdraw after it"}
 
 
+def in_flight_then(answer, clock, posts, refusals=3):
+    """Return a POST /withdraw route that adds (time, body) to ``posts``.
+
+    The first ``refusals`` posts answer 409 trade_in_flight; each later post gets ``answer``.
+    """
+    def route(req):
+        posts.append((clock(), req["body"]))
+        return (409, IN_FLIGHT) if len(posts) <= refusals else answer(req)
+    return route
+
+
 def test_withdraw_posts_the_same_signed_intent_every_5_s_until_taken(
         make_client, session, health, account, monkeypatch):
     """The same signed intent goes again every 5 s until the refusal clears."""
@@ -461,11 +472,7 @@ def test_withdraw_posts_the_same_signed_intent_every_5_s_until_taken(
     g = gate(session, health, account)
     session.routes[("GET", "/balance")] = [balance_body(account), g.view("accepted")]
     posts = []
-
-    def wd(req):
-        posts.append((clock(), req["body"]))
-        return (409, IN_FLIGHT) if len(posts) <= 3 else g.answer(req)
-    session.routes[("POST", "/withdraw")] = wd
+    session.routes[("POST", "/withdraw")] = in_flight_then(g.answer, clock, posts)
     signed = []
     real = crx.client.sign_typed
     monkeypatch.setattr(crx.client, "sign_typed", lambda *a, **k: signed.append(1) or real(*a, **k))
@@ -478,8 +485,10 @@ def test_withdraw_posts_the_same_signed_intent_every_5_s_until_taken(
     assert c._held_withdraw["returned"] is True  # "accepted" is in progress, so the hold stays
 
 
-AMOUNTS = [  # value, the amount or the words of the refusal
+AMOUNTS = [  # value, the amount
     ("1000", Decimal("1000")), (100, Decimal("100")), ("0.000001", Decimal("0.000001")),
+]
+AMOUNT_REFUSALS = [  # value, the words of the refusal
     ("abc", "is not a number"), ("0", "must be above zero"), ("-1", "must be above zero"),
     ("NaN", "must be above zero"), ("Infinity", "must be above zero"), ("1.0000001", "more than 6 decimals"),
 ]
@@ -487,12 +496,14 @@ AMOUNTS = [  # value, the amount or the words of the refusal
 
 def test_amount_parsing():
     for value, out in AMOUNTS:
-        if isinstance(out, Decimal):
-            assert crx.client._amount(value) == out, value
-        else:
-            with pytest.raises(crx.BadRequest) as e:
-                crx.client._amount(value)
-            assert out in str(e.value), value
+        assert crx.client._amount(value) == out, value
+
+
+def test_amount_parsing_refuses_bad_amounts():
+    for value, words in AMOUNT_REFUSALS:
+        with pytest.raises(crx.BadRequest) as e:
+            crx.client._amount(value)
+        assert words in str(e.value), value
 
 
 def utc(text):
@@ -507,9 +518,8 @@ def test_next_check_is_the_next_05_past_the_hour_on_testnet(make_client, session
 
 
 def test_market_reads_one_pair_and_refuses_a_pair_not_offered_here(make_client, session, markets):
-    for row in markets["markets"]:
-        if row["pair"] == "USD/PHP":
-            row["chains"] = [{"chain": "ethereum", "max_premium_bps": 200}]
+    for row in [r for r in markets["markets"] if r["pair"] == "USD/PHP"]:
+        row["chains"] = [{"chain": "ethereum", "max_premium_bps": 200}]
     session.routes[("GET", "/markets")] = markets
     c = make_client(key=False)
     m = c.market("usdmxn")
