@@ -374,6 +374,20 @@ def ms(t):
     return int(t.timestamp()) * 1000
 
 
+PAIRS = ("USD/BRL", "USD/MXN", "USD/PHP")
+
+
+def test_markets_parse(make_client):
+    ms = {m.pair: m for m in make_client(key=False).markets()}
+    assert sorted(ms) == list(PAIRS)
+    for pair in PAIRS:
+        m = ms[pair]
+        assert not m.paused and m.min_notional == Decimal(10000) and m.max_notional == Decimal(10_000_000)
+        assert m.pair_id == "0x" + keccak(text=pair).hex() and (m.base, m.quote) == (pair[:3], pair[4:])
+        assert m.max_premium_bps == 200 and m.open is False and (m.min_tenor_s, m.max_tenor_s) == (600, 7_776_000)
+    assert ms["USD/MXN"].next_open == datetime.fromtimestamp(1_790_546_400, timezone.utc)
+
+
 FREE_REFUSALS = [  # withdraw() amount arguments, free, error, details
     (("1000.000001",), "1000.000000", crx.InsufficientCollateral, {"free": "1000.000000", "requested": "1000.000001"}),
     ((), None, crx.MarkUnavailable, {}),
