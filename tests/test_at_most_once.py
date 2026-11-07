@@ -45,21 +45,21 @@ def faulted_quote(make_client, venue, session, clock, fault):
     return c, c.quote("USD/MXN", "buy", 25_000, settles=WEEK)
 
 
-def test_trade_retry_after_a_fault_signs_and_posts_nothing(make_client, venue, session, clock):
-    """The fault is a read timeout: the first call reads ``sending``."""
-    c, q = faulted_quote(make_client, venue, session, clock, "timeout")
-    assert c.trade(q, wait=30).status == "sending"
-    t = c.trade(q, wait=30)
-    assert t.status == "sending" and (t.rfq_id, t.quote_id) == (RFQ, QID)
-    (body,) = accepts(session)
-    assert "sig" in body
+def first_trade(c, q):
+    """Return the status of the first trade call, or the class of the error it raised."""
+    try:
+        return c.trade(q, wait=30).status
+    except crx.CrxError as e:
+        return type(e)
 
 
-def test_trade_retry_after_mark_unavailable_signs_and_posts_nothing(make_client, venue, session, clock):
-    """The fault is 503 mark_unavailable: the first call raises it, and the gateway may keep the round."""
-    c, q = faulted_quote(make_client, venue, session, clock, "mark_unavailable")
-    with pytest.raises(crx.MarkUnavailable):
-        c.trade(q, wait=30)
+@pytest.mark.parametrize("fault, first", [("timeout", "sending"), ("mark_unavailable", crx.MarkUnavailable)],
+                         ids=["timeout", "mark_unavailable"])
+def test_trade_retry_after_a_fault_signs_and_posts_nothing(make_client, venue, session, clock, fault, first):
+    """After a read timeout the first call reads ``sending``; after 503 mark_unavailable it raises, and the gateway
+    may keep the round. The retry signs and posts nothing."""
+    c, q = faulted_quote(make_client, venue, session, clock, fault)
+    assert first_trade(c, q) == first
     t = c.trade(q, wait=30)
     assert t.status == "sending" and (t.rfq_id, t.quote_id) == (RFQ, QID)
     (body,) = accepts(session)

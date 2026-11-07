@@ -228,14 +228,18 @@ def item_row(status, item, tx=None):
             "reason": None}
 
 
-def test_withdraw_one_signed_post_sends_no_tx(make_client, session, health, account):
+@pytest.mark.parametrize("args, free, amount", [((1000,), "20000.000000", "1000"), ((), "1234.5678919", "1234.567891")],
+                         ids=["1000", "all-free-rounded-down"])
+def test_withdraw_one_signed_post_sends_no_tx(make_client, session, health, account, args, free, amount):
+    """withdraw(1000) signs 1000; withdraw() signs all free collateral, rounded down to 6 decimals."""
     chain = Chain(session)
     g = gate(session, health, account)
-    session.routes[("GET", "/balance")] = [balance_body(account), g.view("sending"), g.view("accepted", tx=LANDED)]
+    session.routes[("GET", "/balance")] = [balance_body(account, free=free), g.view("sending"),
+                                           g.view("accepted", tx=LANDED)]
     clock = Clock(time.time())
     now = int(clock())
-    out = make_client(clock=clock).withdraw(1000)
-    assert (out.status, out.item, out.tx, out.nonce) == ("accepted", g.item, LANDED, 3)
+    out = make_client(clock=clock).withdraw(*args)
+    assert (out.status, out.item, out.tx, out.nonce, out.amount) == ("accepted", g.item, LANDED, 3, Decimal(amount))
     # Only the chain check reads the RPC.
     assert chain.sent == [] and set(session.rpc_methods()) <= {"eth_chainId", "eth_getCode"}
     posts = [c for c in session.calls if c["method"] == "POST"]
@@ -243,9 +247,9 @@ def test_withdraw_one_signed_post_sends_no_tx(make_client, session, health, acco
     body = posts[0]["body"]
     # The body names no recipient, because the chain pays the account.
     assert {k: v for k, v in body.items() if k != "sig"} == {
-        "chain": "avax-fuji", "amount": "1000", "nonce": "3", "deadline": now + 22 * 3600}
+        "chain": "avax-fuji", "amount": amount, "nonce": "3", "deadline": now + 22 * 3600}
     assert 120 < body["deadline"] - now <= 82_800  # the gateway's deadline window
-    assert g.intent == {"account": account.address.lower(), "amount": 1000 * 10**6, "nonce": 3,
+    assert g.intent == {"account": account.address.lower(), "amount": int(Decimal(amount) * 10**6), "nonce": 3,
                         "deadline": now + 22 * 3600}
     assert g.signer == account.address  # the digest signed is the gateway's 4-member rebuild
 

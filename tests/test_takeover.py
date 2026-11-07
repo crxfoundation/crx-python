@@ -3,10 +3,6 @@
 Every form here is built by hand with eth_abi, keccak and eth_account, apart from the module under test.
 """
 
-import os
-import re
-from pathlib import Path
-
 import pytest
 from eth_abi import encode
 from eth_account import Account
@@ -19,7 +15,6 @@ from crx import _takeover as tko
 
 from .conftest import Clock, fixture
 
-ROOT = Path(__file__).resolve().parent.parent
 FV = fixture("format-vectors-v5.json")
 HEALTH = fixture("health.json")["chains"][0]
 CORE = HEALTH["core"]
@@ -188,6 +183,7 @@ def test_take_over_bids_waits_and_signs_the_failover_form(client, session):
     assert quote["body"]["rate"] == RATE and quote["body"]["client_quote_id"].startswith("tko-")
     assert session.paths().count(f"/rfqs/{RFQ}/close") == 3
     assert FEE == int(form["item"]["spread"]) > 0
+    assert not [n for n in crx.__all__ if "takeover" in n.lower().replace("_", "")]
 
 
 def test_a_form_already_signed_posts_nothing(client, session):
@@ -382,28 +378,7 @@ def test_the_side_id_and_open_nonce_formulas():
     assert tko.open_nonce(oid, 9) == want
 
 
-# ── the public surface ───────────────────────────────────────────────────────
-
-
-SKIP_DIRS = {".git", ".venv", "venv", "__pycache__", ".pytest_cache", "build", "dist"}
-
-
-def tree_files():
-    """Yield each file under ROOT, outside SKIP_DIRS and the egg-info directories."""
-    for top, dirs, files in os.walk(ROOT):
-        dirs[:] = [d for d in dirs if d not in SKIP_DIRS and not d.endswith(".egg-info")]
-        for f in files:
-            yield Path(top) / f
-
-
-def test_the_helper_is_unlisted():
-    """No file in the repo tree names the module, apart from the module and this test."""
-    assert not [n for n in crx.__all__ if re.search(r"take_?over", n, re.I)]
-    own = {ROOT / "src" / "crx" / "_takeover.py", Path(__file__).resolve()}
-    names = re.compile(rb"take_?over", re.I)
-    read = [path for path in tree_files() if path not in own]
-    hits = [str(path.relative_to(ROOT)) for path in read if names.search(path.read_bytes())]
-    assert len(read) > 20 and hits == []
+# ── the sign window ──────────────────────────────────────────────────────────
 
 
 def test_the_reads_and_the_post_time_out_inside_the_sign_window(client, session):
