@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.0
+
+- Close and takeover signatures show the pair, direction, size, settlement, incoming party and payment terms. A takeover at a benchmark shows its pricing rule and conditional fee. The client checks each displayed term before signing.
+- Existing close, answer and takeover calls keep their arguments. The earlier signature format remains supported during the release transition.
+
 ## 0.3.21
 
 - A POST that answers `503 service_restarting` is sent again after each `Retry-After` (1 s when absent, 0.5 s at least), for up to 6 s from the first send, with the same body bytes. A signed call signs new headers for each send; a session call sends its token again. A session client's `POST /session` sign-in does the same, for every call, GETs included.

@@ -168,6 +168,8 @@ def check_commitment(t: dict, fields: Any, words: dict, counterparty: bool = Fal
 
 def sign_form(c: "Client", t: dict, primary: str, message: dict) -> str:
     """Sign ``primary`` over ``message`` with the client's pinned domain, once the template's digest and typed data match it."""
+    if not e7.consent_version_ok(t, primary):
+        raise _refuse("the consent version does not match its typed data")
     ch = c._chain_info()
     td = e7.typed_data(primary, ch["chain_id"], ch["core"], message)
     digest = e7.typed_digest(td)
@@ -192,8 +194,20 @@ def _hexes(words: dict, names: Any) -> dict:
     return out
 
 
-def consent_message(words: dict, commitment: Any, salt: Any) -> dict:
-    """Return the ``AllocationConsent`` message of an allocation item."""
+def consent_message(words: dict, commitment: Any, salt: Any, *, pair: str | None = None,
+                    side: int | None = None, notional_e6: int | None = None,
+                    settlement: int | None = None) -> dict:
+    """Return the consent with checked position terms, or the legacy form when pair is absent."""
+    if pair is not None:
+        if not e7.pair_text_ok(pair):
+            raise ValueError("the pair is not AAA/BBB")
+        return {
+            "pair": pair, "exitingPositionSide": e7.side_text(side),
+            "notionalE6": str(_w("uint256", notional_e6)), "settlement": str(_w("uint40", settlement)),
+            "closeRateE6": str(_w("uint256", words["closeRate"])),
+            "spreadUsdE6": str(_w("uint256", words["spread"])), "incoming": _w("address", words["incoming"]),
+            "deadline": str(_w("uint64", words["deadline"])), "commitment": e7.h0x(_w("bytes32", commitment)),
+        }
     m = _hexes(words, ("oldId", "exitingSide", "remainingSide", "incomingSide", "nonce", "deadline"))
     return {**m, "commitment": e7.h0x(_w("bytes32", commitment)), "salt": e7.h0x(_w("bytes32", salt))}
 
@@ -478,7 +492,11 @@ def close_trade(c: "Client", trade_id: Any, to: Any, wait: float, poll: float = 
         w = check_allocation(t, role="exiting", seat=seat, rfq_id=rfq_id, rate_e6=rate_e6, pair=pair, side=side,
                              notional_e6=notional_e6, settlement_ms=settlement_ms, now=c._clock(), entry=entry,
                              to=None if to is None else incoming)
-        sig = sign_form(c, t, "AllocationConsent", consent_message(w, t["commitment"], t["item"]["salt"]))
+        sig = sign_form(c, t, "AllocationConsent", consent_message(
+            w, t["commitment"], t["item"]["salt"],
+            pair=pair if e7.readable_consent(t.get("typed_data"), "AllocationConsent") else None,
+            side=side, notional_e6=notional_e6, settlement=settlement_ms // 1000,
+        ))
         until = min(end, _w("uint64", w["deadline"]))
         if not _post_sign(c, rfq_id, sig, "consenting", until) and not _moved_on(c, rfq_id, end, "consenting"):
             return Close(trade_id=tid, rfq_id=rfq_id, to=str(t["item"].get("incoming", "")).lower(), rate=rate,
@@ -682,7 +700,11 @@ def answer(c: "Client", request: Any, rate: Any, wait: float, poll: float = 0.5,
             raise _refuse(f"the award names another form ({clean(award.get('digest_kind'), 40)})")
         w = check_allocation(t, role="remaining", seat=seat, rfq_id=rfq_id, rate_e6=rate_e6, pair=pair, side=-own,
                              notional_e6=notional_e6, settlement_ms=settlement_ms, now=c._clock(), entry=entry)
-        sig = sign_form(c, t, "AllocationConsent", consent_message(w, t["commitment"], t["item"]["salt"]))
+        sig = sign_form(c, t, "AllocationConsent", consent_message(
+            w, t["commitment"], t["item"]["salt"],
+            pair=pair if e7.readable_consent(t.get("typed_data"), "AllocationConsent") else None,
+            side=-own, notional_e6=notional_e6, settlement=settlement_ms // 1000,
+        ))
     except RefusedToSign:
         _decline(c, rfq_id, quote_id, t.get("digest") if isinstance(t, dict) else None, sign_by)
         raise
