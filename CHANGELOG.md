@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.20
+
+- `close_trade(trade_id, to=None, limit=None, wait=None)` closes an open trade. When the gateway offers closes with the counterparty and picks its answer, the trade ends for both seats. Else the best quote of another seat, or of the one seat `to` names, takes over this seat's side. `limit=` is the worst close rate the seat takes. The SDK checks the close against the trade before it signs. On a mismatch it raises `RefusedToSign` and signs nothing. The call returns a `crx.Close`.
+- `close_requests()` yields each request of a counterparty to close a trade with this seat. `answer_close(request, rate)` answers one. When the gateway picks the answer, the SDK checks the close against the trade and the rate, then signs it.
+- `crx.Close` is new: the result of `close_trade()` and `answer_close()`.
+- A `GET /markets` that fails with `NetworkError`, `ServerError` or `MarkUnavailable` goes once more after a random pause of 0.25 to 0.5 s. Before, the pause was 0.5 s. Other GETs keep 0.5 s. Each GET still goes at most twice.
+- The install line names `@v0.3.20`.
+
 ## 0.3.19
 
 - On testnet, each signed gateway call names its chain. The signed message carries `Chain: 43113` after `Audience: crx-gateway`, and the call sends the header `x-crx-chain: 43113`. The Sandbox gateway refuses a signed call that names no chain (401). On mainnet (chain 1) the signed message and the headers are unchanged.
