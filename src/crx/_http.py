@@ -214,7 +214,7 @@ class Gateway:
         except GET_RETRIED as e:
             if method != "GET" or getattr(e, "login", False):
                 raise
-            pause = random.uniform(GET_RETRY_PAUSE / 2, GET_RETRY_PAUSE)
+            pause = random.uniform(GET_RETRY_PAUSE / 2, GET_RETRY_PAUSE) if path == "/markets" else GET_RETRY_PAUSE
             log.info("GET %s: %s; sending it once more in %s s", clean(path, 100), e.code, pause)
         self.sleep(pause)
         return self.parse(self.raw_request(method, path, body=body, query=query, auth=auth, timeout=timeout), ok)

@@ -92,6 +92,10 @@ def test_the_gateway_over_a_socket_signs_reads_and_follows_no_redirect(server, h
     assert (ei.value.status, ei.value.details["body"]) == (503, "503 Service Unavailable")
     assert [p.split("?")[0] for _, p, _, _ in server.seen] == ["/balance", "/positions", "/markets", "/markets"]
     assert len(pauses) == 1 and 0.25 <= pauses[0] <= 0.5
+    server.answers[("GET", "/balance")] = server.answers[("GET", "/markets")]
+    with pytest.raises(crx.ServerError):
+        c.balance()
+    assert pauses[1:] == [0.5]
 
 
 def js(value) -> bytes:
