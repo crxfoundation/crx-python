@@ -22,7 +22,7 @@ from .signer import as_signer, sign_login
 log = logging.getLogger("crx")
 SESSION_HEADER = "x-crx-session"
 SESSION_MARGIN = 60.0  # seconds before expiry to mint a new token
-GET_RETRY_PAUSE = 0.5  # maximum seconds before the single GET retry
+GET_RETRY_PAUSE = 0.5  # seconds before the single GET retry; /markets waits 1 to 2 times this
 # Errors that retry a GET once. MarkUnavailable means the gateway has no market price yet.
 GET_RETRIED = (NetworkError, ServerError, MarkUnavailable)
 _TOKEN = re.compile(r"[0-9a-f]{64}")
@@ -214,7 +214,7 @@ class Gateway:
         except GET_RETRIED as e:
             if method != "GET" or getattr(e, "login", False):
                 raise
-            pause = random.uniform(GET_RETRY_PAUSE / 2, GET_RETRY_PAUSE) if path == "/markets" else GET_RETRY_PAUSE
+            pause = random.uniform(GET_RETRY_PAUSE, 2 * GET_RETRY_PAUSE) if path == "/markets" else GET_RETRY_PAUSE
             log.info("GET %s: %s; sending it once more in %s s", clean(path, 100), e.code, pause)
         self.sleep(pause)
         return self.parse(self.raw_request(method, path, body=body, query=query, auth=auth, timeout=timeout), ok)
