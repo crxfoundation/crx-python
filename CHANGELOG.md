@@ -3,8 +3,8 @@
 ## Unreleased
 
 - A POST that answers `503 service_restarting` is sent again after each `Retry-After` (1 s when absent, 0.5 s at least), for up to 6 s from the first send, with the same body bytes. A signed call signs new headers for each send; a session call sends its token again. A session client's `POST /session` sign-in does the same, for every call, GETs included.
-- Once a POST was sent again, any answer other than a 2xx, or no answer, reads as the last `503 service_restarting`. Past 6 s that `503` goes back too. Each call reads it as in 0.3.20: `accept()` and `withdraw()` read their status, the close calls wait on the round, and other calls raise `ServerError`.
-- Not sent again: an `eth_sendRawTransaction` on the `/rpc` route (its hash tracks it), and the posts of the close and takeover calls, which repeat on their own within their own time. Other answers and the GETs of a signed client are unchanged.
+- Once a POST was sent again, any answer other than a 2xx, or no answer, reads as its `503 service_restarting`, with the `details` of each such 503 (for example the `rfq_id` of an open RFQ). Past 6 s that 503 goes back too. Each call reads it as in 0.3.20: `accept()` and `withdraw()` read their status, the close calls wait on the round, and other calls raise `ServerError`.
+- The close-round accept, both decline posts and the takeover bid are sent again within their own deadlines. Not sent again: an `eth_sendRawTransaction` on the `/rpc` route (its hash tracks it), and the close posts that repeat on their own (close open, novation, close answer, close sign, takeover sign), sign-in included. Other answers and the GETs of a signed client are unchanged.
 
 ## 0.3.20
 

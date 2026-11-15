@@ -469,10 +469,7 @@ def close_trade(c: "Client", trade_id: Any, to: Any, wait: float, poll: float = 
         raise RefusedToSign(f"refused to accept: the best close rate {_plain(rate)} is past the limit "
                             f"{_plain(Decimal(limit_e6).scaleb(-6))}; nothing accepted",
                             details={"rfq_id": rfq_id, "rate": _plain(rate)})
-    try:
-        c._gw.request("POST", f"/rfqs/{rfq_id}/accept", body={"quote_id": q["quote_id"]})
-    except (NetworkError, ServerError) as e:
-        log.info("close accept on rfq %s: %s; the round's status decides", rfq_id, e.code)
+    _accept_close(c, rfq_id, q["quote_id"], end)
     _await_status(c, rfq_id, ("consenting", "armed"), end, poll)
     t = _template(c, rfq_id, end)
     if t.get("signed") is not True:
@@ -551,12 +548,22 @@ def _await_award(c: "Client", rfq_id: str, quote_id: str, cursor: int, end: floa
         c._sleep(poll)
 
 
-def _decline(c: "Client", rfq_id: str, quote_id: str, digest: Any) -> None:
+def _accept_close(c: "Client", rfq_id: str, quote_id: str, end: float) -> None:
+    """Post the close accept. A 503 ``service_restarting`` sends it again until ``end`` at most. With no
+    answer, the round's status decides."""
+    try:
+        c._gw.request("POST", f"/rfqs/{rfq_id}/accept", body={"quote_id": quote_id}, within=end - c._clock())
+    except (NetworkError, ServerError) as e:
+        log.info("close accept on rfq %s: %s; the round's status decides", rfq_id, e.code)
+
+
+def _decline(c: "Client", rfq_id: str, quote_id: str, digest: Any, until: float) -> None:
+    """Post the decline. A 503 ``service_restarting`` sends it again until ``until`` at most."""
     body = {"quote_id": quote_id}
     if _word(digest) is not None:
         body["digest"] = _word(digest)
     try:
-        c._gw.request("POST", f"/rfqs/{rfq_id}/close/decline", body=body)
+        c._gw.request("POST", f"/rfqs/{rfq_id}/close/decline", body=body, within=until - c._clock())
     except CrxError as e:
         log.info("close decline on rfq %s: %s", rfq_id, e.code)
 
@@ -677,7 +684,7 @@ def answer(c: "Client", request: Any, rate: Any, wait: float, poll: float = 0.5,
                              notional_e6=notional_e6, settlement_ms=settlement_ms, now=c._clock(), entry=entry)
         sig = sign_form(c, t, "AllocationConsent", consent_message(w, t["commitment"], t["item"]["salt"]))
     except RefusedToSign:
-        _decline(c, rfq_id, quote_id, t.get("digest") if isinstance(t, dict) else None)
+        _decline(c, rfq_id, quote_id, t.get("digest") if isinstance(t, dict) else None, sign_by)
         raise
     if not _post_sign(c, rfq_id, sig, "signing", sign_by) and not _moved_on(c, rfq_id, end):
         return Close(trade_id=tid, rfq_id=rfq_id, to=seat, rate=rate_d, status="unsigned", item=None, tx=None, raw=t,

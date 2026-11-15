@@ -8,6 +8,7 @@ import requests
 from eth_account import Account
 from eth_account.messages import encode_defunct
 
+import crx
 from crx import _close
 from crx import _takeover as tko
 from crx._chain import Rpc
@@ -26,15 +27,18 @@ TAKEN = {"rfq_id": RFQ, "quote_id": QID, "client_quote_id": None}
 TOKEN = "cd" * 32
 
 
-def restarting_body(secs=1):
-    """The gateway's 503 service_restarting body, with ``details.retry_after_secs`` unless ``secs`` is None."""
+def restarting_body(secs=1, **more):
+    """The gateway's 503 service_restarting body: ``details`` holds ``more`` and ``retry_after_secs`` unless
+    ``secs`` is None."""
     body = {"error": LINE, "code": "service_restarting", "outcome": "unavailable", "message": LINE}
-    return body if secs is None else {**body, "details": {"retry_after_secs": secs}}
+    details = {**({} if secs is None else {"retry_after_secs": secs}), **more}
+    return {**body, "details": details} if details else body
 
 
-def restarting(secs=1):
+def restarting(secs=1, **more):
     """The 503 service_restarting answer, with ``Retry-After: secs`` unless ``secs`` is None."""
-    return 503, "application/json", js(restarting_body(secs)), {} if secs is None else {"Retry-After": str(secs)}
+    return (503, "application/json", js(restarting_body(secs, **more)),
+            {} if secs is None else {"Retry-After": str(secs)})
 
 
 def refused(status, code):
@@ -127,6 +131,28 @@ def test_a_post_that_answers_503_service_restarting_goes_again_and_a_refused_res
     assert outcome(lambda: gw.request("POST", PATH, body=BODY)) == STILL
     assert (len(server.seen), slept) == (3, [1, 1])
 
+    # The answer keeps each 503's details: a later value wins, and an earlier member stays.
+    server.seen.clear()
+    server.answers[("POST", PATH)] = [restarting(1, rfq_id=RFQ), restarting(2), refused(409, "own_round_open")]
+    gw = Gateway(server.url, account, http)
+    gw.sleep = slept = Pauses()
+    try:
+        gw.request("POST", PATH, body=BODY)
+    except crx.ServerError as e:
+        kept = (e.gateway_code, e.details.get("rfq_id"), e.details.get("retry_after_secs"))
+    assert (kept, len(server.seen), slept) == (("service_restarting", RFQ, 2), 3, [1, 2])
+
+    # A session token refused on a turn past the cap: no new sign-in, no second send; the call reads as the 503.
+    server.seen.clear()
+    signed_in = (200, "application/json", js({"token": TOKEN, "ttl_ms": 3_600_000, "custody": me, "signer": me}))
+    server.answers[("POST", "/session")] = signed_in
+    server.answers[("POST", PATH)] = [restarting(), refused(401, "unauthorized"), OK]
+    gw = Gateway(server.url, account, http, login=True)
+    gw.sleep = slept = Pauses()
+    gw._mono = lambda: 2.5 * len(server.seen) + sum(slept)
+    assert outcome(lambda: gw.request("POST", PATH, body=BODY)) == STILL
+    assert [p for _, p, _, _ in server.seen] == ["/session", PATH, PATH]
+
     # A GET keeps its one retry after 0.5 s.
     server.seen.clear()
     server.answers[("GET", "/balance")] = [restarting(), restarting(), OK]
@@ -209,7 +235,8 @@ def test_a_post_that_answers_503_service_restarting_goes_again_and_a_refused_res
         out = outcome(lambda: c.withdraw(1000).status)
         assert (out, len(posts), c._held_withdraw is not None) == ("sending", 2, True), name
 
-    # A caller with its own retry loop sends each post once: no post past its own end.
+    # A caller with its own retry loop sends each post and its sign-in once. A one-shot close post goes again
+    # until its own end. No post goes past its end.
     c = make_client(clock=Clock(float(tk.T0)))
     sent = []
 
@@ -217,7 +244,7 @@ def test_a_post_that_answers_503_service_restarting_goes_again_and_a_refused_res
         sent.append(c._clock())
         return 503, restarting_body(), {"Retry-After": "1"}
 
-    until = 0.0  # each row ends 3 s after its start
+    until = 0.0  # each row's end: 3 s after its start
     session.routes[("GET", f"/rfqs/{LOOPED}")] = {"rfq_id": LOOPED, "status": "signing"}
     tk.Gate(session, form=tk.failover_form(c.address))
     b = tko.bid(c, tk.RFQ, tk.RATE)
@@ -230,9 +257,33 @@ def test_a_post_that_answers_503_service_restarting_goes_again_and_a_refused_res
          3, False),
         ("takeover sign", f"/rfqs/{tk.RFQ}/close/sign",
          lambda: tko.sign_award(c, tk.RFQ, bid=b, max_notional=tk.CAP), tko.SIGN_TRIES, STILL),
+        ("close accept", f"/rfqs/{LOOPED}/accept", lambda: _close._accept_close(c, LOOPED, QID, until), 4, None),
+        ("close decline", f"/rfqs/{LOOPED}/close/decline", lambda: _close._decline(c, LOOPED, QID, None, until), 4,
+         None),
+        ("takeover decline", f"/rfqs/{tk.RFQ}/close/decline", lambda: tko.decline(c, tk.RFQ, QID, until=until), 4,
+         STILL),
     ]:
         sent.clear()
         session.routes[("POST", path)] = restarted
         until = c._clock() + 3
         assert (outcome(call), len(sent)) == (out, posts), name
-        assert name in ("novation", "takeover sign") or max(sent) < until, name
+        assert name in ("novation", "takeover sign") or max(sent) <= until, name
+    # The takeover bid goes again until the round's quote window ends.
+    sent.clear()
+    until = c._clock() + 3
+    tk.Gate(session, form=tk.failover_form(c.address), rfq=tk.view(closes_at=int(until * 1000)))
+    session.routes[("POST", f"/rfqs/{tk.RFQ}/quotes")] = restarted
+    assert (outcome(lambda: tko.bid(c, tk.RFQ, tk.RATE)), len(sent), max(sent) <= until) == (STILL, 4, True)
+
+    # A session client: its sign-in meets the restart for 3 s, and the close signature's end is 0.5 s away.
+    # Nothing is posted, and the form reads as unsigned.
+    clk = Clock(float(tk.T0))
+    sc = make_client(clock=clk)
+    sc._gw.login, sc._gw._mono, start = True, clk, clk()
+    me = account.address.lower()
+    signed_in = {"token": TOKEN, "ttl_ms": 3_600_000, "custody": me, "signer": me}
+    session.routes[("POST", "/session")] = lambda req: (
+        (503, restarting_body(), {"Retry-After": "1"}) if clk() < start + 3 else signed_in)
+    sent.clear()
+    session.routes[("POST", f"/rfqs/{LOOPED}/close/sign")] = restarted
+    assert (_close._post_sign(sc, LOOPED, "0x01", "signing", start + 0.5), sent) == (False, [])

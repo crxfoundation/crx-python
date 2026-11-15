@@ -319,8 +319,9 @@ def bid(client: "Client", rfq_id: Any, price: Any, *, max_notional: Any = None,
         raise QuoteLost("the round's quote window has ended", reason="expired", details={"rfq_id": rid})
     if max_notional is not None and notional_e6 > _cap(max_notional):
         raise BadRequest("the round's notional is over max_notional")
-    q = client._gw.request("POST", f"/rfqs/{rid}/quotes",
-                           body={"rate": _maker._plain(rate), "client_quote_id": cqid})
+    # A 503 service_restarting sends the bid again until the quote window ends at most.
+    q = client._gw.request("POST", f"/rfqs/{rid}/quotes", body={"rate": _maker._plain(rate), "client_quote_id": cqid},
+                           within=None if closes is None else closes - now)
     quote_id = _maker._word(q.get("quote_id"))
     try:
         echo = e7.scaled6(q.get("rate"))
@@ -386,14 +387,17 @@ def await_award(client: "Client", b: Bid, *, wait: float | None = None, poll: fl
         client._sleep(poll)
 
 
-def decline(client: "Client", rfq_id: Any, quote_id: str) -> dict:
-    """Decline this seat's award on the round when it is the award of ``quote_id``."""
-    return client._gw.request("POST", f"/rfqs/{_rid(rfq_id)}/close/decline", body={"quote_id": quote_id})
+def decline(client: "Client", rfq_id: Any, quote_id: str, until: float | None = None) -> dict:
+    """Decline this seat's award on the round when it is the award of ``quote_id``. A 503
+    ``service_restarting`` sends it again until ``until`` (unix seconds) at most, when set."""
+    return client._gw.request("POST", f"/rfqs/{_rid(rfq_id)}/close/decline", body={"quote_id": quote_id},
+                              within=None if until is None else until - client._clock())
 
 
 def _decline_quietly(client: "Client", b: Bid) -> bool:
+    """Decline the award of ``b`` before the award wait ends: ``SIGN_GRACE_S`` past the quote window."""
     try:
-        decline(client, b.rfq_id, b.quote_id)
+        decline(client, b.rfq_id, b.quote_id, None if b.closes_at is None else b.closes_at + SIGN_GRACE_S)
     except CrxError as e:
         log.warning("takeover %s: the decline failed (%s)", b.rfq_id, e.code)
         return False

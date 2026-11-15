@@ -13,6 +13,7 @@ from urllib.parse import urlencode, urlsplit
 
 import requests
 from eth_utils import keccak
+from requests.structures import CaseInsensitiveDict
 
 from .errors import (
     BadAnswer, ConfigError, CrxError, MarkUnavailable, NetworkError, ServerError, clean, from_gateway, wait_secs,
@@ -73,6 +74,24 @@ def restart_pause(e: CrxError | None) -> float | None:
         return None
     secs = wait_secs(e.details)
     return max(RESTART_WAIT if secs is None else secs, RESTART_WAIT_MIN)
+
+
+def merged(answers: list[requests.Response]) -> requests.Response:
+    """Return the last of ``answers``, 503 ``service_restarting`` answers with JSON bodies, with the ``details``
+    of all of them: a later value wins, and a member only an earlier answer names stays."""
+    last = answers[-1]
+    if len(answers) == 1:
+        return last
+    bodies = [Gateway.body_of(a) for a in answers]
+    details: dict = {}
+    for b in bodies:
+        if isinstance(b, dict) and isinstance(b.get("details"), dict):
+            details.update(b["details"])
+    out = requests.Response()
+    out.status_code, out.url, out.encoding = last.status_code, getattr(last, "url", "") or "", "utf-8"
+    out.headers = CaseInsensitiveDict(getattr(last, "headers", None) or {})
+    out._content = json.dumps({**bodies[-1], "details": details}).encode()
+    return out
 
 
 def takes_session(method: str, path: str) -> bool:
@@ -197,59 +216,71 @@ class Gateway:
 
     def raw_request(
         self, method: str, path: str, *, body: Any = None, query: dict | None = None, auth: bool = True,
-        timeout: float | None = None, resend: bool = True,
+        timeout: float | None = None, resend: bool = True, within: float | None = None,
     ) -> requests.Response:
         """Send one call. A 401 on a session token mints a new token and resends once.
 
         The resend is safe: the gateway refuses a bad token before it reads the call.
 
         An authenticated POST that answers 503 ``service_restarting`` goes again after each Retry-After
-        (``restart_pause``), with the same body bytes, while it answers so. A ``POST /session`` mint does the
-        same, for any call, GETs included. Each send signs new auth headers: the gateway refuses a stamp from
-        before its restart. A session call sends its token again. No send goes later than ``RESTART_CAP`` s,
-        on the monotonic clock, after the first. Once a POST was sent again, only a 2xx answer goes back as
-        received: any other answer, or no answer, goes back as the last 503 ``service_restarting``, because the
-        gateway can hold the first send. ``resend=False`` sends the POST once.
+        (``restart_pause``), with the same body bytes, while it answers so. A ``POST /session`` sign-in that meets
+        the restart does the same, for any call, GETs included. Each send signs new auth headers: the gateway
+        refuses a stamp from before its restart. A session call sends its token again. No send starts later than
+        ``RESTART_CAP`` s after the first, on the monotonic clock, nor later than ``within`` s when that is
+        shorter. Once a POST was sent again, only a 2xx answer goes back as received. Any other answer, or no
+        answer, goes back as its 503 ``service_restarting``, with the details of each such 503 (a later value
+        wins), because the gateway can hold the first send. ``resend=False`` sends the POST and its sign-in once
+        each, for a caller that repeats on its own.
         """
         raw = b"" if body is None else json.dumps(body, separators=(",", ":")).encode()
-        resends = method == "POST" and auth and resend
+        resends = auth and resend
+        cap = RESTART_CAP if within is None else max(0.0, min(RESTART_CAP, within))
         t0, waited = self._mono(), 0.0
-        restarted: requests.Response | None = None  # the last 503 service_restarting of this POST
+        restarts: list[requests.Response] = []  # each 503 service_restarting this POST answered
+
+        def late() -> bool:
+            return max(self._mono() - t0, waited) > cap
+
         while True:
             try:
-                r = self._call(method, path, raw, query, auth, timeout)
+                r = self._call(method, path, raw, query, auth, timeout, late if restarts else None)
             except CrxError as e:
-                if not (getattr(e, "login", False) and restart_pause(e) is not None):
-                    if restarted is None:
+                if not (resends and getattr(e, "login", False) and restart_pause(e) is not None):
+                    if not restarts:
                         raise
-                    log.info("POST %s: %s after a resend; the call reads as the 503 before", clean(path, 100), e.code)
-                    return restarted
+                    log.info("POST %s: %s after a resend; the call reads as its 503", clean(path, 100), e.code)
+                    return merged(restarts)
                 r, refusal, what = None, e, "POST /session"
             else:
                 what = f"{method} {clean(path, 100)}"
-                refusal = self.error_of(r, self.host) if resends and r.status_code == 503 else None
-                if restarted is not None and restart_pause(refusal) is None and not 200 <= r.status_code < 300:
-                    log.info("%s: HTTP %s after a resend; the call reads as the 503 before", what, r.status_code)
-                    return restarted
+                post = resends and method == "POST" and r.status_code == 503
+                refusal = self.error_of(r, self.host) if post else None
+                if restarts and restart_pause(refusal) is None and not 200 <= r.status_code < 300:
+                    log.info("%s: HTTP %s after a resend; the call reads as its 503", what, r.status_code)
+                    return merged(restarts)
             pause = restart_pause(refusal)
-            if pause is None or max(self._mono() - t0, waited) + pause > RESTART_CAP:
-                if r is not None:
-                    return r
-                if restarted is not None:
-                    return restarted
-                raise refusal
+            if pause is None:
+                return r
             if r is not None:
-                restarted = r
+                restarts.append(r)
+            if max(self._mono() - t0, waited) + pause > cap:
+                if restarts:
+                    return merged(restarts)
+                raise refusal
             log.info("%s: 503 %s; sending it again in %s s", what, RESTARTING, pause)
             self.sleep(pause)
             waited += pause
 
     def _call(
         self, method: str, path: str, raw: bytes, query: dict | None, auth: bool, timeout: float | None,
+        late: Any = None,
     ) -> requests.Response:
-        """Send ``raw`` on the session token when one covers the call, else with new signed headers."""
+        """Send ``raw`` on the session token when one covers the call, else with new signed headers. After a
+        refused token, no new token and no second send go once ``late()`` is true: the 401 goes back."""
         if auth and self._uses_session(method, path):
-            for _ in range(2):
+            for i in range(2):
+                if i and late is not None and late():
+                    return r
                 tok = self.token()
                 if tok is None:
                     break
@@ -265,12 +296,13 @@ class Gateway:
     def request(
         self, method: str, path: str, *, body: Any = None, query: dict | None = None, auth: bool = True,
         ok: tuple[int, ...] = (200,), timeout: float | None = None, resend: bool = True,
+        within: float | None = None,
     ) -> dict:
-        """Send one call and parse the answer. Retry a GET once on a ``GET_RETRIED`` error. ``resend`` goes to
-        ``raw_request``."""
+        """Send one call and parse the answer. Retry a GET once on a ``GET_RETRIED`` error. ``resend`` and
+        ``within`` go to ``raw_request``."""
         try:
             return self.parse(self.raw_request(method, path, body=body, query=query, auth=auth, timeout=timeout,
-                                               resend=resend), ok)
+                                               resend=resend, within=within), ok)
         except GET_RETRIED as e:
             if method != "GET" or getattr(e, "login", False):
                 raise
