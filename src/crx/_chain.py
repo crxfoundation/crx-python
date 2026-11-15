@@ -114,16 +114,18 @@ class Rpc:
     def _post_gateway(self, method: str, call: dict) -> requests.Response:
         """Send ``call`` to the gateway RPC and return its 200 answer. Raise the typed error of any other status.
 
-        On a 429, wait Retry-After once (up to ``RATE_WAIT_MAX`` s) and send the call again.
+        On a 429, wait Retry-After once (up to ``RATE_WAIT_MAX`` s) and send the call again. A send that answers
+        503 ``service_restarting`` does not go again: the node may hold it, and its hash tracks it.
         """
-        r = self._gw.raw_request("POST", GATEWAY_PATH, body=call, timeout=self._timeout)
+        resend = method != "eth_sendRawTransaction"
+        r = self._gw.raw_request("POST", GATEWAY_PATH, body=call, timeout=self._timeout, resend=resend)
         if r.status_code == 429:
             e = self._refusal(r, method)
             pause = e.retry_after if isinstance(e, RateLimited) else None
             if pause is None or pause > RATE_WAIT_MAX:
                 raise e
             self._gw.sleep(pause)
-            r = self._gw.raw_request("POST", GATEWAY_PATH, body=call, timeout=self._timeout)
+            r = self._gw.raw_request("POST", GATEWAY_PATH, body=call, timeout=self._timeout, resend=resend)
         if r.status_code != 200:
             raise self._refusal(r, method)
         return r

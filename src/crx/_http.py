@@ -15,7 +15,7 @@ import requests
 from eth_utils import keccak
 
 from .errors import (
-    BadAnswer, ConfigError, CrxError, MarkUnavailable, NetworkError, ServerError, clean, from_gateway,
+    BadAnswer, ConfigError, CrxError, MarkUnavailable, NetworkError, ServerError, clean, from_gateway, wait_secs,
 )
 from .signer import as_signer, sign_login
 
@@ -25,6 +25,9 @@ SESSION_MARGIN = 60.0  # seconds before expiry to mint a new token
 GET_RETRY_PAUSE = 0.5  # seconds before the single GET retry; /markets waits 1 to 2 times this
 # Errors that retry a GET once. MarkUnavailable means the gateway has no market price yet.
 GET_RETRIED = (NetworkError, ServerError, MarkUnavailable)
+RESTARTING = "service_restarting"  # the 503 code of a gateway that restarts or hands over
+RESTART_WAIT = 1.0  # seconds before the POST resend when the 503 names no Retry-After
+RESTART_WAIT_MAX = 5.0  # the longest Retry-After, in seconds, a POST waits before its resend
 _TOKEN = re.compile(r"[0-9a-f]{64}")
 
 
@@ -183,13 +186,40 @@ class Gateway:
 
     def raw_request(
         self, method: str, path: str, *, body: Any = None, query: dict | None = None, auth: bool = True,
-        timeout: float | None = None,
+        timeout: float | None = None, resend: bool = True,
     ) -> requests.Response:
         """Send one call. A 401 on a session token mints a new token and resends once.
 
         The resend is safe: the gateway refuses a bad token before it reads the call.
+
+        An authenticated POST that answers 503 ``service_restarting`` goes once more after its Retry-After
+        (``RESTART_WAIT`` s when it names none, ``RESTART_WAIT_MAX`` s at most), with the same body bytes. The
+        resend signs new auth headers: the gateway refuses a stamp from before its restart. A session call
+        sends its token again. ``resend=False`` sends the POST once. The second answer goes back as received.
         """
         raw = b"" if body is None else json.dumps(body, separators=(",", ":")).encode()
+        r = self._call(method, path, raw, query, auth, timeout)
+        pause = self._restart_wait(r) if method == "POST" and auth and resend else None
+        if pause is None:
+            return r
+        log.info("POST %s: 503 %s; sending it once more in %s s", clean(path, 100), RESTARTING, pause)
+        self.sleep(pause)
+        return self._call(method, path, raw, query, auth, timeout)
+
+    def _restart_wait(self, r: requests.Response) -> float | None:
+        """Return the seconds to wait before the resend of a 503 ``service_restarting``, else None."""
+        if r.status_code != 503:
+            return None
+        e = self.error_of(r, self.host)
+        if e.gateway_code != RESTARTING:
+            return None
+        secs = wait_secs(e.details)
+        return min(RESTART_WAIT if secs is None else secs, RESTART_WAIT_MAX)
+
+    def _call(
+        self, method: str, path: str, raw: bytes, query: dict | None, auth: bool, timeout: float | None,
+    ) -> requests.Response:
+        """Send ``raw`` on the session token when one covers the call, else with new signed headers."""
         if auth and self._uses_session(method, path):
             for _ in range(2):
                 tok = self.token()

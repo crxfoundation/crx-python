@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- A POST that answers `503 service_restarting` goes once more after `Retry-After` (1 s when absent, 5 s at most), with the same body bytes and new signed headers. A session call sends its token again. A second `503` raises `ServerError`, as before. An `eth_sendRawTransaction` on the `/rpc` route goes once, and its hash tracks it. Other answers and GETs are unchanged.
+
 ## 0.3.20
 
 - `close_trade(trade_id, to=None, limit=None, wait=None)` closes an open trade. When the gateway offers closes with the counterparty and picks its answer, the trade ends for both seats. Else the best quote of another seat, or of the one seat `to` names, takes over this seat's side. `limit=` is the worst close rate the seat takes. The SDK checks the close against the trade before it signs. On a mismatch it raises `RefusedToSign` and signs nothing. The call returns a `crx.Close`.

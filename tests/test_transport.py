@@ -19,7 +19,8 @@ from .conftest import Pauses
 
 
 class Server:
-    """Answer each request from ``answers[(method, path)]`` = (status, content type, body bytes) and record it."""
+    """Answer each request from ``answers[(method, path)]`` = (status, content type, body bytes[, headers]) and
+    record it. A list of answers is served in order, the last one repeating."""
 
     def __init__(self):
         self.answers, self.seen = {}, []  # seen: (method, path with query, headers in lower case, body)
@@ -30,10 +31,15 @@ class Server:
                 n = int(self.headers.get("content-length") or 0)
                 outer.seen.append((self.command, self.path, {k.lower(): v for k, v in self.headers.items()},
                                    self.rfile.read(n)))
-                status, kind, body = outer.answers.get((self.command, self.path.split("?")[0]), (404, "", b""))
+                spec = outer.answers.get((self.command, self.path.split("?")[0]), (404, "", b""))
+                if isinstance(spec, list):
+                    spec = spec.pop(0) if len(spec) > 1 else spec[0]
+                status, kind, body, *more = spec
                 self.send_response(status)
                 if kind:
                     self.send_header("content-type", kind)
+                for name, value in (more[0] if more else {}).items():
+                    self.send_header(name, value)
                 if status in (301, 302, 307, 308):
                     self.send_header("location", "/elsewhere")
                 self.send_header("content-length", str(len(body)))
