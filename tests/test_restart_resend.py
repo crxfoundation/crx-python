@@ -1,14 +1,21 @@
-"""A POST that answers 503 service_restarting goes again for up to 6 s, with the same body and new auth headers."""
+"""A POST that answers 503 service_restarting goes again for up to 6 s, with the same body and new auth headers.
+Once it went again, any answer but a 2xx reads as that 503: the gateway can hold the first send."""
 
 import json
+import time
 
+import requests
 from eth_account import Account
 from eth_account.messages import encode_defunct
 
+from crx import _close
+from crx import _takeover as tko
 from crx._chain import Rpc
 from crx._http import Gateway, rest_message
 
-from .conftest import WEEK, Pauses
+from . import test_takeover as tk
+from .conftest import WEEK, Clock, Pauses
+from .test_money import Chain, balance_body, gate, item_row
 from .test_quote_trade import QID, RFQ, TXH, accepts, clock, venue  # noqa: F401 (fixtures)
 from .test_transport import http, js, server  # noqa: F401 (fixtures)
 
@@ -49,7 +56,24 @@ ROWS = [  # name, the POST's answers in order, posts, pauses, the outcome: the 2
     ("409", [refused(409, "conflict"), OK], 1, [], ("conflict", "conflict")),
     ("503 service_unavailable", [refused(503, "service_unavailable"), OK], 1, [],
      ("service_unavailable", "service_unavailable")),
+    # A resend's refusal reads as the 503 before it. A 401: a seat clock behind the gateway's past its restart.
+    ("restarting, then 409", [restarting(), refused(409, "round_closed"), OK], 2, [1], STILL),
+    ("restarting, then 429", [restarting(), refused(429, "rate_limited"), OK], 2, [1], STILL),
+    ("restarting, then 503 service_unavailable", [restarting(), refused(503, "service_unavailable"), OK], 2, [1],
+     STILL),
+    ("restarting, then 401", [restarting(), refused(401, "unauthorized"), OK], 2, [1], STILL),
+    ("restarting, then no answer", [restarting(), (None, "", b""), OK], 2, [1], STILL),
 ]
+
+DROP = object()  # the resend gets no answer
+HELD_THEN = {  # the gateway holds the first send, answers it 503 service_restarting, then answers the resend so
+    "409 round_closed": (409, {"code": "round_closed", "error": "the round was released before its trade opened"}),
+    "429 rate_limited": (429, {"code": "rate_limited", "error": "a burst on the seat budget",
+                               "details": {"retry_after_secs": 5}}, {"Retry-After": "5"}),
+    "503 service_unavailable": (503, {"code": "service_unavailable", "error": "access cannot be checked now"}),
+    "no answer": DROP,
+}
+LOOPED = "0x" + "e1" * 32  # a close round whose posts always answer 503 service_restarting
 
 
 def outcome(call):
@@ -59,8 +83,24 @@ def outcome(call):
         return getattr(e, "code", type(e).__name__), getattr(e, "gateway_code", None)
 
 
-def test_a_post_that_answers_503_service_restarting_goes_once_more_with_the_same_body(
-        server, http, account, make_client, venue, session, clock):
+def held_then(first, second):
+    """Return a route: the first post goes to ``first`` and answers 503 service_restarting; a resend answers
+    ``second``."""
+    posts = []
+
+    def route(req):
+        posts.append(req["body"])
+        if len(posts) == 1:
+            first(req)
+            return 503, restarting_body(), {"Retry-After": "1"}
+        if second is DROP:
+            raise requests.ConnectionError("connection reset by peer")
+        return second
+    return route, posts
+
+
+def test_a_post_that_answers_503_service_restarting_goes_again_and_a_refused_resend_reads_as_that_503(
+        server, http, account, make_client, venue, session, clock, health):
     me = account.address.lower()
     raw = json.dumps(BODY, separators=(",", ":")).encode()
     for name, answers, posts, pauses, out in ROWS:
@@ -77,6 +117,15 @@ def test_a_post_that_answers_503_service_restarting_goes_once_more_with_the_same
         for h, b in sent:
             msg = rest_message("POST", PATH, me, me, int(h["x-crx-ts"]), b)
             assert Account.recover_message(encode_defunct(text=msg), signature=h["x-crx-sig"]).lower() == me, name
+
+    # Send time counts toward the cap: each send here takes 2 s on the cap's clock.
+    server.seen.clear()
+    server.answers[("POST", PATH)] = [restarting()]
+    gw = Gateway(server.url, account, http)
+    gw.sleep = slept = Pauses()
+    gw._mono = lambda: 2 * len(server.seen) + sum(slept)
+    assert outcome(lambda: gw.request("POST", PATH, body=BODY)) == STILL
+    assert (len(server.seen), slept) == (3, [1, 1])
 
     # A GET keeps its one retry after 0.5 s.
     server.seen.clear()
@@ -98,6 +147,15 @@ def test_a_post_that_answers_503_service_restarting_goes_once_more_with_the_same
         ("/session", None, b""), ("/session", None, b""), (PATH, TOKEN, raw), (PATH, TOKEN, raw)]
     mints = [int(h["x-crx-ts"]) for _, p, h, _ in server.seen if p == "/session"]
     assert mints[0] < mints[1] and slept == [1, 1]
+
+    # A GET of a session client: its sign-in goes again.
+    server.seen.clear()
+    server.answers[("POST", "/session")] = [restarting(), mint]
+    server.answers[("GET", "/balance")] = OK
+    gw = Gateway(server.url, account, http, login=True)
+    gw.sleep = slept = Pauses()
+    assert gw.request("GET", "/balance") == TAKEN
+    assert ([p for _, p, _, _ in server.seen], slept) == (["/session", "/session", "/balance"], [1])
 
     # On the /rpc route a read goes once more; a send goes once, and its hash tracks it.
     gw = Gateway(server.url, account, http)
@@ -128,3 +186,53 @@ def test_a_post_that_answers_503_service_restarting_goes_once_more_with_the_same
     assert (t.status, t.tx, t.quote_id) == ("open", TXH, QID)
     signed = [b for b in accepts(session) if "sig" in b]
     assert len(signed) == 2 and signed[0] == signed[1] and slept[0] == 1
+
+
+    # The gateway holds the signed accept, then refuses the resend or gives no answer: the trade status decides.
+    for name, second in HELD_THEN.items():
+        venue.reset()
+        venue.script = [("sending", None), ("open", TXH)]
+        route, posts = held_then(venue.accept, second)
+        session.routes[("POST", PATH)] = lambda req, route=route: route(req) if "sig" in req["body"] else venue.accept(req)
+        c = make_client(clock=clock)
+        q = c.quote("USD/MXN", "buy", 25_000, settles=WEEK)
+        assert (outcome(lambda: c.trade(q).status), len(posts), posts[0] == posts[-1]) == ("open", 2, True), name
+
+    # The gateway queues the signed withdraw, then refuses the resend or gives no answer: the status decides.
+    Chain(session)
+    for name in ("429 rate_limited", "503 service_unavailable", "no answer"):
+        g = gate(session, health, account)
+        session.routes[("POST", "/withdraw")], posts = held_then(g.answer, HELD_THEN[name])
+        session.routes[("GET", "/balance")] = lambda req, g=g: (
+            balance_body(account) if g.item is None else balance_body(account, withdraw=item_row("sending", g.item)))
+        c = make_client(clock=Clock(time.time()))
+        out = outcome(lambda: c.withdraw(1000).status)
+        assert (out, len(posts), c._held_withdraw is not None) == ("sending", 2, True), name
+
+    # A caller with its own retry loop sends each post once: no post past its own end.
+    c = make_client(clock=Clock(float(tk.T0)))
+    sent = []
+
+    def restarted(req):
+        sent.append(c._clock())
+        return 503, restarting_body(), {"Retry-After": "1"}
+
+    until = 0.0  # each row ends 3 s after its start
+    session.routes[("GET", f"/rfqs/{LOOPED}")] = {"rfq_id": LOOPED, "status": "signing"}
+    tk.Gate(session, form=tk.failover_form(c.address))
+    b = tko.bid(c, tk.RFQ, tk.RATE)
+    for name, path, call, posts, out in [
+        ("novation", "/novations", lambda: _close._post_once_more(c, "/novations", {"client_novation_id": "n1"}), 2,
+         STILL),
+        ("close answer", f"/rfqs/{LOOPED}/close/answer",
+         lambda: _close._post_quote(c, LOOPED, f"/rfqs/{LOOPED}/close/answer", {"rate": "5.4"}, QID, until), 3, None),
+        ("close sign", f"/rfqs/{LOOPED}/close/sign", lambda: _close._post_sign(c, LOOPED, "0x01", "signing", until),
+         3, False),
+        ("takeover sign", f"/rfqs/{tk.RFQ}/close/sign",
+         lambda: tko.sign_award(c, tk.RFQ, bid=b, max_notional=tk.CAP), tko.SIGN_TRIES, STILL),
+    ]:
+        sent.clear()
+        session.routes[("POST", path)] = restarted
+        until = c._clock() + 3
+        assert (outcome(call), len(sent)) == (out, posts), name
+        assert name in ("novation", "takeover sign") or max(sent) < until, name

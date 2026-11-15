@@ -101,6 +101,7 @@ class Gateway:
         self._timeout = timeout
         self.login = login
         self._clock = time.time
+        self._mono = time.monotonic  # the clock of the resend cap
         self._lock = threading.Lock()
         self._token: str | None = None
         self._token_until = 0.0
@@ -204,28 +205,41 @@ class Gateway:
 
         An authenticated POST that answers 503 ``service_restarting`` goes again after each Retry-After
         (``restart_pause``), with the same body bytes, while it answers so. A ``POST /session`` mint does the
-        same, for any call. Each send signs new auth headers: the gateway refuses a stamp from before its
-        restart. A session call sends its token again. No send goes later than ``RESTART_CAP`` s after the
-        first; the last answer goes back as received. ``resend=False`` sends the POST once.
+        same, for any call, GETs included. Each send signs new auth headers: the gateway refuses a stamp from
+        before its restart. A session call sends its token again. No send goes later than ``RESTART_CAP`` s,
+        on the monotonic clock, after the first. Once a POST was sent again, only a 2xx answer goes back as
+        received: any other answer, or no answer, goes back as the last 503 ``service_restarting``, because the
+        gateway can hold the first send. ``resend=False`` sends the POST once.
         """
         raw = b"" if body is None else json.dumps(body, separators=(",", ":")).encode()
         resends = method == "POST" and auth and resend
-        t0, waited = self._clock(), 0.0
+        t0, waited = self._mono(), 0.0
+        restarted: requests.Response | None = None  # the last 503 service_restarting of this POST
         while True:
             try:
                 r = self._call(method, path, raw, query, auth, timeout)
-            except ServerError as e:
-                if not getattr(e, "login", False):
-                    raise
+            except CrxError as e:
+                if not (getattr(e, "login", False) and restart_pause(e) is not None):
+                    if restarted is None:
+                        raise
+                    log.info("POST %s: %s after a resend; the call reads as the 503 before", clean(path, 100), e.code)
+                    return restarted
                 r, refusal, what = None, e, "POST /session"
             else:
-                refusal = self.error_of(r, self.host) if resends and r.status_code == 503 else None
                 what = f"{method} {clean(path, 100)}"
+                refusal = self.error_of(r, self.host) if resends and r.status_code == 503 else None
+                if restarted is not None and restart_pause(refusal) is None and not 200 <= r.status_code < 300:
+                    log.info("%s: HTTP %s after a resend; the call reads as the 503 before", what, r.status_code)
+                    return restarted
             pause = restart_pause(refusal)
-            if pause is None or max(self._clock() - t0, waited) + pause > RESTART_CAP:
-                if r is None:
-                    raise refusal
-                return r
+            if pause is None or max(self._mono() - t0, waited) + pause > RESTART_CAP:
+                if r is not None:
+                    return r
+                if restarted is not None:
+                    return restarted
+                raise refusal
+            if r is not None:
+                restarted = r
             log.info("%s: 503 %s; sending it again in %s s", what, RESTARTING, pause)
             self.sleep(pause)
             waited += pause
@@ -250,11 +264,13 @@ class Gateway:
 
     def request(
         self, method: str, path: str, *, body: Any = None, query: dict | None = None, auth: bool = True,
-        ok: tuple[int, ...] = (200,), timeout: float | None = None,
+        ok: tuple[int, ...] = (200,), timeout: float | None = None, resend: bool = True,
     ) -> dict:
-        """Send one call and parse the answer. Retry a GET once on a ``GET_RETRIED`` error."""
+        """Send one call and parse the answer. Retry a GET once on a ``GET_RETRIED`` error. ``resend`` goes to
+        ``raw_request``."""
         try:
-            return self.parse(self.raw_request(method, path, body=body, query=query, auth=auth, timeout=timeout), ok)
+            return self.parse(self.raw_request(method, path, body=body, query=query, auth=auth, timeout=timeout,
+                                               resend=resend), ok)
         except GET_RETRIED as e:
             if method != "GET" or getattr(e, "login", False):
                 raise

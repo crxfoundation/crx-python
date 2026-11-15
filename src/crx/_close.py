@@ -271,23 +271,24 @@ def _position(c: "Client", trade_id: str) -> dict:
 
 
 def _post_once_more(c: "Client", path: str, body: dict) -> dict:
-    """Post ``body``. After a network error, post the same body once more: its client id makes the repeat safe."""
+    """Post ``body``. After a network error, post the same body once more: its client id makes the repeat safe.
+    Each post goes once on a 503 ``service_restarting``: this function sends the repeat."""
     try:
-        return c._gw.request("POST", path, body=body)
+        return c._gw.request("POST", path, body=body, resend=False)
     except (NetworkError, ServerError) as e:
         log.info("POST %s: %s; sending the same body once more", path, e.code)
     c._sleep(1.0)
-    return c._gw.request("POST", path, body=body)
+    return c._gw.request("POST", path, body=body, resend=False)
 
 
 def _post_quote(c: "Client", rfq_id: str, path: str, body: dict, quote_id: str, until: float) -> None:
     """Post a close quote or answer. After a transient error, post the same body again until ``until``: a
     repeat under the same client id answers the quote that rests. A refused repeat raises unless the round
-    lists the quote."""
+    lists the quote. Each post goes once on a 503 ``service_restarting``: this loop sends the repeats."""
     first = True
     while True:
         try:
-            q = c._gw.request("POST", path, body=body)
+            q = c._gw.request("POST", path, body=body, resend=False)
             break
         except TRANSIENT as e:
             _backoff(c, e, 1.0, f"POST {path}", until)
@@ -311,7 +312,8 @@ def _post_quote(c: "Client", rfq_id: str, path: str, body: dict, quote_id: str, 
 def _post_sign(c: "Client", rfq_id: str, sig: str, due: str, until: float) -> bool:
     """Post a signature. After a transient error, post it again while the round still waits for this seat's
     form (round status ``due``) and ``until`` has not passed: a repeat of the same signature is safe. A
-    refusal raises. Return False when ``until`` passed with no answer."""
+    refusal raises. Return False when ``until`` passed with no answer. Each post goes once on a 503
+    ``service_restarting``: this loop sends the repeats."""
     path = f"/rfqs/{rfq_id}/close/sign"
     first = True
     while True:
@@ -320,7 +322,7 @@ def _post_sign(c: "Client", rfq_id: str, sig: str, due: str, until: float) -> bo
             return False
         first = False
         try:
-            c._gw.request("POST", path, body={"sig": sig})
+            c._gw.request("POST", path, body={"sig": sig}, resend=False)
             return True
         except TRANSIENT as e:
             _backoff(c, e, 1.0, f"POST {path}", until)

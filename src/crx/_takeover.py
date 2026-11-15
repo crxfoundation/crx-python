@@ -432,7 +432,9 @@ def sign_award(client: "Client", rfq_id: Any, *, bid: Bid, max_notional: Any, te
                             details={"rfq_id": rid, "word": word, "declined": declined}) from None
     for i in range(SIGN_TRIES):
         try:
-            out = client._gw.request("POST", f"/rfqs/{rid}/close/sign", body={"sig": sig}, timeout=HTTP_TIMEOUT_S)
+            # This loop sends the repeats: each post goes once on a 503 service_restarting.
+            out = client._gw.request("POST", f"/rfqs/{rid}/close/sign", body={"sig": sig}, timeout=HTTP_TIMEOUT_S,
+                                     resend=False)
         except TRANSIENT as e:
             if i + 1 == SIGN_TRIES:
                 raise

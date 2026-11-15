@@ -20,7 +20,8 @@ from .conftest import Pauses
 
 class Server:
     """Answer each request from ``answers[(method, path)]`` = (status, content type, body bytes[, headers]) and
-    record it. A list of answers is served in order, the last one repeating."""
+    record it. A list of answers is served in order, the last one repeating. Status None closes the
+    connection with no answer."""
 
     def __init__(self):
         self.answers, self.seen = {}, []  # seen: (method, path with query, headers in lower case, body)
@@ -35,6 +36,9 @@ class Server:
                 if isinstance(spec, list):
                     spec = spec.pop(0) if len(spec) > 1 else spec[0]
                 status, kind, body, *more = spec
+                if status is None:  # no answer: the connection closes
+                    self.close_connection = True
+                    return
                 self.send_response(status)
                 if kind:
                     self.send_header("content-type", kind)
