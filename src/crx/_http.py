@@ -26,8 +26,9 @@ GET_RETRY_PAUSE = 0.5  # seconds before the single GET retry; /markets waits 1 t
 # Errors that retry a GET once. MarkUnavailable means the gateway has no market price yet.
 GET_RETRIED = (NetworkError, ServerError, MarkUnavailable)
 RESTARTING = "service_restarting"  # the 503 code of a gateway that restarts or hands over
-RESTART_WAIT = 1.0  # seconds before the POST resend when the 503 names no Retry-After
-RESTART_WAIT_MAX = 5.0  # the longest Retry-After, in seconds, a POST waits before its resend
+RESTART_WAIT = 1.0  # seconds before the next send when the 503 names no Retry-After
+RESTART_WAIT_MIN = 0.5  # the shortest wait, in seconds, before the next send
+RESTART_CAP = 6.0  # seconds from the first send after which no send goes
 _TOKEN = re.compile(r"[0-9a-f]{64}")
 
 
@@ -63,6 +64,15 @@ def rest_message(
         lines.append(f"Signer: {signer.lower()}")
     lines += [f"Timestamp: {ts}", f"Body: 0x{keccak(raw).hex()}"]
     return "\n".join(lines)
+
+
+def restart_pause(e: CrxError | None) -> float | None:
+    """Return the seconds to wait before the next send after the 503 ``service_restarting`` refusal ``e``, else
+    None: its Retry-After, ``RESTART_WAIT`` when it names none, ``RESTART_WAIT_MIN`` at least."""
+    if e is None or e.status != 503 or e.gateway_code != RESTARTING:
+        return None
+    secs = wait_secs(e.details)
+    return max(RESTART_WAIT if secs is None else secs, RESTART_WAIT_MIN)
 
 
 def takes_session(method: str, path: str) -> bool:
@@ -192,29 +202,33 @@ class Gateway:
 
         The resend is safe: the gateway refuses a bad token before it reads the call.
 
-        An authenticated POST that answers 503 ``service_restarting`` goes once more after its Retry-After
-        (``RESTART_WAIT`` s when it names none, ``RESTART_WAIT_MAX`` s at most), with the same body bytes. The
-        resend signs new auth headers: the gateway refuses a stamp from before its restart. A session call
-        sends its token again. ``resend=False`` sends the POST once. The second answer goes back as received.
+        An authenticated POST that answers 503 ``service_restarting`` goes again after each Retry-After
+        (``restart_pause``), with the same body bytes, while it answers so. A ``POST /session`` mint does the
+        same, for any call. Each send signs new auth headers: the gateway refuses a stamp from before its
+        restart. A session call sends its token again. No send goes later than ``RESTART_CAP`` s after the
+        first; the last answer goes back as received. ``resend=False`` sends the POST once.
         """
         raw = b"" if body is None else json.dumps(body, separators=(",", ":")).encode()
-        r = self._call(method, path, raw, query, auth, timeout)
-        pause = self._restart_wait(r) if method == "POST" and auth and resend else None
-        if pause is None:
-            return r
-        log.info("POST %s: 503 %s; sending it once more in %s s", clean(path, 100), RESTARTING, pause)
-        self.sleep(pause)
-        return self._call(method, path, raw, query, auth, timeout)
-
-    def _restart_wait(self, r: requests.Response) -> float | None:
-        """Return the seconds to wait before the resend of a 503 ``service_restarting``, else None."""
-        if r.status_code != 503:
-            return None
-        e = self.error_of(r, self.host)
-        if e.gateway_code != RESTARTING:
-            return None
-        secs = wait_secs(e.details)
-        return min(RESTART_WAIT if secs is None else secs, RESTART_WAIT_MAX)
+        resends = method == "POST" and auth and resend
+        t0, waited = self._clock(), 0.0
+        while True:
+            try:
+                r = self._call(method, path, raw, query, auth, timeout)
+            except ServerError as e:
+                if not getattr(e, "login", False):
+                    raise
+                r, refusal, what = None, e, "POST /session"
+            else:
+                refusal = self.error_of(r, self.host) if resends and r.status_code == 503 else None
+                what = f"{method} {clean(path, 100)}"
+            pause = restart_pause(refusal)
+            if pause is None or max(self._clock() - t0, waited) + pause > RESTART_CAP:
+                if r is None:
+                    raise refusal
+                return r
+            log.info("%s: 503 %s; sending it again in %s s", what, RESTARTING, pause)
+            self.sleep(pause)
+            waited += pause
 
     def _call(
         self, method: str, path: str, raw: bytes, query: dict | None, auth: bool, timeout: float | None,

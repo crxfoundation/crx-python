@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- A POST that answers `503 service_restarting` goes once more after `Retry-After` (1 s when absent, 5 s at most), with the same body bytes and new signed headers. A session call sends its token again. A second `503` raises `ServerError`, as before. An `eth_sendRawTransaction` on the `/rpc` route goes once, and its hash tracks it. Other answers and GETs are unchanged.
+- A POST that answers `503 service_restarting` goes again after each `Retry-After` (1 s when absent, 0.5 s at least), with the same body bytes and new signed headers, for up to 6 s from the first send. Past 6 s the `503` raises `ServerError`, as before. A `POST /session` sign-in does the same. A session call sends its token again. An `eth_sendRawTransaction` on the `/rpc` route goes once, and its hash tracks it. Other answers and GETs are unchanged.
 
 ## 0.3.20
 

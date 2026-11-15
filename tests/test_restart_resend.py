@@ -1,4 +1,4 @@
-"""A POST that answers 503 service_restarting goes once more, with the same body and new auth headers."""
+"""A POST that answers 503 service_restarting goes again for up to 6 s, with the same body and new auth headers."""
 
 import json
 
@@ -36,10 +36,14 @@ def refused(status, code):
 
 OK = (200, "application/json", js(TAKEN))
 
+STILL = ("server_error", "service_restarting")
+
 ROWS = [  # name, the POST's answers in order, posts, pauses, the outcome: the 200 body, or (code, gateway code)
     ("restarting, then 200", [restarting(), OK], 2, [1], TAKEN),
-    ("restarting twice", [restarting(), restarting(), OK], 2, [1], ("server_error", "service_restarting")),
-    ("Retry-After 30 waits 5 s", [restarting(30), OK], 2, [5], TAKEN),
+    ("restarting for 4 s, then 200", [restarting()] * 4 + [OK], 5, [1] * 4, TAKEN),
+    ("restarting past the 6 s cap", [restarting()], 7, [1] * 6, STILL),
+    ("Retry-After 30 is past the cap", [restarting(30), OK], 1, [], STILL),
+    ("Retry-After 0 waits 0.5 s", [restarting(0), OK], 2, [0.5], TAKEN),
     ("no Retry-After waits 1 s", [restarting(None), OK], 2, [1], TAKEN),
     ("500", [refused(500, "internal"), OK], 1, [], ("server_error", "internal")),
     ("409", [refused(409, "conflict"), OK], 1, [], ("conflict", "conflict")),
@@ -82,15 +86,18 @@ def test_a_post_that_answers_503_service_restarting_goes_once_more_with_the_same
     assert outcome(lambda: gw.request("GET", "/balance")) == ("server_error", "service_restarting")
     assert ([m for m, _, _, _ in server.seen], slept) == (["GET", "GET"], [0.5])
 
-    # A session call sends its token again.
+    # The session mint goes again, signed anew; the session call sends its token again.
     server.seen.clear()
-    server.json("POST", "/session", {"token": TOKEN, "ttl_ms": 3_600_000, "custody": me, "signer": me})
+    mint = (200, "application/json", js({"token": TOKEN, "ttl_ms": 3_600_000, "custody": me, "signer": me}))
+    server.answers[("POST", "/session")] = [restarting(), mint]
     server.answers[("POST", PATH)] = [restarting(), OK]
     gw = Gateway(server.url, account, http, login=True)
-    gw.sleep = Pauses()
+    gw.sleep = slept = Pauses()
     assert gw.request("POST", PATH, body=BODY) == TAKEN
     assert [(p, h.get("x-crx-session"), b) for _, p, h, b in server.seen] == [
-        ("/session", None, b""), (PATH, TOKEN, raw), (PATH, TOKEN, raw)]
+        ("/session", None, b""), ("/session", None, b""), (PATH, TOKEN, raw), (PATH, TOKEN, raw)]
+    mints = [int(h["x-crx-ts"]) for _, p, h, _ in server.seen if p == "/session"]
+    assert mints[0] < mints[1] and slept == [1, 1]
 
     # On the /rpc route a read goes once more; a send goes once, and its hash tracks it.
     gw = Gateway(server.url, account, http)
