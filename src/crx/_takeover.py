@@ -193,6 +193,7 @@ def _item(t: dict, fields: Any) -> tuple[dict, dict, bytes]:
 
 def _tail(t: dict, primary: str, msg: dict, chain_id: int, core: str, commitment: bytes) -> tuple[dict, bytes]:
     """Check the commitment, the digest and the served typed data. Return the typed data and its digest."""
+    _need(e7.consent_version_ok(t, primary), "consent_version", "does not match its typed data")
     _need(_maker._word(t.get("commitment")) == e7.h0x(commitment), "commitment", "not the item's own")
     td = e7.typed_data(primary, chain_id, core, msg)
     digest = e7.typed_digest(td)
@@ -254,6 +255,13 @@ def check_failover(t: Any, b: Bid, *, chain_id: int, core: str, sep: bytes, max_
         "incomingC": e7.h0x(incoming_c), "nonce": str(w["nonce"]), "openNonce": str(w["openNonce"]),
         "deadline": str(w["deadline"]), "commitment": e7.h0x(commitment),
     }
+    if e7.readable_consent(t.get("typed_data"), "FailoverConsent"):
+        msg = {
+            "pair": b.pair, "closedPositionSide": e7.side_text(b.side), "notionalE6": str(b.notional_e6),
+            "settlement": str(b.settlement_s), "pricing": e7.FAILOVER_PRICING,
+            "spreadIfOpenedUsdE6": str(w["spread"]), "incoming": b.seat,
+            "deadline": str(w["deadline"]), "commitment": e7.h0x(commitment),
+        }
     return _tail(t, "FailoverConsent", msg, chain_id, core, commitment)
 
 

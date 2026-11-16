@@ -36,9 +36,12 @@ OTHER = "0x" + "77" * 20
 
 TERMS = ("Terms(bytes32 takerSide,bytes32 makerSide,uint256 notional,int16 premiumBps,uint64 nonce,bytes32 pair,"
          "int8 side,uint40 settlement,uint64 rate)")
-FAILOVER_TYPES = [("oldId", "bytes32"), ("closedOutSide", "bytes32"), ("remainingSide", "bytes32"),
+LEGACY_FAILOVER_TYPES = [("oldId", "bytes32"), ("closedOutSide", "bytes32"), ("remainingSide", "bytes32"),
                   ("incomingSide", "bytes32"), ("incomingC", "bytes32"), ("nonce", "uint64"), ("openNonce", "uint64"),
                   ("deadline", "uint64"), ("commitment", "bytes32")]
+FAILOVER_TYPES = [("pair", "string"), ("closedPositionSide", "string"), ("notionalE6", "uint256"),
+                  ("settlement", "uint40"), ("pricing", "string"), ("spreadIfOpenedUsdE6", "uint256"),
+                  ("incoming", "address"), ("deadline", "uint64"), ("commitment", "bytes32")]
 DOMAIN_TYPES = [("name", "string"), ("version", "string"), ("chainId", "uint256"), ("verifyingContract", "address")]
 
 
@@ -85,7 +88,7 @@ CLOSED, REMAINING = keccak(b"closed-out side"), keccak(b"remaining side")
 
 def failover_form(seat, *, rate_e6=RATE_E6, side=SIDE, notional=NOTIONAL, mark=MARK, spread=None, subsidy=0,
            deadline=T0 + 1000, close_time=T0 - 360, incoming_c=STRONG_C, salt=STRONG_SALT, incoming_side=None,
-           old=None, old_id=None, open_nonce=None, nonce=3, remaining=REMAINING):
+           old=None, old_id=None, open_nonce=None, nonce=3, remaining=REMAINING, legacy=False):
     """Return a failover_consent form whose commitment, digest and typed data hash over its own words."""
     old = old or old_leg(notional=notional)
     taker, maker = (CLOSED, remaining) if side == old["side"] else (remaining, CLOSED)
@@ -105,7 +108,11 @@ def failover_form(seat, *, rate_e6=RATE_E6, side=SIDE, notional=NOTIONAL, mark=M
     msg = {"oldId": h(oid), "closedOutSide": h(CLOSED), "remainingSide": h(remaining), "incomingSide": h(iside),
            "incomingC": h(incoming_c), "nonce": nonce, "openNonce": onc, "deadline": deadline,
            "commitment": h(commitment)}
-    td = typed("FailoverConsent", FAILOVER_TYPES, msg)
+    if not legacy:
+        msg = {"pair": PAIR, "closedPositionSide": "buy" if side == 1 else "sell", "notionalE6": notional,
+               "settlement": old["settlement"], "pricing": "Latest eligible benchmark at execution",
+               "spreadIfOpenedUsdE6": spread, "incoming": seat, "deadline": deadline, "commitment": h(commitment)}
+    td = typed("FailoverConsent", LEGACY_FAILOVER_TYPES if legacy else FAILOVER_TYPES, msg)
     return {
         "rfq_id": RFQ, "novation_id": "0x" + "c3" * 32, "role": "incoming", "digest_kind": "failover_consent",
         "digest": h(digest_of(td)), "typed_data": td, "signed": False, "chain": "avax-fuji", "domain_separator": SEP,
@@ -171,19 +178,31 @@ def recover(digest, sig) -> str:
 
 
 def test_take_over_bids_waits_and_signs_the_failover_form(client, session):
-    form = failover_form(client.address)
-    g = Gate(session, form=[NO_FORM, NO_FORM, form])
-    out = tko.take_over(client, RFQ, RATE, max_notional=CAP, poll=0.5)
-    assert out == tko.Signed(RFQ, "failover_consent", form["digest"], "armed")
-    assert len(g.signed) == 1 and not g.declined
-    assert form["digest"] == h(digest_of(form["typed_data"]))
-    assert recover(form["digest"], g.signed[0]) == client.address
-    quote = next(c for c in session.calls if c["path"] == f"/rfqs/{RFQ}/quotes")
-    assert set(quote["body"]) == {"rate", "client_quote_id"}, "a close bid is a price only"
-    assert quote["body"]["rate"] == RATE and quote["body"]["client_quote_id"].startswith("tko-")
-    assert session.paths().count(f"/rfqs/{RFQ}/close") == 3
-    assert FEE == int(form["item"]["spread"]) > 0
-    assert not [n for n in crx.__all__ if "takeover" in n.lower().replace("_", "")]
+    for legacy in (True, False):
+        session.calls.clear()
+        form = failover_form(client.address, legacy=legacy)
+        if not legacy:
+            form["consent_version"] = "economic-terms-v1"
+        g = Gate(session, form=[NO_FORM, NO_FORM, form])
+        out = tko.take_over(client, RFQ, RATE, max_notional=CAP, poll=0.5)
+        assert out == tko.Signed(RFQ, "failover_consent", form["digest"], "armed")
+        assert len(g.signed) == 1 and not g.declined
+        assert form["digest"] == h(digest_of(form["typed_data"]))
+        assert recover(form["digest"], g.signed[0]) == client.address
+        quote = next(c for c in session.calls if c["path"] == f"/rfqs/{RFQ}/quotes")
+        assert set(quote["body"]) == {"rate", "client_quote_id"}, "a close bid is a price only"
+        assert quote["body"]["rate"] == RATE and quote["body"]["client_quote_id"].startswith("tko-")
+        assert session.paths().count(f"/rfqs/{RFQ}/close") == 3
+        assert FEE == int(form["item"]["spread"]) > 0
+        assert not [n for n in crx.__all__ if "takeover" in n.lower().replace("_", "")]
+    for form in (
+        dict(failover_form(client.address, legacy=True), consent_version="economic-terms-v1"),
+        dict(failover_form(client.address), consent_version="unknown"),
+    ):
+        gate = Gate(session, form=form)
+        with pytest.raises(crx.RefusedToSign, match="consent_version"):
+            tko.take_over(client, RFQ, RATE, max_notional=CAP)
+        assert not gate.signed and len(gate.declined) == 1
 
 
 def test_a_form_already_signed_posts_nothing(client, session):
@@ -248,14 +267,14 @@ def _cases():
         ("pricing", lambda s: {k: v for k, v in failover_form(s).items() if k != "pricing"}),
         ("pricing.usd_is_base", lambda s: _repriced(failover_form(s), usd_is_base=False)),
         ("old", lambda s: {k: v for k, v in failover_form(s).items() if k != "old"}),
-        ("typed_data.message.nonce", lambda s: _retyped(failover_form(s))),
+        ("typed_data.message.deadline", lambda s: _retyped(failover_form(s))),
         ("item.spread", lambda s: _reitem(failover_form(s), spread="1.5")),
     ]
 
 
 def _retyped(form):
     td = form["typed_data"]
-    form["typed_data"] = dict(td, message=dict(td["message"], nonce=99))
+    form["typed_data"] = dict(td, message=dict(td["message"], deadline=99))
     return form
 
 
@@ -340,8 +359,12 @@ def test_a_declined_bid_raises(client, session):
 # ── the pinned vectors ───────────────────────────────────────────────────────
 
 
-def test_the_failover_digest_matches_the_format_vectors():
+def test_the_consent_digests_match_the_format_vectors():
     """format-vectors-v5.json closeout C1, computed by eth_account and viem; signed by keys.other."""
+    assert e7.type_string("FailoverConsent") == (
+        "FailoverConsent(string pair,string closedPositionSide,uint256 notionalE6,uint40 settlement,"
+        "string pricing,uint256 spreadIfOpenedUsdE6,address incoming,uint64 deadline,bytes32 commitment)"
+    )
     c = FV["closeout"]
     fc = c["failover_consent"]
     dom = fc["typed_data"]["domain"]
@@ -350,9 +373,18 @@ def test_the_failover_digest_matches_the_format_vectors():
     assert h(e7.typed_digest(td)) == fc["digest"] == h(digest_of(fc["typed_data"]))
     assert e7.typed_mismatch(fc["typed_data"], td) is None
     assert recover(fc["digest"], fc["signature"]) == FV["keys"]["other"]["address"].lower()
-    assert keccak(text=e7.type_string("FailoverConsent")) == keccak(
+    assert keccak(text=e7.type_string("FailoverConsent", fc["typed_data"]["message"])) == keccak(
         text="FailoverConsent(bytes32 oldId,bytes32 closedOutSide,bytes32 remainingSide,bytes32 incomingSide,"
              "bytes32 incomingC,uint64 nonce,uint64 openNonce,uint64 deadline,bytes32 commitment)")
+    for v in FV["consent_terms"]["vectors"]:
+        td = v["typed_data"]
+        primary, msg, dom = td["primaryType"], td["message"], td["domain"]
+        own = e7.typed_data(primary, dom["chainId"], dom["verifyingContract"], msg)
+        assert own == td
+        assert e7.type_string(primary) == v["type_string"]
+        assert h(e7.struct_hash(primary, msg)) == v["struct_hash"]
+        assert h(e7.typed_digest(own)) == v["digest"] == h(digest_of(td))
+        assert recover(v["digest"], v["signature"]) == v["signer"].lower()
 
 
 def test_the_fee_and_cap_match_the_gateways_vectors():

@@ -1097,5 +1097,270 @@
   "struct_hash": "0x6ae4cfaa0f89fbb97581cf1435bf714582ce4497a06aa7b487afaaac1ae5e4d0",
   "digest": "0xd81f1e577ef29653d7abae064e1b14e2d4386fe63f89d090e696cce7b0e5f704",
   "signature": "0x39d3c26a7d5b7739c8bb2f9382c57dadc2c0c39f7bfcefebc9340255ac0389893be81645df51e86c32979b98c3adbc8482950d6d58dcd18b281a39ad59e77d201c"
+ },
+ "consent_terms": {
+  "about": "Economic-terms-v1 encoding vectors computed by eth_account. Existing item commitments unchanged. Synthetic old ids test encoding only.",
+  "vectors": [
+   {
+    "type_string": "AllocationConsent(string pair,string exitingPositionSide,uint256 notionalE6,uint40 settlement,uint256 closeRateE6,uint256 spreadUsdE6,address incoming,uint64 deadline,bytes32 commitment)",
+    "typed_data": {
+     "types": {
+      "EIP712Domain": [
+       {
+        "name": "name",
+        "type": "string"
+       },
+       {
+        "name": "version",
+        "type": "string"
+       },
+       {
+        "name": "chainId",
+        "type": "uint256"
+       },
+       {
+        "name": "verifyingContract",
+        "type": "address"
+       }
+      ],
+      "AllocationConsent": [
+       {
+        "name": "pair",
+        "type": "string"
+       },
+       {
+        "name": "exitingPositionSide",
+        "type": "string"
+       },
+       {
+        "name": "notionalE6",
+        "type": "uint256"
+       },
+       {
+        "name": "settlement",
+        "type": "uint40"
+       },
+       {
+        "name": "closeRateE6",
+        "type": "uint256"
+       },
+       {
+        "name": "spreadUsdE6",
+        "type": "uint256"
+       },
+       {
+        "name": "incoming",
+        "type": "address"
+       },
+       {
+        "name": "deadline",
+        "type": "uint64"
+       },
+       {
+        "name": "commitment",
+        "type": "bytes32"
+       }
+      ]
+     },
+     "primaryType": "AllocationConsent",
+     "domain": {
+      "name": "CRX",
+      "version": "rulebook-1.0",
+      "chainId": 43113,
+      "verifyingContract": "0xd757933e2a5600c6f00f83fd282b33aa7cb409c0"
+     },
+     "message": {
+      "pair": "USD/BRL",
+      "exitingPositionSide": "sell",
+      "notionalE6": "5000000000000",
+      "settlement": "1798732800",
+      "closeRateE6": "5410000",
+      "spreadUsdE6": "1000000",
+      "incoming": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+      "deadline": "1790000900",
+      "commitment": "0x6c389ec66dc66f5c04a66e7cd65dcdea88d3d651e16202d6b559de33f1280735"
+     }
+    },
+    "struct_hash": "0xbf8539215131a5b776c109a89caf264dff6739f37e3459b7ee249685e7db8db2",
+    "digest": "0xd9926570f7dc47b855d15d80784c06e4e55d8f8a2b9d529b192a4eb935c85dd4",
+    "signature": "0x6125474c09d5c14b2805ac1a284311296b370ab963777eaf23b887d9170301937f7928982897abd333cad75eef64466be2c5d5417bf0b5d9d4d7814aed91f49d1b",
+    "signer": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+   },
+   {
+    "type_string": "AllocationAcceptance(string pair,string incomingPositionSide,uint256 notionalE6,uint40 settlement,uint64 entryRateE6,uint256 closeRateE6,uint256 spreadUsdE6,address incoming,uint64 deadline,bytes32 commitment)",
+    "typed_data": {
+     "types": {
+      "EIP712Domain": [
+       {
+        "name": "name",
+        "type": "string"
+       },
+       {
+        "name": "version",
+        "type": "string"
+       },
+       {
+        "name": "chainId",
+        "type": "uint256"
+       },
+       {
+        "name": "verifyingContract",
+        "type": "address"
+       }
+      ],
+      "AllocationAcceptance": [
+       {
+        "name": "pair",
+        "type": "string"
+       },
+       {
+        "name": "incomingPositionSide",
+        "type": "string"
+       },
+       {
+        "name": "notionalE6",
+        "type": "uint256"
+       },
+       {
+        "name": "settlement",
+        "type": "uint40"
+       },
+       {
+        "name": "entryRateE6",
+        "type": "uint64"
+       },
+       {
+        "name": "closeRateE6",
+        "type": "uint256"
+       },
+       {
+        "name": "spreadUsdE6",
+        "type": "uint256"
+       },
+       {
+        "name": "incoming",
+        "type": "address"
+       },
+       {
+        "name": "deadline",
+        "type": "uint64"
+       },
+       {
+        "name": "commitment",
+        "type": "bytes32"
+       }
+      ]
+     },
+     "primaryType": "AllocationAcceptance",
+     "domain": {
+      "name": "CRX",
+      "version": "rulebook-1.0",
+      "chainId": 43113,
+      "verifyingContract": "0xd757933e2a5600c6f00f83fd282b33aa7cb409c0"
+     },
+     "message": {
+      "pair": "USD/BRL",
+      "incomingPositionSide": "sell",
+      "notionalE6": "5000000000000",
+      "settlement": "1798732800",
+      "entryRateE6": "5300000",
+      "closeRateE6": "5410000",
+      "spreadUsdE6": "1000000",
+      "incoming": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+      "deadline": "1790000900",
+      "commitment": "0x6c389ec66dc66f5c04a66e7cd65dcdea88d3d651e16202d6b559de33f1280735"
+     }
+    },
+    "struct_hash": "0xc5ef86630a852023cdce4f678df59c75d8ae1cfe2b1d66dc5e12caa2496f5cbb",
+    "digest": "0x6d809d423f257aedb68bc8b2467e83a230c144b3b2aeac1138c29cba01737807",
+    "signature": "0x573a054a93d382e2732ef41b24d52a6b3765bdab2f1ca07b125861bb124d0ea02fa68162167114e4c0529dcb24aad15b83d4f67747bdf83b37a37375a467081d1b",
+    "signer": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8"
+   },
+   {
+    "type_string": "FailoverConsent(string pair,string closedPositionSide,uint256 notionalE6,uint40 settlement,string pricing,uint256 spreadIfOpenedUsdE6,address incoming,uint64 deadline,bytes32 commitment)",
+    "typed_data": {
+     "types": {
+      "EIP712Domain": [
+       {
+        "name": "name",
+        "type": "string"
+       },
+       {
+        "name": "version",
+        "type": "string"
+       },
+       {
+        "name": "chainId",
+        "type": "uint256"
+       },
+       {
+        "name": "verifyingContract",
+        "type": "address"
+       }
+      ],
+      "FailoverConsent": [
+       {
+        "name": "pair",
+        "type": "string"
+       },
+       {
+        "name": "closedPositionSide",
+        "type": "string"
+       },
+       {
+        "name": "notionalE6",
+        "type": "uint256"
+       },
+       {
+        "name": "settlement",
+        "type": "uint40"
+       },
+       {
+        "name": "pricing",
+        "type": "string"
+       },
+       {
+        "name": "spreadIfOpenedUsdE6",
+        "type": "uint256"
+       },
+       {
+        "name": "incoming",
+        "type": "address"
+       },
+       {
+        "name": "deadline",
+        "type": "uint64"
+       },
+       {
+        "name": "commitment",
+        "type": "bytes32"
+       }
+      ]
+     },
+     "primaryType": "FailoverConsent",
+     "domain": {
+      "name": "CRX",
+      "version": "rulebook-1.0",
+      "chainId": 43113,
+      "verifyingContract": "0xd757933e2a5600c6f00f83fd282b33aa7cb409c0"
+     },
+     "message": {
+      "pair": "USD/BRL",
+      "closedPositionSide": "sell",
+      "notionalE6": "5000000000000",
+      "settlement": "1798732800",
+      "pricing": "Latest eligible benchmark at execution",
+      "spreadIfOpenedUsdE6": "2000000",
+      "incoming": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+      "deadline": "1790001600",
+      "commitment": "0x8ebabc1ea413e1d61cb2c2701a4cb4764eb23e00fbd6c76fc735ae6c99de4258"
+     }
+    },
+    "struct_hash": "0x289f59fe5f6612cc35516e176a5a3e789e0f5e5096d5b23eabc7c542ad2b8464",
+    "digest": "0x773a4c4984a269b94d8a0a1a98db8bd86568c275d3b23404c04f488b7a98619e",
+    "signature": "0x60df972ed3510d3e66266f370aaf7bb6a12f11e8f2f28ce5305406811ca22fe924519f31a823ff57267b400af5f0a5347a108d32b70baf0a6979c7560af62d631c",
+    "signer": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8"
+   }
+  ]
  }
 }

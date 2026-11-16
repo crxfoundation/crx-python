@@ -29,19 +29,40 @@ TERMS_FIELDS = (
     ("takerSide", "bytes32"), ("makerSide", "bytes32"), ("notional", "uint256"), ("premiumBps", "int16"),
     ("nonce", "uint64"), ("pair", "bytes32"), ("side", "int8"), ("settlement", "uint40"), ("rate", "uint64"),
 )
-ALLOCATION_CONSENT_FIELDS = (
+LEGACY_ALLOCATION_CONSENT_FIELDS = (
     ("oldId", "bytes32"), ("exitingSide", "bytes32"), ("remainingSide", "bytes32"), ("incomingSide", "bytes32"),
     ("nonce", "uint64"), ("deadline", "uint64"), ("commitment", "bytes32"), ("salt", "bytes32"),
 )
-FAILOVER_CONSENT_FIELDS = (
+LEGACY_FAILOVER_CONSENT_FIELDS = (
     ("oldId", "bytes32"), ("closedOutSide", "bytes32"), ("remainingSide", "bytes32"), ("incomingSide", "bytes32"),
     ("incomingC", "bytes32"), ("nonce", "uint64"), ("openNonce", "uint64"), ("deadline", "uint64"),
     ("commitment", "bytes32"),
 )
-ALLOCATION_ACCEPTANCE_FIELDS = (
+LEGACY_ALLOCATION_ACCEPTANCE_FIELDS = (
     ("oldId", "bytes32"), ("incomingSide", "bytes32"), ("incomingC", "bytes32"), ("nonce", "uint64"),
     ("deadline", "uint64"), ("commitment", "bytes32"),
 )
+ALLOCATION_CONSENT_FIELDS = (
+    ("pair", "string"), ("exitingPositionSide", "string"), ("notionalE6", "uint256"), ("settlement", "uint40"),
+    ("closeRateE6", "uint256"), ("spreadUsdE6", "uint256"), ("incoming", "address"), ("deadline", "uint64"),
+    ("commitment", "bytes32"),
+)
+ALLOCATION_ACCEPTANCE_FIELDS = (
+    ("pair", "string"), ("incomingPositionSide", "string"), ("notionalE6", "uint256"), ("settlement", "uint40"),
+    ("entryRateE6", "uint64"), ("closeRateE6", "uint256"), ("spreadUsdE6", "uint256"), ("incoming", "address"),
+    ("deadline", "uint64"), ("commitment", "bytes32"),
+)
+FAILOVER_CONSENT_FIELDS = (
+    ("pair", "string"), ("closedPositionSide", "string"), ("notionalE6", "uint256"), ("settlement", "uint40"),
+    ("pricing", "string"), ("spreadIfOpenedUsdE6", "uint256"), ("incoming", "address"), ("deadline", "uint64"),
+    ("commitment", "bytes32"),
+)
+FAILOVER_PRICING = "Latest eligible benchmark at execution"
+LEGACY_CONSENTS = {
+    "AllocationConsent": LEGACY_ALLOCATION_CONSENT_FIELDS,
+    "AllocationAcceptance": LEGACY_ALLOCATION_ACCEPTANCE_FIELDS,
+    "FailoverConsent": LEGACY_FAILOVER_CONSENT_FIELDS,
+}
 # Hidden words: committed as keccak256(abi.encode(words) ‖ salt) and not signed as a struct.
 ALLOCATION_ITEM_FIELDS = (
     ("oldId", "bytes32"), ("exitingSide", "bytes32"), ("remainingSide", "bytes32"), ("incoming", "address"),
@@ -92,18 +113,34 @@ def structs() -> dict[str, list[tuple[str, str]]]:
     }
 
 
-def type_string(primary: str) -> str:
+def type_string(primary: str, message: dict | None = None) -> str:
     """Return the EIP-712 type string of a known struct, such as ``Trade(string summary,...)``."""
-    return primary + "(" + ",".join(f"{t} {n}" for n, t in fields_of(primary)) + ")"
+    return primary + "(" + ",".join(f"{t} {n}" for n, t in fields_of(primary, message)) + ")"
 
 
-def typehash(primary: str) -> bytes:
-    return keccak(text=type_string(primary))
+def typehash(primary: str, message: dict | None = None) -> bytes:
+    return keccak(text=type_string(primary, message))
 
 
-def fields_of(primary: str) -> list[tuple[str, str]]:
+def fields_of(primary: str, message: dict | None = None) -> list[tuple[str, str]]:
     """Return (name, type) of each member of a known struct. Raise KeyError for an unknown one."""
+    legacy = LEGACY_CONSENTS.get(primary)
+    if legacy is not None and isinstance(message, dict) and set(message) == {n for n, _ in legacy}:
+        return list(legacy)
     return structs()[primary]
+
+
+def readable_consent(td: Any, primary: str) -> bool:
+    """Return whether the served form uses the current consent members."""
+    return (isinstance(td, dict) and isinstance(td.get("types"), dict)
+            and td["types"].get(primary) == [{"name": n, "type": t} for n, t in fields_of(primary)])
+
+
+def consent_version_ok(template: dict, primary: str) -> bool:
+    """Check a served version marker against the consent schema."""
+    version = template.get("consent_version")
+    return version is None or (version == "economic-terms-v1"
+                               and readable_consent(template.get("typed_data"), primary))
 
 
 def hx(value: str) -> bytes:
@@ -371,7 +408,7 @@ def typed_data(primary: str, chain_id: int, core: str, message: dict) -> dict:
     return {
         "types": {
             "EIP712Domain": [{"name": n, "type": t} for n, t in DOMAIN_FIELDS],
-            primary: [{"name": n, "type": t} for n, t in fields_of(primary)],
+            primary: [{"name": n, "type": t} for n, t in fields_of(primary, message)],
         },
         "primaryType": primary,
         "domain": domain_json(chain_id, core),
@@ -412,10 +449,10 @@ def word_of(kind: str, value: Any) -> Any:
 
 def struct_hash(primary: str, message: dict) -> bytes:
     """Return ``hashStruct`` of a flat struct: strings hashed, other members as ABI words."""
-    fields = fields_of(primary)
+    fields = fields_of(primary, message)
     if not isinstance(message, dict) or set(message) != {n for n, _ in fields}:
         raise ValueError(f"the {primary} message does not have its members")
-    kinds, words = ["bytes32"], [typehash(primary)]
+    kinds, words = ["bytes32"], [typehash(primary, message)]
     for name, kind in fields:
         v = word_of(kind, message[name])
         if kind == "string":
@@ -440,7 +477,7 @@ def typed_digest(td: dict) -> bytes:
         [DOMAIN_TYPEHASH, keccak(text=word_of("string", d["name"])), keccak(text=word_of("string", d["version"])),
          word_of("uint256", d["chainId"]), to_checksum_address(word_of("address", d["verifyingContract"]))],
     ))
-    if td.get("types") != typed_data(primary, 1, "0x" + "00" * 20, {})["types"]:
+    if td.get("types") != typed_data(primary, 1, "0x" + "00" * 20, td["message"])["types"]:
         raise ValueError("the types are not this struct's")
     return keccak(b"\x19\x01" + sep + struct_hash(primary, td["message"]))
 
@@ -456,7 +493,7 @@ def typed_mismatch(served: Any, own: dict) -> str | None:
         return "primaryType"
     if served["types"] != own["types"]:
         return "types"
-    parts = (("domain", DOMAIN_FIELDS), ("message", fields_of(own["primaryType"])))
+    parts = (("domain", DOMAIN_FIELDS), ("message", fields_of(own["primaryType"], own["message"])))
     for part, fields in parts:
         s, o = served[part], own[part]
         if not isinstance(s, dict) or set(s) != set(o):

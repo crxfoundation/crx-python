@@ -6,6 +6,8 @@ from decimal import Decimal
 import copy
 
 import pytest
+from eth_account.messages import encode_typed_data
+from eth_utils import keccak
 
 import crx
 from crx import _close
@@ -51,7 +53,9 @@ def allocation(role, incoming, *, rate=18_612_345, side=1, taker=True, deadline=
     item.update(edits)
     w = camel(item, e7.ALLOCATION_ITEM_FIELDS)
     commitment = e7.h0x(e7.hidden_commitment(e7.ALLOCATION_ITEM_FIELDS, w, SALT))
-    td = e7.typed_data("AllocationConsent", CHAIN_ID, CORE, _close.consent_message(w, commitment, SALT))
+    td = e7.typed_data("AllocationConsent", CHAIN_ID, CORE, _close.consent_message(
+        w, commitment, SALT, pair=PAIR, side=side, notional_e6=NOTIONAL, settlement=SETTLE,
+    ))
     t = {"novation_id": "0x" + "34" * 32, "rfq_id": RFQ, "chain": "avax-fuji", "commitment": commitment,
          "incoming_c": INC_C, "item": item, "old": old, "role": role, "digest_kind": "allocation_consent",
          "digest": e7.h0x(e7.typed_digest(td)), "typed_data": td, "signed": False, "trade_id": TRADE}
@@ -114,6 +118,47 @@ def test_close_vectors_are_the_gateway_words():
         assert _close.close_quote_id(q["rfq_id"], q["maker"].lower(), q["rate_e6"], q["client_quote_id"]) == q["quote_id"]
 
 
+def test_changed_consent_terms_never_reach_the_signer(monkeypatch):
+    def unexpected_sign(*args):
+        raise AssertionError("an altered consent reached the signer")
+
+    monkeypatch.setattr(_close, "sign_typed", unexpected_sign)
+    class CheckedClient:
+        _signer = None
+
+        def _chain_info(self):
+            return {"chain_id": self.domain["chainId"], "core": self.domain["verifyingContract"]}
+
+    c = CheckedClient()
+    for vector in FV["consent_terms"]["vectors"]:
+        td = vector["typed_data"]
+        c.domain, c.address = td["domain"], vector["signer"]
+        primary = td["primaryType"]
+        for version, served in (("unknown", td), ("economic-terms-v1", None)):
+            template = {"digest": vector["digest"], "typed_data": served, "consent_version": version}
+            with pytest.raises(crx.RefusedToSign, match="consent version"):
+                _close.sign_form(c, template, primary, td["message"])
+        for field in td["types"][primary]:
+            name, kind = field["name"], field["type"]
+            bent = copy.deepcopy(td)
+            value = bent["message"][name]
+            if kind == "string":
+                value += " changed"
+            elif kind == "address":
+                value = "0x" + "fe" * 20
+            elif kind == "bytes32":
+                value = "0x" + "fe" * 32
+            else:
+                value = str(int(value) + 1)
+            bent["message"][name] = value
+            encoded = encode_typed_data(full_message=bent)
+            wrong_digest = e7.h0x(keccak(b"\x19" + encoded.version + encoded.header + encoded.body))
+            for served_digest in (vector["digest"], wrong_digest):
+                template = {"digest": served_digest, "typed_data": bent}
+                with pytest.raises(crx.RefusedToSign):
+                    _close.sign_form(c, template, primary, td["message"])
+
+
 # ── a close with the counterparty, as crx-api served it ──────────────────────
 
 AG_RFQ = AG["template"]["remaining"]["rfq_id"]
@@ -142,20 +187,22 @@ def counterparty_routes(session, template=None):
 
 
 def test_answer_close_signs_the_gateways_plain_close_and_reads_closed(session, tmp_path):
-    """The counterparty reads the request, answers, and signs the gateway's own plain close: the same
-    signature the gateway took. The trade ends for both seats."""
-    c = client(session, tmp_path, INCOMING, Clock(AG_T0), core=AG_CORE)
-    counterparty_routes(session)
-    assert AG["template"]["remaining"]["digest"] == AG["template"]["exiting"]["digest"]
-    req = next(iter(c.close_requests(wait=0)))
-    assert (req.rfq_id, req.raw["trade_id"], req.closes_at.timestamp() * 1000) == (
-        AG_RFQ, AG_TRADE, AG["tape_remaining"][-5]["data"]["answer_by"])
-    out = c.answer_close(req, "156.5", wait=150, client_quote_id="rt-answer-1")
-    assert (out.status, out.final, out.counterparty, out.trade_id) == ("closed", True, True, AG_TRADE)
-    assert out.item == AG["arm_tx"][-1]["item"]
-    sent = {x["path"]: x["body"] for x in session.calls if x["method"] == "POST"}
-    assert sent[f"/rfqs/{AG_RFQ}/close/answer"] == AG["answer"]["sent"]
-    assert sent[f"/rfqs/{AG_RFQ}/close/sign"] == AG["sign"]["remaining"]["sent"]
+    for data in (AG, dict(AG, **AG["consent_terms"])):
+        session.calls.clear()
+        """The counterparty reads the request, answers, and signs the gateway's own plain close: the same
+        signature the gateway took. The trade ends for both seats."""
+        c = client(session, tmp_path, INCOMING, Clock(AG_T0), core=AG_CORE)
+        counterparty_routes(session, data["template"]["remaining"])
+        assert data["template"]["remaining"]["digest"] == data["template"]["exiting"]["digest"]
+        req = next(iter(c.close_requests(wait=0)))
+        assert (req.rfq_id, req.raw["trade_id"], req.closes_at.timestamp() * 1000) == (
+            AG_RFQ, AG_TRADE, data["tape_remaining"][-5]["data"]["answer_by"])
+        out = c.answer_close(req, "156.5", wait=150, client_quote_id="rt-answer-1")
+        assert (out.status, out.final, out.counterparty, out.trade_id) == ("closed", True, True, AG_TRADE)
+        assert out.item == data["arm_tx"][-1]["item"]
+        sent = {x["path"]: x["body"] for x in session.calls if x["method"] == "POST"}
+        assert sent[f"/rfqs/{AG_RFQ}/close/answer"] == data["answer"]["sent"]
+        assert sent[f"/rfqs/{AG_RFQ}/close/sign"] == data["sign"]["remaining"]["sent"]
 
 
 def edited(template, edit):
@@ -195,24 +242,26 @@ def test_a_late_answer_reads_quote_expired(session, tmp_path):
 
 
 def test_close_trade_signs_the_gateways_plain_close_and_reads_closed(session, tmp_path):
-    """The exiting seat takes the counterparty's answer and signs the gateway's own plain close: the same
-    signature the gateway took."""
-    c = client(session, tmp_path, EXITING, Clock(AG_T0), core=AG_CORE)
-    session.routes.update({
-        ("GET", "/health"): AG["health"],
-        ("GET", "/positions"): AG["positions"]["exiting"],
-        ("POST", "/rfqs"): AG["open"]["body"],
-        ("GET", f"/rfqs/{AG_RFQ}"): list(AG["views_exiting"]),
-        ("POST", f"/rfqs/{AG_RFQ}/accept"): AG["accept"]["body"],
-        ("GET", f"/rfqs/{AG_RFQ}/close"): AG["template"]["exiting"],
-        ("POST", f"/rfqs/{AG_RFQ}/close/sign"): AG["sign"]["exiting"]["body"],
-        ("GET", f"/rfqs/{AG_RFQ}/close/arm-tx"): list(AG["arm_tx"]),
-    })
-    out = c.close_trade(AG_TRADE, wait=75)
-    remaining = AG["template"]["exiting"]["item"]["incoming"]
-    assert (out.status, out.final, out.counterparty, out.to, out.rate) == ("closed", True, True, remaining,
-                                                                           Decimal("156.5"))
-    sent = {x["path"]: x["body"] for x in session.calls if x["method"] == "POST"}
-    assert sent["/rfqs"]["position_id"] == AG["open"]["sent"]["position_id"]
-    assert sent[f"/rfqs/{AG_RFQ}/accept"] == AG["accept"]["sent"]
-    assert sent[f"/rfqs/{AG_RFQ}/close/sign"] == AG["sign"]["exiting"]["sent"]
+    for data in (AG, dict(AG, **AG["consent_terms"])):
+        session.calls.clear()
+        """The exiting seat takes the counterparty's answer and signs the gateway's own plain close: the same
+        signature the gateway took."""
+        c = client(session, tmp_path, EXITING, Clock(AG_T0), core=AG_CORE)
+        session.routes.update({
+            ("GET", "/health"): data["health"],
+            ("GET", "/positions"): data["positions"]["exiting"],
+            ("POST", "/rfqs"): data["open"]["body"],
+            ("GET", f"/rfqs/{AG_RFQ}"): list(data["views_exiting"]),
+            ("POST", f"/rfqs/{AG_RFQ}/accept"): data["accept"]["body"],
+            ("GET", f"/rfqs/{AG_RFQ}/close"): data["template"]["exiting"],
+            ("POST", f"/rfqs/{AG_RFQ}/close/sign"): data["sign"]["exiting"]["body"],
+            ("GET", f"/rfqs/{AG_RFQ}/close/arm-tx"): list(data["arm_tx"]),
+        })
+        out = c.close_trade(AG_TRADE, wait=75)
+        remaining = data["template"]["exiting"]["item"]["incoming"]
+        assert (out.status, out.final, out.counterparty, out.to, out.rate) == ("closed", True, True, remaining,
+                                                                               Decimal("156.5"))
+        sent = {x["path"]: x["body"] for x in session.calls if x["method"] == "POST"}
+        assert sent["/rfqs"]["position_id"] == data["open"]["sent"]["position_id"]
+        assert sent[f"/rfqs/{AG_RFQ}/accept"] == data["accept"]["sent"]
+        assert sent[f"/rfqs/{AG_RFQ}/close/sign"] == data["sign"]["exiting"]["sent"]
