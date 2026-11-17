@@ -146,6 +146,19 @@ def _page(c: "Client", cursor: int) -> tuple[list, int]:
     return rows, max(cursor, seq)
 
 
+def _page_with_restore(c: "Client", cursor: int, recover_restore: bool) -> tuple[list, int, bool]:
+    try:
+        rows, cursor = _page(c, cursor)
+        return rows, cursor, False
+    except CrxError as e:
+        if not (recover_restore and cursor > 0 and e.status == 409 and e.code == "conflict" and
+                e.details.get("field") == "after"):
+            raise
+        log.info("rfqs: restored tape rejected cursor %s; reading again from 0", cursor)
+        rows, cursor = _page(c, 0)
+        return rows, cursor, True
+
+
 def _opened(rows: list) -> Iterator[Rfq]:
     for row in rows:
         if isinstance(row, dict) and row.get("type") == "rfq.opened" and isinstance(row.get("data"), dict):
@@ -156,6 +169,7 @@ def _opened(rows: list) -> Iterator[Rfq]:
 
 def stream(
     c: "Client", after: int | None, wait: float | None, poll: float, stop: Any = None, only: Any = None,
+    recover_restore: bool = False,
 ) -> Iterator[Rfq]:
     """Yield open RFQs from the ``/trades`` tape, oldest first, once each, until ``wait`` ends or ``stop`` is set."""
     rid = None
@@ -167,12 +181,14 @@ def stream(
     end = None if wait is None else c._clock() + max(float(wait), 0.0)
     backlog: list[Rfq] = []
     while True:
-        rows, cursor = _page(c, cursor)
+        rows, cursor, rewound = _page_with_restore(c, cursor, recover_restore)
+        if rewound:
+            backlog.clear()
         backlog = [r for r in backlog if _quotable(r, c.chain_key, c._clock() * 1000)]
         backlog += [r for r in _opened(rows) if _quotable(r, c.chain_key, c._clock() * 1000)]
         if len(rows) < PAGE:
             break
-    rfqs = _follow(c, cursor, backlog, end, poll, stop)
+    rfqs = _follow(c, cursor, backlog, end, poll, stop, recover_restore)
     return rfqs if rid is None else _only(rfqs, rid, stop)
 
 
@@ -189,6 +205,7 @@ def _only(rfqs: Iterator[Rfq], rfq_id: str, stop: Any) -> Iterator[Rfq]:
 
 def _follow(
     c: "Client", cursor: int, backlog: list[Rfq], end: float | None, poll: float, stop: Any,
+    recover_restore: bool = False,
 ) -> Iterator[Rfq]:
     seen: set[str] = set()
     pending = list(backlog)
@@ -206,7 +223,9 @@ def _follow(
         c._sleep(poll)
         try:
             while True:
-                rows, cursor = _page(c, cursor)
+                rows, cursor, rewound = _page_with_restore(c, cursor, recover_restore)
+                if rewound:
+                    pending.clear()
                 pending += list(_opened(rows))
                 if len(rows) < PAGE:
                     break

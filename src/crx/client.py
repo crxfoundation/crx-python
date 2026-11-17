@@ -706,7 +706,7 @@ class Client:
             raise BadAnswer("/positions lists no positions")
         return [_position(p) for p in rows if isinstance(p, dict)]
 
-    def trades(self, after: int = 0, *, market: bool = False) -> list[Event]:
+    def trades(self, after: int = 0, *, market: bool = False, recover_restore: bool = False) -> list[Event]:
         """List the seat's event tape, oldest first.
 
         Key trades on ``trade_id``. ``trade.retracted`` can take back a ``trade.opened`` until ``trade.final``
@@ -715,6 +715,7 @@ class Client:
         Args:
             after: Return only events after this ``Event.seq``. Sequence numbers count per account and role.
             market: Keep every ``rfq.opened`` a maker seat receives. By default only the seat's own RFQs show.
+            recover_restore: On a restored-log cursor conflict, restart the read from sequence 0. Defaults off.
 
         Raises:
             CrxError: ``after`` is past the end of the tape (code ``conflict``).
@@ -722,7 +723,15 @@ class Client:
         self._need_key()
         rows: list = []
         while True:
-            page = self._gw.request("GET", "/trades", query={"after": after, "limit": 1000})
+            try:
+                page = self._gw.request("GET", "/trades", query={"after": after, "limit": 1000})
+            except CrxError as e:
+                if not (recover_restore and e.status == 409 and e.code == "conflict" and
+                        e.details.get("field") == "after" and after > 0):
+                    raise
+                rows.clear()
+                after = 0
+                continue
             got = page.get("trades")
             if not isinstance(got, list):
                 raise BadAnswer("/trades lists no trades")
@@ -1638,7 +1647,7 @@ class Client:
 
     def rfqs(
         self, *, after: int | None = None, wait: float | None = None, poll: float = 1.0,
-        stop: threading.Event | None = None, only: Ask | str | None = None,
+        stop: threading.Event | None = None, only: Ask | str | None = None, recover_restore: bool = False,
     ) -> Iterator[Rfq]:
         """Yield the open RFQs this seat can quote, as they arrive.
 
@@ -1651,13 +1660,14 @@ class Client:
             poll: Seconds between reads. Defaults to 1. Reads share a limit of 5 requests a second per IP.
             stop: A ``threading.Event`` that ends the stream when set.
             only: An ``Ask`` or RFQ id. Yield that RFQ alone, then end.
+            recover_restore: On a restored-log cursor conflict, restart the read from sequence 0. Defaults off.
 
         Raises:
             NoQuotes: With ``only``, ``wait`` ends before the RFQ arrives.
         """
         self._need_seat()
         self._keep_live()
-        return _maker.stream(self, after, wait, poll, stop, only)
+        return _maker.stream(self, after, wait, poll, stop, only, recover_restore)
 
     def rfq(self, rfq_id: str) -> Rfq:
         """Return one RFQ as this seat sees it.
