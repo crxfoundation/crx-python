@@ -94,7 +94,7 @@ print(w.amount, w.status)
 | `withdraw(amount=None)` | Withdraws USDC to the seat wallet, or all free collateral with no amount. |
 | `balance()` | Returns collateral, free collateral, margin and withdraw state. |
 | `positions()` | Lists open positions with entry price, mark price, mark time and unrealized P&L. The mark and the P&L are `None` with no mark. |
-| `trades(after=0, market=False)` | Returns the event tape of the seat, oldest first. |
+| `trades(after=0, market=False, recover_restore=False)` | Returns the event tape of the seat, oldest first. With `recover_restore=True`, a cursor that the gateway refuses after a service restore reads the tape again from the start. |
 | `add_viewer(addr)`, `remove_viewer(addr)`, `viewers()` | Grants, takes back and lists read access to the seat, for up to 5 wallets. |
 
 `quote()` and `ask()` take the same terms:
@@ -161,7 +161,7 @@ c.quote_live(lambda rfq: "18.49" if rfq.pair == "USD/MXN" else None, seconds=600
 
 `test_request()`: a request lasts 15 minutes. Each RFQ closes after 120 seconds and settles one hour after `request_expires_at`. A repeat call returns the active or accepted RFQ, or renews an expired one with the same deadlines, except in the last minute. Each maker starts at most one request per UTC day, within ten globally. `wait` covers a rate limit and a new deposit that does not count yet. On a network without test requests, the code is `test_requests_off`.
 
-`rfqs()`: a seat with no collateral receives no RFQ. `only=` (an `Ask` or an RFQ id) yields that RFQ alone. `after=` (an `Rfq.seq`) starts after that RFQ. The stream ends after `wait=` seconds or when `stop=` is set, and by default never ends.
+`rfqs()`: a seat with no collateral receives no RFQ. `only=` (an `Ask` or an RFQ id) yields that RFQ alone. `after=` (an `Rfq.seq`) starts after that RFQ. With `recover_restore=True`, a cursor that the gateway refuses after a service restore restarts the stream from the start of the tape. The stream ends after `wait=` seconds or when `stop=` is set, and by default never ends.
 
 `send_quote()`: normal RFQs take quotes for 10 seconds. The taker gets the best quote only. The SDK signs a premium of 0 and the settlement in `rfq.expiry`. Pass `premium_bps=` or `expiry=` (a datetime, unix ms or a timedelta bound) when the rate prices other terms. The call waits until the RFQ's `closes_at` for a new deposit to count. The quote binds the seat until the RFQ's `quote_expiry_max` or a `drop_quote()`. Nothing is signed after the accept. A later quote on the same RFQ replaces the earlier one.
 
@@ -219,6 +219,7 @@ Every error is a `crx.CrxError`. Branch on `.code`. Show `str(e)`: on a gateway 
 | `leg_live` | Quote again, or call `drop_quote(rfq, leg_id=err.leg_id)`. |
 | `quote_format_outdated` | Update the SDK. |
 | `network`, `conflict`, `quote_fills_full`, `rate_limited` | Call again later. `rate_limited.retry_after` is the wait in seconds, when sent. |
+| `conflict` on `after` | The cursor is past the head of a restored tape. Read again from `after=0`, or pass `recover_restore=True` to `trades()` or `rfqs()`. |
 | `already_accepted` | The taker accepted before the drop. Call `confirm()`. |
 | `unknown_or_ended` | The RFQ ended. Nothing to drop. |
 | `deposit_failed`, `bad_answer` | Read `balance()` before the next deposit or call. |
