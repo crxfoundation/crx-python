@@ -171,7 +171,10 @@ def stream(
     c: "Client", after: int | None, wait: float | None, poll: float, stop: Any = None, only: Any = None,
     recover_restore: bool = False,
 ) -> Iterator[Rfq]:
-    """Yield open RFQs from the ``/trades`` tape, oldest first, once each, until ``wait`` ends or ``stop`` is set."""
+    """Yield open RFQs from the ``/trades`` tape, oldest first, once each, until ``wait`` ends or ``stop`` is set.
+
+    With ``recover_restore``, one cursor conflict per stream reads the tape again from 0; a second raises.
+    """
     rid = None
     if only is not None:
         rid = _word(getattr(only, "rfq_id", only))
@@ -183,6 +186,7 @@ def stream(
     while True:
         rows, cursor, rewound = _page_with_restore(c, cursor, recover_restore)
         if rewound:
+            recover_restore = False
             backlog.clear()
         backlog = [r for r in backlog if _quotable(r, c.chain_key, c._clock() * 1000)]
         backlog += [r for r in _opened(rows) if _quotable(r, c.chain_key, c._clock() * 1000)]
@@ -225,6 +229,7 @@ def _follow(
             while True:
                 rows, cursor, rewound = _page_with_restore(c, cursor, recover_restore)
                 if rewound:
+                    recover_restore = False
                     pending.clear()
                 pending += list(_opened(rows))
                 if len(rows) < PAGE:

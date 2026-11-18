@@ -715,7 +715,8 @@ class Client:
         Args:
             after: Return only events after this ``Event.seq``. Sequence numbers count per account and role.
             market: Keep every ``rfq.opened`` a maker seat receives. By default only the seat's own RFQs show.
-            recover_restore: On a restored-log cursor conflict, restart the read from sequence 0. Defaults off.
+            recover_restore: On a restored-log cursor conflict, restart the read from sequence 0 once per call; a
+                second conflict raises. Defaults off.
 
         Raises:
             CrxError: ``after`` is past the end of the tape (code ``conflict``).
@@ -729,6 +730,7 @@ class Client:
                 if not (recover_restore and e.status == 409 and e.code == "conflict" and
                         e.details.get("field") == "after" and after > 0):
                     raise
+                recover_restore = False
                 rows.clear()
                 after = 0
                 continue
@@ -1660,7 +1662,8 @@ class Client:
             poll: Seconds between reads. Defaults to 1. Reads share a limit of 5 requests a second per IP.
             stop: A ``threading.Event`` that ends the stream when set.
             only: An ``Ask`` or RFQ id. Yield that RFQ alone, then end.
-            recover_restore: On a restored-log cursor conflict, restart the read from sequence 0. Defaults off.
+            recover_restore: On a restored-log cursor conflict, restart the read from sequence 0 once per stream; a
+                second conflict raises. Defaults off.
 
         Raises:
             NoQuotes: With ``only``, ``wait`` ends before the RFQ arrives.
