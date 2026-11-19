@@ -2,9 +2,11 @@
 
 ## 0.4.0
 
-- `trades()` and `rfqs()` take `recover_restore=False`. With `True`, a `conflict` on `after` (a cursor past the head of a restored tape) reads the tape again from the start, once per `trades()` call or `rfqs()` stream; a second conflict raises. The default keeps the 0.3.20 behaviour: the call raises `conflict`.
+- `trades()` and `rfqs()` take `recover_restore=False`. With `True`, a `conflict` on `after` (a cursor past the head of a restored tape) reads the tape again from the start, once per `trades()` call or `rfqs()` stream; a second conflict raises. The default keeps the 0.3.21 behaviour: the call raises `conflict`.
 - Close and takeover signatures show the pair, direction, size, settlement, incoming party and payment terms. A takeover at a benchmark shows its pricing rule and conditional fee. The client checks each displayed term before signing.
 - Existing close, answer and takeover calls keep their arguments. The earlier signature format remains supported during the release transition.
+- Once the network runs the updated rulebook engine, 0.3.21 refuses to sign these close and takeover signatures. Sign them with 0.4.0 or later.
+- The install line names `@v0.4.0`.
 
 ## 0.3.21
 
