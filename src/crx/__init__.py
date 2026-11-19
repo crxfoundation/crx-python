@@ -14,12 +14,13 @@ from .guardian import Guardian
 from .models import (
     Ask, Balance, Close, Confirmation, ConfirmationPage, Deposit, Drop, Event, MakerQuote, Market, Position, Quote,
     Rfq, Trade, Viewer, Withdraw,
+    pair_label,
 )
 
 __version__ = "0.5.4"
 
 __all__ = [
-    "Client", "Guardian", "NETWORKS", "__version__",
+    "Client", "Guardian", "NETWORKS", "__version__", "pair_label",
     "Ask", "Balance", "Close", "Confirmation", "ConfirmationPage", "Deposit", "Drop", "Event", "MakerQuote",
     "Market", "Position", "Quote", "Rfq",
     "Trade", "Viewer", "Withdraw",

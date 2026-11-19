@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- `quote()`, `ask()` and `market()` take `USDC/USDT` (or `usdcusdt`) for the API code `USD/UST`. Return values and fields keep `USD/UST`.
+- `crx.pair_label(pair)` returns the name a person reads: `USDC/USDT` for `USD/UST`, else the pair.
+- Error texts and the `quote_live()` lines name `USDC/USDT` in place of `USD/UST`. `details["pair"]` keeps the API code.
+
 ## 0.5.4
 
 - `crx-key new [PATH]` is new: it writes a new seat key to a new file (default `~/.crx/seat.key`; owner-only on macOS and Linux) and prints its address. The firm sends CRX the address; the key stays on its machine. An existing path is refused and stays unchanged. `crx-key address [PATH]` prints the address of a key file. `python -m crx.key` runs the same command.

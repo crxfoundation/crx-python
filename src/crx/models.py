@@ -32,6 +32,15 @@ def side_word(side: Any) -> str | None:
     return {1: "buy", -1: "sell"}.get(side) if isinstance(side, int) else None
 
 
+# The name a person reads for a pair whose API code differs from it.
+PAIR_LABELS = {"USD/UST": "USDC/USDT", "USDUST": "USDC/USDT"}
+
+
+def pair_label(pair: Any) -> str:
+    """Return the name a person reads for ``pair``: ``USDC/USDT`` for the API code ``USD/UST``, else ``pair``."""
+    return PAIR_LABELS.get(str(pair), str(pair))
+
+
 @dataclass(frozen=True)
 class Market:
     """One currency pair as this client's chain offers it.

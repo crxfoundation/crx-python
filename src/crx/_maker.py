@@ -19,7 +19,7 @@ from .errors import (
     AlreadyAccepted, BadAnswer, BadRequest, CrxError, LegIdTaken, LegLive, NetworkError, NoQuotes, QuoteLost,
     RateLimited, RefusedToSign, ServerError, UnknownOrEnded, clean,
 )
-from .models import Drop, MakerQuote, Rfq, Trade, _final, _provisional, _side_of, dec, ms_to_dt
+from .models import Drop, MakerQuote, Rfq, Trade, _final, _provisional, _side_of, dec, ms_to_dt, pair_label
 
 if TYPE_CHECKING:
     from .client import Client
@@ -601,7 +601,7 @@ def live(c: "Client", price: Any, seconds: Any, out: Any) -> list[Trade]:
                     after = r.seq or after
                     rid = r.rfq_id
                     rate = price(r)
-                    say("rfq", rid[:10], r.pair, r.side, r.notional, "pass" if rate is None else rate)
+                    say("rfq", rid[:10], pair_label(r.pair), r.side, r.notional, "pass" if rate is None else rate)
                     if rate is not None and rid not in quotes:
                         q = post(r, rate)
                         if q is not None:
@@ -625,7 +625,7 @@ def live(c: "Client", price: Any, seconds: Any, out: Any) -> list[Trade]:
                     continue
                 if t.status in ("pending", "sending"):
                     continue
-                say("trade", rid[:10], t.pair, t.side, t.notional, t.rate, t.status)
+                say("trade", rid[:10], pair_label(t.pair), t.side, t.notional, t.rate, t.status)
                 del quotes[rid]
                 if t.status == "open":
                     opened.append(t)
