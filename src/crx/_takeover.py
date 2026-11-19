@@ -20,6 +20,7 @@ from . import _maker
 from .errors import (
     BadAnswer, BadRequest, CrxError, NetworkError, QuoteLost, RateLimited, RefusedToSign, ServerError, clean,
 )
+from .models import pair_label
 from .signer import sign_typed
 
 if TYPE_CHECKING:
@@ -234,7 +235,7 @@ def check_failover(t: Any, b: Bid, *, chain_id: int, core: str, sep: bytes, max_
     usd_is_base = p.get("usd_is_base")
     _need(isinstance(usd_is_base, bool), "pricing.usd_is_base", "not a bool")
     if "USD" in (b.pair[:3], b.pair[4:]):
-        _need(usd_is_base == (b.pair[:3] == "USD"), "pricing.usd_is_base", f"not the {b.pair} base")
+        _need(usd_is_base == (b.pair[:3] == "USD"), "pricing.usd_is_base", f"not the {pair_label(b.pair)} base")
     _need(quote_rate == b.rate_e6, "pricing.quote_rate", "not the bid's rate")
     _need(c_side == b.side, "pricing.side", "not the bid's side")
     _need(notional == b.notional_e6, "pricing.notional", "not the bid's notional")

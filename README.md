@@ -101,6 +101,7 @@ print(w.amount, w.status)
 
 | Argument | Values |
 |---|---|
+| `pair` | `"USD/MXN"`, `"usdmxn"` or `"USD-MXN"`. `"USDC/USDT"` names the API code `USD/UST`: `Quote.pair` returns `USD/UST`, and `crx.pair_label(q.pair)` returns `USDC/USDT`. |
 | `side` | `"buy"` or `"sell"`, the seat's side in the base currency. |
 | `notional` | Base currency amount, at most 6 decimals, from `Market.min_notional` to `Market.max_notional`. |
 | `settles` | The exact UTC time the trade settles. See the forms below. No default. |

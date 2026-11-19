@@ -35,7 +35,7 @@ from .errors import (
 )
 from .models import (
     Ask, Balance, Close, Deposit, Drop, Event, MakerQuote, Market, Position, Quote, Rfq, Trade, Viewer, Withdraw,
-    dec, _final, _provisional, ms_to_dt, side_word,
+    dec, _final, _provisional, ms_to_dt, pair_label, side_word,
 )
 
 log = logging.getLogger("crx")
@@ -171,9 +171,14 @@ def _usdc(d: Decimal) -> str:
     return format(d.quantize(Decimal("0.000001"), rounding=ROUND_DOWN), "f")
 
 
+# A pair name a person reads -> the API code, letters only.
+PAIR_ALIASES = {"USDCUSDT": "USDUST"}
+
+
 def _pair(pair: str) -> tuple[str, str]:
-    """Return ('USD/MXN', 'USDMXN') from USD/MXN, usdmxn or USD-MXN."""
+    """Return ('USD/MXN', 'USDMXN') from USD/MXN, usdmxn or USD-MXN, and ('USD/UST', 'USDUST') from USDC/USDT."""
     s = "".join(ch for ch in str(pair).upper() if ch.isalpha())
+    s = PAIR_ALIASES.get(s, s)
     if len(s) != 6:
         raise BadRequest(f"unknown pair {clean(pair, 20)!r}")
     return f"{s[:3]}/{s[3:]}", s
@@ -662,7 +667,7 @@ class Client:
         """Return the market for one pair.
 
         Args:
-            pair: Currency pair, e.g. ``"USD/MXN"`` or ``"usdmxn"``.
+            pair: Currency pair, e.g. ``"USD/MXN"``, ``"usdmxn"`` or ``"USDC/USDT"`` (API code ``USD/UST``).
 
         Raises:
             BadRequest: ``pair`` is not a currency pair.
@@ -672,7 +677,7 @@ class Client:
         m = next((m for m in self.markets() if m.pair == slash), None)
         if m is None or ("chains" in m.raw and not any(
                 isinstance(c, dict) and c.get("chain") == self.chain_key for c in m.raw.get("chains") or [])):
-            raise MarketPaused(f"{slash} is not offered on {self.chain_key}", details={"pair": slash})
+            raise MarketPaused(f"{pair_label(slash)} is not offered on {self.chain_key}", details={"pair": slash})
         return m
 
     def balance(self) -> Balance:
@@ -776,6 +781,7 @@ class Client:
         Accept the quote with ``accept()`` before ``Quote.closes_at``, 120 s after the request.
 
         Args:
+            pair: Currency pair, e.g. ``"USD/MXN"`` or ``"USDC/USDT"``. ``Quote.pair`` is the API code: ``USD/UST``.
             side: ``"buy"`` or ``"sell"`` the base currency.
             notional: Amount in the base currency, at most 6 decimals.
             settles: Exact UTC time: an aware datetime, ISO 8601 with Z or an offset, or Unix seconds. No default.
@@ -835,11 +841,13 @@ class Client:
         amount = _amount(notional, "notional")
         m = self.market(slash)
         if m.paused:
-            raise MarketPaused(f"{slash} is paused", details={"pair": slash})
+            raise MarketPaused(f"{pair_label(slash)} is paused", details={"pair": slash})
         if m.min_notional is not None and amount < m.min_notional:
-            raise BelowMin(f"minimum notional on {slash} is {m.min_notional}", details={"min": str(m.min_notional)})
+            raise BelowMin(f"minimum notional on {pair_label(slash)} is {m.min_notional}",
+                           details={"min": str(m.min_notional)})
         if m.max_notional is not None and amount > m.max_notional:
-            raise AboveMax(f"maximum notional on {slash} is {m.max_notional}", details={"max": str(m.max_notional)})
+            raise AboveMax(f"maximum notional on {pair_label(slash)} is {m.max_notional}",
+                           details={"max": str(m.max_notional)})
         now, t0 = datetime.now(timezone.utc), self._clock()
         if settles is not None and expiry is not None:
             raise BadRequest("pass settles or expiry, not both", details={"field": "settles"})

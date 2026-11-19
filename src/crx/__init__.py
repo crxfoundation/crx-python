@@ -11,12 +11,13 @@ from .errors import (
 )
 from .models import (
     Ask, Balance, Close, Deposit, Drop, Event, MakerQuote, Market, Position, Quote, Rfq, Trade, Viewer, Withdraw,
+    pair_label,
 )
 
 __version__ = "0.4.0"
 
 __all__ = [
-    "Client", "NETWORKS", "__version__",
+    "Client", "NETWORKS", "__version__", "pair_label",
     "Ask", "Balance", "Close", "Deposit", "Drop", "Event", "MakerQuote", "Market", "Position", "Quote", "Rfq",
     "Trade", "Viewer", "Withdraw",
     "CrxError", "AboveMax", "DepositFailed", "EarlierOutcome", "AlreadyAccepted", "AuthError", "BadAnswer",

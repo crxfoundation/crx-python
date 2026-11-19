@@ -19,7 +19,7 @@ from ._maker import PAGE, TRANSIENT, _page, _plain, _rate, _slash, _word, rfq_of
 from .errors import (
     BadAnswer, BadRequest, CrxError, NetworkError, NoQuotes, QuoteExpired, RefusedToSign, ServerError, clean,
 )
-from .models import Close, Rfq, dec, side_word
+from .models import Close, Rfq, dec, pair_label, side_word
 from .signer import sign_typed
 
 if TYPE_CHECKING:
@@ -123,7 +123,7 @@ def check_leg(old: dict, old_id: Any, leaving: Any, remaining: Any, side: int) -
 def check_trade(old: dict, item_side: int, *, pair: str, side: int, notional_e6: int, settlement_ms: int) -> None:
     """Check the old leg against the trade the seat expects: pair, side, notional and settlement."""
     if old["pair"] != e7.pair_id(pair):
-        raise _refuse(f"the old leg is not {pair}")
+        raise _refuse(f"the old leg is not {pair_label(pair)}")
     if item_side != side:
         raise _refuse(f"the side that moves is not {side_word(side)}")
     if old["notional"] != notional_e6:

@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .errors import BadRequest
-from .models import Market
+from .models import Market, pair_label
 
 INSTANT = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt ][0-9]{2}:[0-9]{2}.*")
 MIN_SECS = 3_600  # shortest tenor when /markets gives none
@@ -90,9 +90,9 @@ def _at(t: datetime, m: Market, now: datetime) -> datetime:
                f"{lo // 60} minutes, plus {OPEN_MARGIN_SECS // 60} minutes to open the request")
         nxt = earliest(m, now)
     elif lc is not None and lc[0] <= t < lc[1]:
-        why, nxt = f"{m.pair} takes no settlement from {_utc(lc[0])} to {_utc(lc[1])}", lc[1]
+        why, nxt = f"{pair_label(m.pair)} takes no settlement from {_utc(lc[0])} to {_utc(lc[1])}", lc[1]
     elif hi is not None and ahead > hi:
-        why = f"{_utc(t)} is past the longest trade: {m.pair} settles at most {hi // 86_400} days from now"
+        why = f"{_utc(t)} is past the longest trade: {pair_label(m.pair)} settles at most {hi // 86_400} days from now"
     if why is None:
         return t
     raise BadRequest(why + (f"; the next time that settles is {_utc(nxt)}" if nxt else ""),

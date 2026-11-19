@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- `quote()`, `ask()` and `market()` take `USDC/USDT` (or `usdcusdt`) for the API code `USD/UST`. Return values and fields keep `USD/UST`.
+- `crx.pair_label(pair)` returns the name a person reads: `USDC/USDT` for `USD/UST`, else the pair.
+- Error texts and the `quote_live()` lines name `USDC/USDT` in place of `USD/UST`. `details["pair"]` keeps the API code.
+
 ## 0.4.0
 
 - `trades()` and `rfqs()` take `recover_restore=False`. With `True`, a `conflict` on `after` (a cursor past the head of a restored tape) reads the tape again from the start, once per `trades()` call or `rfqs()` stream; a second conflict raises. The default keeps the 0.3.21 behaviour: the call raises `conflict`.
