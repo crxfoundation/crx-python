@@ -4,6 +4,7 @@
 
 - `test_request(pair=None)` takes `"USD/MXN"`, `"USD/BRL"` or `"USD/PHP"`. Without `pair`, the request body is unchanged and the market is USD/MXN.
 - The test-request checks of the maker and of `TestRequestWorker` take each of the three markets. A `test_request()` answer on another market than the one asked raises `BadAnswer`.
+- `TestRequestWorker` signs each test on its own market. It reads an opened test again only from its expiry, and ends a test whose trade was refused, so its reads stay within the gateway's read limit while many tests are open.
 - The `test_request()` docstring states the gateway's rule: an RFQ that still takes quotes comes back unchanged; after its accept, the next call opens a new test.
 - The install line names `@v0.4.1`.
 

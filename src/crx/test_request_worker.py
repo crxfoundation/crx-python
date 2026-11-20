@@ -11,7 +11,7 @@ import sys
 
 from .client import Client
 from . import _maker
-from ._test_requests import validate, word
+from ._test_requests import MARKETS, compact, validate, word
 from .errors import BadAnswer, BadRequest, CrxError
 from .models import Trade
 
@@ -28,8 +28,9 @@ class TestRequestWorker:
     Each scan reads the account's event history from the start and acts on each RFQ's current status.
     A new accept passes the gateway's accept check, then signs like any trade. The scan does not wait for
     the trade status, and a trade with no answer does not stop the accept of another request. An accepted
-    request is posted again, unsigned, until it ends. Ended requests go to ``test-requests-done.json`` in the
-    client state directory, and later scans skip them.
+    request is posted again, unsigned, until it ends; one whose trade was refused ends. An opened request
+    is read again only from its expiry. Ended requests go to ``test-requests-done.json`` in the client
+    state directory, and later scans skip them.
 
     Args:
         client: A taker client for a dedicated account.
@@ -47,6 +48,8 @@ class TestRequestWorker:
         self._done_path = client._state_dir / DONE_FILE
         self._done = self._load_done()
         self._said: dict[str, str] = {}
+        # Opened or decided requests, read again only from their expiry (unix ms): rfq_id -> expiry.
+        self._quiet: dict[str, int] = {}
 
     def _load_done(self) -> list[str]:
         try:
@@ -90,7 +93,7 @@ class TestRequestWorker:
             BadAnswer: The event history is longer than ``max_pages``.
         """
         c = self.client
-        cursor, seen, results = 0, set(), []
+        cursor, seen, found = 0, set(), []
         for _ in range(self.max_pages):
             rows, cursor = _maker._page(c, cursor)
             for event in rows:
@@ -105,16 +108,24 @@ class TestRequestWorker:
                 if rid in seen or rid in self._done:
                     continue
                 seen.add(rid)
-                try:
-                    trade = self._accept(d)
-                    self._said.pop(rid, None)
-                    if trade is not None:
-                        results.append(trade)
-                except CrxError as e:
-                    self._say(rid, f"{e.code}: {e}")
+                found.append(d)
             if len(rows) < _maker.PAGE:
-                return results
-        raise BadAnswer("the test request event history exceeds max_pages")
+                break
+        else:
+            raise BadAnswer("the test request event history exceeds max_pages")
+        results, now_ms = [], c._clock() * 1000
+        for d in found:
+            rid = d["rfq_id"]
+            if now_ms < self._quiet.get(rid, 0):
+                continue
+            try:
+                trade = self._accept(d)
+                self._said.pop(rid, None)
+                if trade is not None:
+                    results.append(trade)
+            except CrxError as e:
+                self._say(rid, f"{e.code}: {e}")
+        return results
 
     def _accept(self, event: dict) -> Trade | None:
         c, rid = self.client, event["rfq_id"]
@@ -128,10 +139,15 @@ class TestRequestWorker:
                     "quote_expiry_max"):
             if view.get(key) != event.get(key):
                 raise BadAnswer("the test request changed after its opening event")
+        if view["status"] == "accepted" and view.get("trade_status") == "refused":
+            log.info("test request %s: trade refused", rid)
+            self._mark_done(rid)
+            return None
         if view["status"] == "accepted":
             self._recover(view)
             return None
         if view["status"] == "opened":
+            self._quiet[rid] = view["expiry"]
             return None
         if view.get("trade_status") not in (None, ""):
             return None
@@ -147,7 +163,7 @@ class TestRequestWorker:
         if (check.get("ok") is not True or check.get("rfq_id") != rid or check.get("quote_id") != qid
                 or not isinstance(check.get("trade_template"), dict)):
             raise BadAnswer("the test quote did not pass the acceptance check")
-        terms = dict(view, pair="USD/MXN", side="buy", premium_bps=0)
+        terms = dict(view, pair=MARKETS[compact(view["pair"])], side="buy", premium_bps=0)
         quote = c._quote_of(terms, dict(current, trade_template=check["trade_template"]))
         if not quote.rate.is_finite() or quote.rate <= 0:
             raise BadAnswer("the test quote rate is invalid")
