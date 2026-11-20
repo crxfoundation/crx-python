@@ -51,3 +51,24 @@ def test_request_posts_only_chain_and_returns_only_the_fixed_maker_terms(make_cl
             make_client(clock=Clock(NOW)).test_request()
         assert not session.rpc_calls, edit
     assert not any(call["path"].endswith("/quotes") for call in session.calls)
+
+
+def test_request_names_its_market_and_the_worker_takes_each_market(make_client, session):
+    from crx._test_requests import validate
+    c = make_client(clock=Clock(NOW))
+    session.routes[("POST", "/test-requests")] = request_wire(pair="USD/BRL")
+    r = c.test_request(pair="usdbrl")
+    assert r.pair == "USD/BRL"
+    assert session.calls[-1]["body"] == {"chain": c.chain_key, "pair": "USD/BRL"}
+    with pytest.raises(crx.BadAnswer):
+        make_client(clock=Clock(NOW)).test_request(pair="USD/PHP")
+    with pytest.raises(crx.BadRequest):
+        make_client(clock=Clock(NOW)).test_request(pair="EUR/USD")
+    session.routes[("POST", "/test-requests")] = request_wire(pair="USD/BRL")
+    with pytest.raises(crx.BadAnswer):
+        make_client(clock=Clock(NOW)).test_request()
+    session.routes[("POST", "/test-requests")] = request_wire(pair="EUR/USD")
+    with pytest.raises(crx.BadAnswer):
+        make_client(clock=Clock(NOW)).test_request()
+    for pair in ("USD/MXN", "USDBRL", "USD/PHP"):
+        validate(request_wire(pair=pair, side=1, client_rfq_id="test-request-1"), "avax-fuji", NOW, maker=False)

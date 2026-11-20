@@ -12,8 +12,18 @@ SETTLEMENT_DELAY_SECONDS = 3600
 # (request, settlement delay) pairs in seconds that a gateway serves. The first is current.
 TERMS = ((REQUEST_SECONDS, SETTLEMENT_DELAY_SECONDS), (3 * 3600, 2 * 3600))
 OWNER_PREFIX = "test-request-"
+# Markets a test request may name, slash form. The first is the default.
+PAIRS = ("USD/MXN", "USD/BRL", "USD/PHP")
 WORD = re.compile(r"0x[0-9a-fA-F]{64}\Z")
 DECIMAL = re.compile(r"[0-9]+(?:\.[0-9]+)?\Z")
+
+
+def compact(pair) -> str | None:
+    """``pair`` without its slash, upper case; None when it is not a string."""
+    return pair.replace("/", "").upper() if isinstance(pair, str) else None
+
+
+MARKETS = {compact(p): p for p in PAIRS}
 
 
 def word(value) -> bool:
@@ -36,11 +46,15 @@ def rate(value) -> Decimal:
 
 def validate(d: dict, chain: str, now: float, *, maker: bool, event: bool = False,
              require_reference: bool = True, allow_accepted: bool = False,
-             historical_event: bool = False) -> None:
-    """Raise BadAnswer when the terms differ from the fixed ones, before any trade is signed."""
+             historical_event: bool = False, pair: str | None = None) -> None:
+    """Raise BadAnswer when the terms differ from the fixed ones, before any trade is signed.
+
+    The market is one of ``PAIRS``; with ``pair``, it is that market.
+    """
     if not isinstance(d, dict) or d.get("test_request") is not True:
         raise BadAnswer("the response is not a test request")
-    if (not word(d.get("rfq_id")) or d.get("chain") != chain or d.get("pair") not in ("USD/MXN", "USDMXN")
+    if (not word(d.get("rfq_id")) or d.get("chain") != chain or compact(d.get("pair")) not in MARKETS
+            or (pair is not None and compact(d.get("pair")) != compact(pair))
             or type(d.get("side")) is not int or d["side"] != (-1 if maker else 1)
             or d.get("kind", "open") != "open"):
         raise BadAnswer("the test request has different trade terms")

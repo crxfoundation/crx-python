@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.1
+
+- `test_request(pair=None)` takes `"USD/MXN"`, `"USD/BRL"` or `"USD/PHP"`. Without `pair`, the request body is unchanged and the market is USD/MXN.
+- The test-request checks of the maker and of `TestRequestWorker` take each of the three markets. A `test_request()` answer on another market than the one asked raises `BadAnswer`.
+- The `test_request()` docstring states the gateway's rule: an RFQ that still takes quotes comes back unchanged; after its accept, the next call opens a new test.
+- The install line names `@v0.4.1`.
+
 ## 0.4.0
 
 - `trades()` and `rfqs()` take `recover_restore=False`. With `True`, a `conflict` on `after` (a cursor past the head of a restored tape) reads the tape again from the start, once per `trades()` call or `rfqs()` stream; a second conflict raises. The default keeps the 0.3.21 behaviour: the call raises `conflict`.
