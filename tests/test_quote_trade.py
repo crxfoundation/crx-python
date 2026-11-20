@@ -242,6 +242,8 @@ def refuse_signed_accept(session, venue, status, code):
 
 REFUSED_AFTER_SIGN = [  # status, code, error, words, details: refusals of the signed accept
     (409, "round_closed", crx.QuoteExpired, "not opened", {"trade_template": "?"}),
+    (409, "desk_limit_reached", crx.CrxError, "desk_limit_reached", {"trade_template": "?"}),
+    (409, "pair_limit_reached", crx.CrxError, "pair_limit_reached", {"trade_template": "?"}),
     (422, "insufficient_collateral", crx.TradeUnknown, "may still open", {"rfq_id": RFQ}),  # the trade is unknown
     (409, "trade_stale", crx.TradeUnknown, "may still open", {"rfq_id": RFQ}),  # its fresh template cannot be read
 ]
@@ -256,6 +258,8 @@ def test_refusal_after_the_trade_is_signed(make_client, venue, session, clock):
         with pytest.raises(err) as ei:
             c.trade(c.quote("USD/MXN", "buy", 25_000, settles=WEEK))
         assert words in str(ei.value) and ei.value.details == details, code
+        if code in ("desk_limit_reached", "pair_limit_reached"):
+            assert ei.value.code == code and not isinstance(ei.value, crx.TradeUnknown), code
         assert len(accepts(session)) == before + 1 and sent_nothing(session), code
 
 

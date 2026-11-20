@@ -25,7 +25,7 @@ MAX_POSTS = 3  # accept bodies per trade, each posted once
 # Accept refusals that reserve nothing and send nothing, even after a signed post.
 NOTHING_SENT = (QuoteExpired, OwnRoundOpen, QuoteNotYours, RateLimited, Declined, ServiceUnavailable)
 # Declines sent before the accept reserves anything, whatever the HTTP status.
-DECLINES = ("rate_out_of_band", "mark_unavailable", "position_matured")
+DECLINES = ("rate_out_of_band", "mark_unavailable", "position_matured", "desk_limit_reached", "pair_limit_reached")
 # The service takes no new trade and reserves nothing.
 UNAVAILABLE = ("service_unavailable",)
 TEMPLATE = "trade_template"
@@ -307,6 +307,8 @@ class Binder:
             raise
         except Exception as e:  # noqa: BLE001 - once a Trade is signed, no failure may read as "nothing happened"
             if signed is None:
+                raise
+            if isinstance(e, CrxError) and e.gateway_code in DECLINES:
                 raise
             why = f"{e.code}: {e}" if isinstance(e, CrxError) else type(e).__name__
         raise TradeUnknown(
