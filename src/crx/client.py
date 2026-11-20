@@ -1594,16 +1594,18 @@ class Client:
             raise BadAnswer("/viewers lists no viewers")
         return [_viewer(v) for v in rows if isinstance(v, dict)]
 
-    def test_request(self, *, wait: float | None = None) -> Rfq:
-        """Request a test RFQ for this maker: 100 USD of USD/MXN at zero premium.
+    def test_request(self, *, pair: str | None = None, wait: float | None = None) -> Rfq:
+        """Request a test RFQ for this maker: 100 USD at zero premium, on USD/MXN unless ``pair`` names another.
 
         The request lasts 15 minutes and each RFQ closes after 120 s. Call again to renew an expired RFQ
-        that no one accepted, except in the last minute. A live or accepted RFQ comes back unchanged. One
-        test runs at a time per maker: once it ends, request again at any time; there is no daily limit.
-        While the test taker is at capacity, the call fails with code ``service_unavailable``; request
-        again after an open test settles. ``reference_rate`` is an example quote rate.
+        that no one accepted, except in the last minute. An RFQ that still takes quotes comes back
+        unchanged. Once its quote is accepted, the next call opens a new test; there is no daily limit.
+        While the test capacity is in use, the call fails with code ``service_unavailable``; request again
+        after an open test settles. ``reference_rate`` is an example quote rate.
 
         Args:
+            pair: ``"USD/MXN"`` (default), ``"USD/BRL"`` or ``"USD/PHP"``. When None, the request names no
+                market and the gateway uses USD/MXN.
             wait: Seconds to retry while rate limited or while new collateral does not count yet. Defaults
                 to 30 minutes on testnet and 15 minutes on mainnet.
 
@@ -1612,15 +1614,20 @@ class Client:
             RateLimited: The rate limit outlasts ``wait``.
             CrxError: Code ``test_requests_off``. This network offers no test requests.
         """
-        from ._test_requests import validate
+        from ._test_requests import MARKETS, PAIRS, compact, validate
 
+        if pair is not None and compact(pair) not in MARKETS:
+            raise BadRequest(f"pair must be one of {', '.join(PAIRS)}")
         self._need_seat()
         self._keep_live()
         wait = self._wait_of(wait)
         end = self._clock() + wait
+        body = {"chain": self.chain_key}
+        if pair is not None:
+            body["pair"] = MARKETS[compact(pair)]
         while True:
             try:
-                answer = self._gw.request("POST", "/test-requests", body={"chain": self.chain_key})
+                answer = self._gw.request("POST", "/test-requests", body=body)
                 break
             except RateLimited as e:
                 pause = None if e.retry_after is None else max(e.retry_after, 1.0)
@@ -1645,7 +1652,8 @@ class Client:
                 raise CrxError(f"test requests are not offered on {self.chain_key}", code="test_requests_off",
                                status=404, details={**e.details, "message": str(e)},
                                gateway_code=e.gateway_code) from None
-        validate(answer, self.chain_key, self._clock(), maker=True, allow_accepted=True)
+        validate(answer, self.chain_key, self._clock(), maker=True, allow_accepted=True,
+                 pair=PAIRS[0] if pair is None else pair)
         return _maker.rfq_of(answer)
 
     def rfqs(
