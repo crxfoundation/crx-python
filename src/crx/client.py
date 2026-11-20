@@ -1598,9 +1598,10 @@ class Client:
         """Request a test RFQ for this maker: 100 USD of USD/MXN at zero premium.
 
         The request lasts 15 minutes and each RFQ closes after 120 s. Call again to renew an expired RFQ
-        that no one accepted, except in the last minute. A live or accepted RFQ comes back unchanged. Each
-        maker starts one request per UTC day, within a global limit of ten. ``reference_rate`` is an
-        example quote rate.
+        that no one accepted, except in the last minute. A live or accepted RFQ comes back unchanged. One
+        test runs at a time per maker: once it ends, request again at any time; there is no daily limit.
+        While the test taker is at capacity, the call fails with code ``service_unavailable``; request
+        again after an open test settles. ``reference_rate`` is an example quote rate.
 
         Args:
             wait: Seconds to retry while rate limited or while new collateral does not count yet. Defaults
@@ -1628,7 +1629,7 @@ class Client:
                 log.info("test request: rate limited; sending again in %g s", pause)
                 self._sleep(pause)
             except (InsufficientCollateral, ServerError, AuthError) as e:
-                # A refusal for uncounted collateral opens no request, so the day's request stays unused.
+                # A refusal for uncounted collateral opens no request.
                 last = _uncounted(e)
                 if last is None:
                     raise

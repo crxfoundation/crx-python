@@ -159,7 +159,7 @@ print(c.confirm(mq).status)
 c.quote_live(lambda rfq: "18.49" if rfq.pair == "USD/MXN" else None, seconds=600)
 ```
 
-`test_request()`: a request lasts 15 minutes. Each RFQ closes after 120 seconds and settles one hour after `request_expires_at`. A repeat call returns the active or accepted RFQ, or renews an expired one with the same deadlines, except in the last minute. Each maker starts at most one request per UTC day, within ten globally. `wait` covers a rate limit and a new deposit that does not count yet. On a network without test requests, the code is `test_requests_off`.
+`test_request()`: a request lasts 15 minutes. Each RFQ closes after 120 seconds and settles one hour after `request_expires_at`. A repeat call returns the active or accepted RFQ, or renews an expired one with the same deadlines, except in the last minute. One test runs at a time per maker; once it ends, request again at any time (no daily limit). While the test taker is at capacity, the call fails with `service_unavailable`; request again after an open test settles. `wait` covers a rate limit and a new deposit that does not count yet. On a network without test requests, the code is `test_requests_off`.
 
 `rfqs()`: a seat with no collateral receives no RFQ. `only=` (an `Ask` or an RFQ id) yields that RFQ alone. `after=` (an `Rfq.seq`) starts after that RFQ. With `recover_restore=True`, a cursor that the gateway refuses after a service restore restarts the stream from the start of the tape, once per stream; a second refusal raises `conflict`. The stream ends after `wait=` seconds or when `stop=` is set, and by default never ends.
 
