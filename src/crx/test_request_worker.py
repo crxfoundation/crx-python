@@ -20,6 +20,7 @@ log = logging.getLogger("crx.test_requests")
 TERMINAL = ("settled", "expired", "cancelled")  # RFQ statuses that never trade again
 DONE_FILE = "test-requests-done.json"
 DONE_KEEP = 1000
+QUIET_MS = 60_000  # an opened request past its expiry is read once a minute
 
 
 class TestRequestWorker:
@@ -29,8 +30,8 @@ class TestRequestWorker:
     A new accept passes the gateway's accept check, then signs like any trade. The scan does not wait for
     the trade status, and a trade with no answer does not stop the accept of another request. An accepted
     request is posted again, unsigned, until it ends; one whose trade was refused ends. An opened request
-    is read again only from its expiry. Ended requests go to ``test-requests-done.json`` in the client
-    state directory, and later scans skip them.
+    is read again from its expiry, then once a minute. Ended requests go to ``test-requests-done.json``
+    in the client state directory, and later scans skip them.
 
     Args:
         client: A taker client for a dedicated account.
@@ -48,7 +49,7 @@ class TestRequestWorker:
         self._done_path = client._state_dir / DONE_FILE
         self._done = self._load_done()
         self._said: dict[str, str] = {}
-        # Opened or decided requests, read again only from their expiry (unix ms): rfq_id -> expiry.
+        # Opened requests and the time (unix ms) of their next read: rfq_id -> time.
         self._quiet: dict[str, int] = {}
 
     def _load_done(self) -> list[str]:
@@ -135,7 +136,7 @@ class TestRequestWorker:
             self._mark_done(rid)
             return None
         validate(view, c.chain_key, c._clock(), maker=False, allow_accepted=True)
-        for key in ("rfq_id", "client_rfq_id", "expiry", "closes_at", "request_expires_at", "taker_ref",
+        for key in ("rfq_id", "pair", "client_rfq_id", "expiry", "closes_at", "request_expires_at", "taker_ref",
                     "quote_expiry_max"):
             if view.get(key) != event.get(key):
                 raise BadAnswer("the test request changed after its opening event")
@@ -147,7 +148,8 @@ class TestRequestWorker:
             self._recover(view)
             return None
         if view["status"] == "opened":
-            self._quiet[rid] = view["expiry"]
+            # Read again from the expiry, then once a minute until the trade settles.
+            self._quiet[rid] = max(view["expiry"], int(c._clock() * 1000) + QUIET_MS)
             return None
         if view.get("trade_status") not in (None, ""):
             return None

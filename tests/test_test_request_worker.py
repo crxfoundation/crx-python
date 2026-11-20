@@ -108,4 +108,8 @@ def test_worker_signs_each_market_and_reads_an_opened_test_again_only_from_its_e
     assert len([x for x in session.calls if x["path"] == f"/rfqs/{RFQ}"]) == reads
     clock.t = NOW + 4_501
     w.run_once()
+    w.run_once()
     assert len([x for x in session.calls if x["path"] == f"/rfqs/{RFQ}"]) == reads + 1
+    clock.t = NOW + 4_562
+    w.run_once()
+    assert len([x for x in session.calls if x["path"] == f"/rfqs/{RFQ}"]) == reads + 2
