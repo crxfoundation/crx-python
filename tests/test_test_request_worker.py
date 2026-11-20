@@ -17,15 +17,15 @@ def worker_type():
     return importlib.import_module("crx.test_request_worker").TestRequestWorker
 
 
-def add_request(session, venue, events, n):
+def add_request(session, venue, events, n, pair="USD/MXN"):
     """Serve one open test request on ``venue.rfq`` and its ``rfq.opened`` event."""
     v, rid = venue, venue.rfq
-    v.rfq_body = {"pair": "USDMXN", "side": "buy", "notional": "100", "premium_bps": 0,
+    v.rfq_body = {"pair": pair.replace("/", ""), "side": "buy", "notional": "100", "premium_bps": 0,
                   "expiry": (NOW + 4_500) * 1000}
     v.qe = NOW + 570
     v.leg = e7.leg_id_for(HEAD, v.qe)
     v.rate = "18.123456"
-    wire = request_wire(rfq_id=rid, side=1, client_rfq_id=f"test-request-fixture-{n}", leg_id=v.leg)
+    wire = request_wire(rfq_id=rid, side=1, client_rfq_id=f"test-request-fixture-{n}", leg_id=v.leg, pair=pair)
     event = {"type": "rfq.opened", "seq": n, "data": copy.deepcopy(wire)}
     event["data"].pop("status")
     event["data"].pop("kind")
@@ -80,3 +80,32 @@ def test_worker_accepts_a_second_request_while_the_first_trade_is_pending(setup,
     assert [t.rfq_id for t in trades] == [RFQ, RFQ2]
     assert first.sig is not None and second.sig is not None
     assert clock() < NOW + c._settle_wait  # no scan waits on a trade status
+
+
+def test_worker_signs_each_market_and_reads_an_opened_test_again_only_from_its_expiry(
+        make_client, session, health, markets):
+    clock = Clock(NOW)
+    c = make_client(clock=clock)
+    events = []
+    brl = Venue(session, health, markets, clock)
+    add_request(session, brl, events, 1, pair="USD/BRL")
+    php = Venue(session, health, markets, clock, rfq=RFQ2)
+    php.counter = (NOW + 60) * 1000
+    add_request(session, php, events, 2, pair="USD/PHP")
+    session.routes[("GET", "/trades")] = lambda req: {"trades": events, "seq": len(events)}
+    w = worker_type()(c)
+    assert sorted(t.rfq_id for t in w.run_once()) == sorted([RFQ, RFQ2])
+    opened = dict(request_wire(rfq_id=RFQ, side=1, client_rfq_id="test-request-fixture-1", leg_id=brl.leg,
+                               pair="USD/BRL"), status="opened")
+    session.routes[("GET", f"/rfqs/{RFQ}")] = lambda req: opened
+    refused = dict(request_wire(rfq_id=RFQ2, side=1, client_rfq_id="test-request-fixture-2", leg_id=php.leg,
+                                pair="USD/PHP"), status="accepted", trade_status="refused")
+    session.routes[("GET", f"/rfqs/{RFQ2}")] = lambda req: refused
+    w.run_once()
+    assert RFQ2 in w._done and RFQ not in w._done
+    reads = len([x for x in session.calls if x["path"] == f"/rfqs/{RFQ}"])
+    w.run_once()
+    assert len([x for x in session.calls if x["path"] == f"/rfqs/{RFQ}"]) == reads
+    clock.t = NOW + 4_501
+    w.run_once()
+    assert len([x for x in session.calls if x["path"] == f"/rfqs/{RFQ}"]) == reads + 1
