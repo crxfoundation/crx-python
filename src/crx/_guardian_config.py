@@ -17,12 +17,12 @@ VETO = "0x" + b"VETO".hex() + "00" * 28
 CONFIG = {
     "test": {
         "chainId": 43113,
-        "core": ZERO,
-        "lens": ZERO,
+        "core": "0x9c3CC6203b57728b605F21532FBCD569920D44dE",
+        "lens": "0x9c3CC6203b57728b605F21532FBCD569920D44dE",
         "printLens": "0x5e81b2b442cb441897f930d9ab038f9a540e3d30",
-        "roles": ZERO,
+        "roles": "0xd4C2D9Fb37D6B3330633Cc53c429d5aC13DbBE53",
         "roleKey": VETO,
-        "startBlock": 0,
+        "startBlock": 61406607,
         "rpc": "https://api.avax-test.network/ext/bc/C/rpc",
     },
     "live": {

@@ -140,7 +140,7 @@ class Node:
             return "0x" + encode(["(int64,int32,bool)", "uint64"], [(price, expo, price > 0), at]).hex()
         if to == ROLES and sel == gd.EXEC:
             if call.get("from", "").lower() not in self.members:
-                raise Revert(keccak(text="NoMembership()")[:4])
+                raise Revert(keccak(text="NotAuthorized(address)")[:4] + bytes(12) + bytes.fromhex(call["from"][2:]))
             target, _value, inner, _op, _key, _rev = decode(
                 ["address", "uint256", "bytes", "uint8", "bytes32", "bool"], body)
             feed, expiry = decode(["bytes32", "uint64"], inner[4:])

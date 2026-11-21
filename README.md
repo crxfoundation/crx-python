@@ -5,7 +5,7 @@ Trade FX forwards on CRX from Python.
 ## Install
 
 ```bash
-pip install "git+https://github.com/crxfoundation/crx-python@v0.4.1"
+pip install "git+https://github.com/crxfoundation/crx-python@v0.5.0"
 ```
 
 Python 3.10 or newer.
@@ -195,6 +195,54 @@ viewer = crx.Client(key_file="viewer.key", network="testnet", account=owner.addr
 print(viewer.balance().free)  # 900.000000
 ```
 
+## Guardian
+
+A guardian is a wallet that CRX names for a firm. Each manual price waits 2 hours before its write. In that wait the guardian can cancel it, with a reason that the same wallet signs. A cancel writes no price and moves no funds. Pause and desk holds stay with CRX.
+
+Quick Start, in Test mode:
+
+1. Connect the wallet at [safe.crxfx.com](https://safe.crxfx.com) in Test mode and join with the invite from CRX.
+2. Install the SDK:
+
+   ```bash
+   pip install "git+https://github.com/crxfoundation/crx-python@v0.5.0"
+   ```
+
+3. Load the guardian wallet:
+
+   ```python
+   import os
+   from crx import Guardian
+   g = Guardian(key=os.environ["GUARDIAN_KEY"], test=True)
+   ```
+
+4. Post a test price 3 % above the reference: `p = g.post_test_price("USD/BRL", off_bp=300)`
+5. List the waiting prices, oldest first:
+
+   ```python
+   for p in g.proposals():
+       print(p.pair, p.price, p.reference, p.diff_bp, p.seconds_left)
+   ```
+
+6. Cancel the last one with a reason: `print(g.cancel(p, reason="3 % off Pyth spot"))` prints `Cancelled. Transaction 0x...`
+
+Live: drop `test=True` and pass `rpc_url=` or set `CRX_RPC`. Live reads work now. A Live cancel raises `not_guardian` until CRX adds the wallet; adding a wallet and removing one each take 72 hours.
+
+| Call | Returns |
+|---|---|
+| `proposals()` | Each `Proposal` that waits for its write: `pair`, `kind`, `price`, `reference`, `diff_bp`, `ready_at` (UTC), `seconds_left`, `proposer`, `tx`. |
+| `cancel(p, reason)` | A `Cancel`: `tx`, `reason_recorded`, `reason_error`. One transaction from the wallet; the network fee is in the chain's coin. |
+| `history(days=30, pair=None)` | Each `Outcome` of the period, newest first: `cancelled`, `written`, `replaced` or `pending`, with `by`, `outcome_tx`, `outcome_at`. |
+| `watch(every=30)` | Yields each new proposal once. No end. |
+| `post_test_price(pair, off_bp=0, kind="fixing")` | Test only. A new `Proposal` on the Test venue. `kind`: `fixing`, `final_price` or `steward_mark`. At most 5 open per wallet. |
+
+- `kind` is `fixing`, `final_price`, `steward_mark` or `trade_price`. `pair` is `USD/BRL`, `USD/MXN` or `USDC/USDT`, and `None` for a trade price.
+- `reference` is Pyth spot from `hermes_url=` or `CRX_HERMES_URL` when set, else Pyth spot from the portal, else the latest CRX print on the chain. `reference_source` is `pyth` or `crx`. `diff_bp` is (price - reference) / reference x 10,000.
+- `cancel()` refuses a trade hold release and the listed mark of a pair with `not_cancellable`, before any send. The reason is 10 to 280 characters on one line.
+- The reason goes to `portal_url=` (default `https://safe.crxfx.com`, or `CRX_SAFE_URL`). A refused reason leaves the cancel in force: `reason_recorded` is `False` and `reason_error` holds the code.
+- The Guardian takes its key from `key=` or `key_file=` only, never from `CRX_WALLET_PK`. Without a key, only the reads work.
+- Live and Test addresses are pinned in the SDK. Live (chain 1): core `0x0d716cA9Fc2BFD8c66D2AF2fB38b56D08809A8cc`. The RPC must serve the mode's chain, else `config`.
+
 ## Errors
 
 Every error is a `crx.CrxError`. Branch on `.code`. Show `str(e)`: on a gateway refusal it is the gateway's `message`. When the gateway names a time to call again, `details["retry_after_secs"]` holds the wait in seconds and `details["time_utc"]` the UTC time (`17:05 UTC`). `except crx.NoQuotes` also catches `rfq_cancelled`, `except crx.Declined` catches `rate_out_of_band` and `mark_unavailable`, and `except crx.ServerError` catches `service_unavailable`.
@@ -229,6 +277,8 @@ Every error is a `crx.CrxError`. Branch on `.code`. Show `str(e)`: on a gateway 
 | `refused_to_sign` | Read the message. The SDK signed nothing. |
 | `tx_failed` | Read the message. |
 | `send_unknown` | The transaction can still land. Check `.tx` on the chain before a new send. No receipt after 300 s. |
+| `not_guardian` | The wallet holds no guardian role in this mode. Nothing was sent. Ask CRX to add the wallet. |
+| `not_cancellable` | The price is a trade hold release or the listed mark. Nothing was sent. |
 
 ## Safety
 

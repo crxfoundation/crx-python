@@ -75,6 +75,7 @@ PROPOSE_TEST = _sel("proposeTestPrice(bytes32,uint64,int64,int32)")
 
 # Refusals of the guardian role contract, by selector.
 ROLE_REFUSALS: dict[bytes, tuple[type[CrxError], str, str | None]] = {
+    _sel("NotAuthorized(address)"): (NotGuardian, "This wallet is not a guardian.", None),
     _sel("NoMembership()"): (NotGuardian, "This wallet is not a guardian.", None),
     _sel("ConditionViolation(uint8,bytes32)"): (BadRequest, "The guardian role does not cover this price.",
                                                  "not_cancellable"),

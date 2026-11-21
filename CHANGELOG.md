@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.0
+
+- `crx.Guardian` is new. A guardian wallet reads the manual prices that wait for their write (`proposals()`), cancels one with a signed reason (`cancel()`), reads the outcomes of the last days (`history()`) and follows new proposals (`watch()`). `Guardian(test=True)` works on the Test venue, where `post_test_price()` proposes a test price.
+- `crx.guardian.Proposal`, `Cancel` and `Outcome` are the results. `crx.NotGuardian` (`not_guardian`) is new.
+- A Live cancel raises `not_guardian` until CRX adds the wallet. Live reads work now.
+- No existing call, field, error or default changes.
+- The install line names `@v0.5.0`.
+
 ## 0.4.1
 
 - `test_request(pair=None)` takes `"USD/MXN"`, `"USD/BRL"` or `"USD/PHP"`. Without `pair`, the request body is unchanged and the market is USD/MXN.
