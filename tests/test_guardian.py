@@ -64,6 +64,7 @@ class Node:
         self.throttle: dict[str, list[tuple]] = {}  # method -> HTTP answers served before the node answers
         self.receipt_reads: dict[str, int] = {}
         self.blind_reads: set[int] = set()  # receipt reads, by number per transaction, that answer null
+        self.txs: dict[str, dict] = {}  # transaction hash -> its sender and recipient
 
     # Script
 
@@ -172,7 +173,11 @@ class Node:
             self.propose("0x" + feed.hex(), expiry, price, NOW + gd.DELAY_S, HEAD, proposer=sender, expo=expo)
             logs.append(self.logs[-1])
         self.receipts[h] = {"status": "0x1", "blockNumber": hex(HEAD), "logs": logs}
+        self.txs[h] = {"from": sender, "to": to}
         return h
+
+    def rpc_eth_getTransactionByHash(self, h):
+        return self.txs.get(h)
 
     def rpc_eth_getTransactionReceipt(self, h):
         self.receipt_reads[h] = n = self.receipt_reads.get(h, 0) + 1
@@ -322,7 +327,7 @@ def test_cancel_sends_exactly_the_role_call_from_the_guardian_wallet(cancelled, 
     assert gd.cancel_call(CORE, VETO, BRL["feedId"], E1) == PINNED
     assert (BRL["feedId"], E1) not in node.pending
     assert cancelled.reason_recorded is True and cancelled.reason_error is None
-    assert str(cancelled) == f"Cancelled. Transaction {cancelled.tx}."
+    assert str(cancelled) == f"Cancelled. Transaction {cancelled.tx}. Reason recorded."
 
 
 # The example of the portal's reason text v2, word for word.
@@ -403,23 +408,31 @@ def test_a_wallet_with_no_guardian_role_is_refused_with_nothing_sent(make, node,
     assert node.sent == [] and session.posts == []
 
 
-def test_history_gives_each_recent_proposal_its_outcome(make, node):
+def test_history_gives_each_recent_proposal_its_outcome(make, node, session):
     a = node.propose(BRL["feedId"], E1, 6_160_000, NOW + 3600, block=100)
     b = node.propose(MXN["feedId"], E1, 18_100_000, NOW - 3600, block=200)
-    x = node.cancelled(MXN["feedId"], E1, block=300)
+    x = node.cancelled(MXN["feedId"], E1, block=300)  # logged by the venue Safe, sent by a guardian wallet
+    guardian = "0x" + "6a" * 20
+    node.txs[x["transactionHash"]] = {"from": guardian, "to": ROLES}
     c = node.propose(BRL["feedId"], E1 + 1, 6_000_000, NOW - 7200, block=400)
     node.written(BRL["feedId"], E1 + 1, block=500)
     old = node.propose(BRL["feedId"], E1 + 2, 6_000_000, NOW - 40 * 86_400, block=600)
     r1 = node.propose(MXN["feedId"], gd.MARK_SLOT_A, 18_000_000, NOW, block=700)
     r2 = node.propose(MXN["feedId"], gd.MARK_SLOT_A, 18_000_000, NOW + 60, block=800)
 
+    quiet = make(with_key=False).history(days=30)  # the portal does not answer
+    session.routes[("GET", "/api/v1/history")] = (200, [{"outcomeTx": x["transactionHash"].upper(),
+                                                         "reason": "300 bp above the reference"}])
     got = make(with_key=False).history(days=30)
 
     assert {o.proposal.tx: o.outcome for o in got} == {a: "pending", b: "cancelled", c: "written",
                                                       r1: "replaced", r2: "pending"}
     assert old not in {o.proposal.tx for o in got}
     hit = next(o for o in got if o.proposal.tx == b)
-    assert (hit.by, hit.outcome_tx) == ("0x" + "5a" * 20, x["transactionHash"])
+    assert (hit.by, hit.outcome_tx, hit.reason) == (guardian, x["transactionHash"], "300 bp above the reference")
+    assert next(o for o in quiet if o.proposal.tx == b).reason is None
+    assert {o.reason for o in got if o.proposal.tx != b} == {None}
+    assert next(o for o in got if o.proposal.tx == c).by == "0x" + "9b" * 20
     assert hit.outcome_at.timestamp() == NOW - (HEAD - 300) * 2
     assert {o.proposal.tx for o in make(with_key=False).history(pair="USDC/USDT")} == set()
 

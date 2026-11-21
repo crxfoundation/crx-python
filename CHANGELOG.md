@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.2
+
+- `history()`: a cancel's `by` is the wallet that sent the cancel transaction (the guardian wallet, or CRX), read with `eth_getTransactionByHash`. 0.5.1 gave the venue Safe that the cancel log names. A write's `by` does not change.
+- `Outcome.reason` is new: the reason CRX holds for a cancel, from the portal's `/api/v1/history` (30 days at most). `None` for any other outcome, for a cancel with no reason on record, and when the portal does not answer. It is the last field, with a default, so an `Outcome` built by position keeps working.
+- `str()` of a `Cancel` whose reason CRX recorded ends `Reason recorded.`
+- No call, argument default or error code changes.
+- The install line names `@v0.5.2`.
+
 ## 0.5.1
 
 - `Guardian(account=...)` takes a custody or hardware signer in place of a key: an object with `address`, `sign_transaction(dict)` and `sign_message(SignableMessage)`, as an eth_account `LocalAccount`. Set one of `key`, `key_file` and `account`. The SDK checks each signature before it sends: a transaction other than the one asked, or from another address, raises `refused_to_sign` with nothing sent.

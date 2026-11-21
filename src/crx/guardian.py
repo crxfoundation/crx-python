@@ -8,6 +8,7 @@ signed by the same wallet. ``Guardian(test=True)`` works on the Test venue; the 
 from __future__ import annotations
 
 import logging
+import math
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -275,9 +276,13 @@ class Outcome:
         proposal: The proposal, with no reference price.
         outcome: ``"cancelled"``, ``"written"``, ``"replaced"`` (a later proposal on the same key took its place)
             or ``"pending"`` (no cancel and no write yet).
-        by: The address that cancelled or wrote it, or None.
+        by: For a cancel, the wallet that sent the cancel transaction (a guardian wallet, or CRX); for a write, the
+            address that wrote the price. None when the RPC does not serve the cancel transaction, and for a
+            proposal with no outcome.
         outcome_tx: The transaction of the cancel or the write, or None.
         outcome_at: The time of the cancel or the write, UTC, or None.
+        reason: The reason CRX holds for a cancel, as the portal's history gives it. None for a cancel with no
+            reason on record, for any other outcome, and when the portal does not answer.
     """
 
     proposal: Proposal
@@ -285,6 +290,7 @@ class Outcome:
     by: str | None
     outcome_tx: str | None
     outcome_at: datetime | None
+    reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -309,7 +315,9 @@ class Cancel:
 
     def __str__(self) -> str:
         line = f"Cancelled. Transaction {self.tx}."
-        if not self.reason_recorded:
+        if self.reason_recorded:
+            line += " Reason recorded."
+        else:
             line += f" The reason is not recorded ({self.reason_error}); the cancel stands."
         return line
 
@@ -417,6 +425,7 @@ class Guardian:
         self._kept: list[dict] = []  # parsed logs up to self._scanned
         self._scanned = self._start - 1
         self._block_times: dict[int, int] = {}
+        self._senders: dict[str, str] = {}
         self._kept_refs: dict[str, tuple[float, tuple[Decimal, str, datetime | None]]] = {}
 
     def __repr__(self) -> str:
@@ -457,12 +466,17 @@ class Guardian:
         return sorted(out, key=lambda p: (p.ready_at or datetime.min.replace(tzinfo=timezone.utc), p.tx))
 
     def history(self, days: int = 30, pair: str | None = None) -> list[Outcome]:
-        """Return each proposal of the last ``days`` days with its outcome, newest first. ``pair`` filters."""
+        """Return each proposal of the last ``days`` days with its outcome, newest first. ``pair`` filters.
+
+        A cancel names the wallet that sent it (the transaction's sender) and carries the reason CRX holds for
+        it, read from the portal's history of the last 30 days at most. With no portal answer, ``reason`` is
+        None."""
         if isinstance(days, bool) or not isinstance(days, (int, float)) or days <= 0:
             raise BadRequest("days must be above zero")
         row = self._row_named(pair) if pair is not None else None
         now = int(self._clock())
         out = []
+        reasons: dict[str, str] | None = None
         for it in self._items():
             if it.ready - DELAY_S < now - days * 86_400:
                 continue
@@ -470,7 +484,13 @@ class Guardian:
             if row is not None and p.pair != row["pair"]:
                 continue
             at = self._block_time(it.outcome_block) if it.outcome_block is not None else None
-            out.append(Outcome(p, it.outcome or "pending", it.by, it.outcome_tx, _utc(at)))
+            by, reason = it.by, None
+            if it.outcome == "cancelled" and it.outcome_tx:
+                by = self._sender(it.outcome_tx)
+                if reasons is None:
+                    reasons = self._portal_reasons(days)
+                reason = reasons.get(it.outcome_tx.lower())
+            out.append(Outcome(p, it.outcome or "pending", by, it.outcome_tx, _utc(at), reason))
         return sorted(out, key=lambda o: (o.proposal.proposed_at or datetime.min.replace(tzinfo=timezone.utc)),
                       reverse=True)
 
@@ -793,6 +813,29 @@ class Guardian:
             if it is not None:
                 it.outcome, it.by, it.outcome_tx, it.outcome_block = e["type"], e["who"], e["tx"], e["block"]
         return items
+
+    def _sender(self, tx: str) -> str | None:
+        """The sender of ``tx`` in lower case, or None when the RPC does not serve it."""
+        if tx not in self._senders:
+            try:
+                t = self._rpc("eth_getTransactionByHash", tx)
+                sender = str(t["from"]).lower() if isinstance(t, dict) and t.get("from") else None
+            except (CrxError, RpcError, KeyError, TypeError):
+                return None
+            if sender is None or not is_address(sender):
+                return None
+            self._senders[tx] = sender
+        return self._senders[tx]
+
+    def _portal_reasons(self, days: float) -> dict[str, str]:
+        """The reasons the portal's history holds, by cancel transaction in lower case; empty with no answer."""
+        span = max(1, min(30, math.ceil(days)))
+        body = self._get_json(f"{self._portal}/api/v1/history", {"mode": self.mode, "days": span})
+        out: dict[str, str] = {}
+        for r in body if isinstance(body, list) else []:
+            if isinstance(r, dict) and isinstance(r.get("outcomeTx"), str) and isinstance(r.get("reason"), str):
+                out[r["outcomeTx"].lower()] = r["reason"]
+        return out
 
     def _block_time(self, block: int) -> int | None:
         if block not in self._block_times:

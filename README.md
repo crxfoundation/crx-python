@@ -5,7 +5,7 @@ Trade FX forwards on CRX from Python.
 ## Install
 
 ```bash
-pip install "git+https://github.com/crxfoundation/crx-python@v0.5.1"
+pip install "git+https://github.com/crxfoundation/crx-python@v0.5.2"
 ```
 
 Python 3.10 or newer.
@@ -205,10 +205,10 @@ Quick Start, in Test mode:
 2. Install the SDK:
 
    ```bash
-   pip install "git+https://github.com/crxfoundation/crx-python@v0.5.1"
+   pip install "git+https://github.com/crxfoundation/crx-python@v0.5.2"
    ```
 
-3. Load the guardian wallet:
+3. Load the guardian wallet. Set the key from a file your firm controls: `export GUARDIAN_KEY="$(cat guardian.key)"`.
 
    ```python
    import os
@@ -224,7 +224,7 @@ Quick Start, in Test mode:
        print(p.pair, p.price, p.reference, p.diff_bp, p.seconds_left)
    ```
 
-6. Cancel the last one with a reason: `print(g.cancel(p, reason="3 % off Pyth spot"))` prints `Cancelled. Transaction 0x...`
+6. Cancel the last one with a reason: `print(g.cancel(p, reason="3 % off Pyth spot"))` prints `Cancelled. Transaction <hash>. Reason recorded.`
 
 Live: drop `test=True` and pass `rpc_url=` or set `CRX_RPC`. Live reads work now. A Live cancel raises `not_guardian` until CRX adds the wallet; adding a wallet and removing one each take 72 hours.
 
@@ -233,7 +233,7 @@ Live: drop `test=True` and pass `rpc_url=` or set `CRX_RPC`. Live reads work now
 | `proposals()` | Each `Proposal` that waits for its write: `pair`, `kind`, `price`, `reference`, `diff_bp`, `ready_at` (UTC), `seconds_left`, `proposer`, `tx`. |
 | `cancel(p, reason)` | A `Cancel`: `tx`, `reason_recorded`, `reason_error`. One transaction from the wallet; the network fee is in the chain's coin. |
 | `record_reason(tx, feed_id, expiry, reason)` | `(recorded, error)`. Sends the reason of a mined cancel again. |
-| `history(days=30, pair=None)` | Each `Outcome` of the period, newest first: `cancelled`, `written`, `replaced` or `pending`, with `by`, `outcome_tx`, `outcome_at`. |
+| `history(days=30, pair=None)` | Each `Outcome` of the period, newest first: `cancelled`, `written`, `replaced` or `pending`, with `by`, `outcome_tx`, `outcome_at`, `reason`. A cancel's `by` is the wallet that sent it; its `reason` comes from the portal's history (30 days at most), else `None`. |
 | `watch(every=30)` | Yields each new proposal once. No end. |
 | `post_test_price(pair, off_bp=0, kind="fixing")` | Test only. A new `Proposal` on the Test venue. `kind`: `fixing`, `final_price` or `steward_mark`. At most 5 open per wallet. |
 
