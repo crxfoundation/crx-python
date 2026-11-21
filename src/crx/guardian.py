@@ -26,7 +26,8 @@ from . import _env
 from ._chain import Rpc, RpcError, TxLog, send_tx
 from ._guardian_config import CONFIG, PAIRS, ZERO
 from ._keys import load_account
-from .errors import BadAnswer, BadRequest, ConfigError, CrxError, MarkUnavailable, NotGuardian, TxFailed, clean
+from .errors import (BadAnswer, BadRequest, ConfigError, CrxError, MarkUnavailable, NotGuardian, SendUnknown,
+                     TxFailed, clean)
 
 log = logging.getLogger("crx")
 
@@ -42,8 +43,10 @@ MARK_OPEN_S = 24 * 3600  # a steward mark stays open this long after its ready t
 DEFAULT_PORTAL = "https://safe.crxfx.com"
 DEFAULT_STATE_DIR = "~/.crx-quickstart"  # the Client's folder: one record of sent transactions per wallet
 REASON_MIN, REASON_MAX = 10, 280
-REASON_TRIES = 3  # posts of one reason when the portal does not answer or answers 5xx
-REASON_PAUSE_S = 2.0
+REASON_PAUSES_S = (5.0, 15.0)  # pauses between the 3 posts of one reason
+REASON_LAG_CODES = ("not_a_cancel", "not_seen_yet")  # the portal's chain read has not reached the cancel yet
+READ_PAUSES_S = (1.0, 3.0)  # pauses between the 3 tries of a chain read
+RECEIPT_READS = 5  # reads of a mined transaction's receipt
 REFERENCE_TIMEOUT_S = 5.0  # the portal and Hermes reads of a reference price
 CONFIRMS = {"live": 12, "test": 1}  # blocks under the head after which a log read is kept for the next call
 CHUNK = {"live": 10_000, "test": 2_000}  # blocks per eth_getLogs call; halves on a refusal
@@ -235,8 +238,10 @@ class Cancel:
     Attributes:
         tx: The cancel transaction. It is mined: the price is cancelled.
         reason_recorded: True when CRX holds the reason. A refusal of the reason leaves the cancel in force.
+            ``Guardian.record_reason`` sends a reason that is not recorded again.
         reason_error: The portal's error code when the reason is not recorded, else None. ``already_recorded``
-            comes with ``reason_recorded`` True.
+            comes with ``reason_recorded`` True. ``no_receipt``: the RPC did not serve the receipt again after the
+            cancel was mined, and the reason was not sent.
         proposal: The proposal the cancel removed.
     """
 
@@ -275,8 +280,9 @@ class Guardian:
     Args:
         key: The guardian wallet's private key, hex or 32 bytes. None: reads only. Never read from the environment.
         key_file: A file that holds the key, owner-only (as for ``Client``), in place of ``key``.
-        test: True for the Test venue. Its addresses are pinned in this SDK; its RPC is a public Avalanche Fuji
-            node unless ``rpc_url`` names another.
+        test: True for the Test venue, False (default) for Live. Any other value raises ``ConfigError``. The Test
+            venue's addresses are pinned in this SDK; its RPC is a public node of the test network unless
+            ``rpc_url`` names another.
         rpc_url: The chain RPC. Live: required, or ``CRX_RPC``. The RPC must serve the mode's chain.
         portal_url: The guardian portal, default ``https://safe.crxfx.com``, or ``CRX_SAFE_URL``.
         hermes_url: A Pyth Hermes endpoint for Pyth spot, or ``CRX_HERMES_URL``. Without it, the reference price
@@ -298,15 +304,17 @@ class Guardian:
         timeout: float = 20.0,
     ) -> None:
         self._account = None
-        self.mode = "test" if test is True else "live"
         try:
+            if not isinstance(test, bool):
+                raise ConfigError("test must be True or False.")
+            self.mode = "test" if test else "live"
             env = _env.load()
             cfg = dict(CONFIG[self.mode])
-            words = "Test venue" if test is True else "Live"
+            words = "Test venue" if test else "Live"
             for name in ("core", "lens") + (("roles",) if cfg.get("roles") is not None else ()):
                 if str(cfg.get(name) or ZERO).lower() == ZERO:
                     raise ConfigError(f"This SDK version holds no {words} address; update the SDK.")
-            env_rpc = None if test is True else env.get("CRX_RPC")
+            env_rpc = None if test else env.get("CRX_RPC")
             if env_rpc and ("<" in env_rpc or ">" in env_rpc):
                 env_rpc = None
             rpc = rpc_url or env_rpc or cfg.get("rpc")
@@ -331,7 +339,7 @@ class Guardian:
         self._hermes = (hermes_url or env.get("CRX_HERMES_URL") or "").rstrip("/") or None
         self._session = session or requests.Session()
         self._timeout = float(timeout)
-        self._rpc = Rpc(rpc, self._session, self._timeout)
+        self._rpc = _ReadRpc(rpc, self._session, self._timeout, lambda s: self._sleep(s))
         state = state_dir or env.get("CRX_STATE_DIR")
         self._txlog = TxLog(Path(state or DEFAULT_STATE_DIR).expanduser() / "txs.json", own_dir=not state)
         self._clock: Callable[[], float] = time.time
@@ -416,9 +424,9 @@ class Guardian:
         """Cancel ``proposal`` and send ``reason`` to CRX, signed by the guardian wallet.
 
         The call refuses a trade hold release and any key the guardian role does not cover before it reads the
-        chain. It sends one transaction, waits for its receipt and checks the cancel record in it. Then it signs
-        the reason and posts it to the portal. A refused reason does not undo the cancel: ``reason_recorded`` is
-        False and ``reason_error`` holds the portal's code.
+        chain. It sends one transaction, waits for its receipt and checks the cancel record in it. Then it sends
+        the reason with ``record_reason``. A reason that is not recorded does not undo the cancel:
+        ``reason_recorded`` is False and ``reason_error`` holds the code.
 
         Raises:
             BadRequest: ``not_cancellable`` for a key the role does not cover; a reason outside 10 to 280
@@ -440,11 +448,58 @@ class Guardian:
         self._simulate(account.address, self._roles, data)
         tx = send_tx(self._rpc, account, self.chain_id, "cancel", self._roles, data, sleep=self._sleep,
                      log=self._txlog)
-        receipt = self._rpc("eth_getTransactionReceipt", tx)
+        receipt = self._receipt(tx)
+        if receipt is None:
+            log.warning("cancel %s: the receipt is not readable; the reason is not sent", tx)
+            return Cancel(tx=tx, reason_recorded=False, reason_error="no_receipt", proposal=proposal)
         if not self._has_cancel(receipt, feed, expiry):
             raise TxFailed(f"Transaction {tx} holds no cancel of this price.", details={"step": "cancel", "tx": tx})
-        recorded, error = self._post_reason(account, tx, feed, expiry, text)
+        recorded, error = self.record_reason(tx, feed, expiry, text)
         return Cancel(tx=tx, reason_recorded=recorded, reason_error=error, proposal=proposal)
+
+    def record_reason(self, tx: str, feed_id: str, expiry: int, reason: str) -> tuple[bool, str | None]:
+        """Send the reason of the cancel ``tx`` of (``feed_id``, ``expiry``) to CRX, signed by the guardian wallet.
+
+        ``cancel()`` calls it once the cancel is mined. A reason that is not recorded can be sent again with the
+        same arguments. The portal checks the cancel on the chain. A post that gets no answer, a 429 or 5xx, a
+        ``not_a_cancel`` or ``not_seen_yet`` (the portal has not read the cancel yet), or a 2xx with no
+        ``recorded`` answer goes again: 3 posts over about 20 seconds.
+
+        Returns:
+            ``(recorded, error)``. ``recorded`` is True when CRX holds the reason. ``error`` is the portal's code,
+            else None; ``already_recorded`` comes with True.
+
+        Raises:
+            BadRequest: ``tx`` or ``feed_id`` is not 32 bytes of hex, ``expiry`` names no price a guardian can
+                cancel, or the reason is outside 10 to 280 characters on one line. Nothing was sent.
+            ConfigError: The Guardian holds no key.
+        """
+        expiry = check_cancellable(expiry)
+        feed = "0x" + _word(str(feed_id), "feed_id").hex()
+        tx = "0x" + _word(str(tx), "tx").hex()
+        text = _reason(reason)
+        account = self._need_key()
+        msg = reason_message(self.mode, tx, feed, expiry, text)
+        sig = "0x" + bytes(account.sign_message(encode_defunct(text=msg)).signature).hex()
+        body = {"mode": self.mode, "tx": tx, "feedId": feed, "expiry": str(expiry), "reason": text,
+                "signer": account.address.lower(), "sig": sig}
+        pauses = iter(REASON_PAUSES_S)
+        while True:
+            try:
+                r = self._session.post(f"{self._portal}/api/v1/reasons", json=body, timeout=self._timeout,
+                                       allow_redirects=False)
+            except requests.RequestException:
+                error, again = "network", True
+            else:
+                error, again = _reason_answer(r)
+                if error is None or error == "already_recorded":
+                    return True, error
+            pause = next(pauses, None)
+            if not again or pause is None:
+                break
+            self._sleep(pause)
+        log.warning("cancel %s: the reason is not recorded (%s)", tx, error)
+        return False, error
 
     def post_test_price(self, pair: str, off_bp: Any = 0, kind: str = "fixing") -> Proposal:
         """Test only: propose a price on the Test venue at the reference spot x (1 + off_bp / 10,000).
@@ -485,7 +540,10 @@ class Guardian:
                                              [_word(feed, "feed_id"), expiry, price, TEST_EXPO])).hex()
         tx = send_tx(self._rpc, account, self.chain_id, "test price", self._core, data, sleep=self._sleep,
                      log=self._txlog)
-        receipt = self._rpc("eth_getTransactionReceipt", tx)
+        receipt = self._receipt(tx)
+        if receipt is None:
+            raise SendUnknown(f"Transaction {tx} is mined and its receipt is not readable. Read proposals().",
+                              details={"step": "test price", "tx": tx})
         for raw in _logs_of(receipt):
             e = self._event(raw)
             if e and e["type"] == "proposed" and e["feed"] == feed.lower() and e["expiry"] == expiry:
@@ -544,6 +602,20 @@ class Guardian:
                 return  # send_tx runs the same call and names the revert
             cls, words, code = hit
             raise cls(f"{words} Nothing was sent.", **({"code": code} if code else {})) from None
+
+    def _receipt(self, tx: str) -> dict | None:
+        """Return the receipt of a mined transaction, or None. A node behind the one that served the receipt can
+        answer null; the read goes again, ``RECEIPT_READS`` reads in all."""
+        for n in range(RECEIPT_READS):
+            if n:
+                self._sleep(self._rpc.poll_s)
+            try:
+                receipt = self._rpc("eth_getTransactionReceipt", tx)
+            except (CrxError, RpcError):
+                receipt = None
+            if isinstance(receipt, dict):
+                return receipt
+        return None
 
     def _has_cancel(self, receipt: Any, feed: str, expiry: int) -> bool:
         for raw in _logs_of(receipt):
@@ -731,38 +803,6 @@ class Guardian:
                 out.setdefault(row["pair"], (value, "pyth", when))
         return out
 
-    # Reason
-
-    def _post_reason(self, account: Any, tx: str, feed: str, expiry: int, text: str) -> tuple[bool, str | None]:
-        msg = reason_message(self.mode, tx, feed, expiry, text)
-        sig = "0x" + bytes(account.sign_message(encode_defunct(text=msg)).signature).hex()
-        body = {"mode": self.mode, "tx": tx.lower(), "feedId": feed.lower(), "expiry": str(expiry), "reason": text,
-                "signer": account.address.lower(), "sig": sig}
-        error = "network"
-        for attempt in range(REASON_TRIES):
-            if attempt:
-                self._sleep(REASON_PAUSE_S)
-            try:
-                r = self._session.post(f"{self._portal}/api/v1/reasons", json=body, timeout=self._timeout,
-                                       allow_redirects=False)
-            except requests.RequestException:
-                error = "network"
-                continue
-            if 200 <= r.status_code < 300:
-                return True, None
-            try:
-                answer = r.json()
-            except ValueError:
-                answer = None
-            code = answer.get("code") or answer.get("error") if isinstance(answer, dict) else None
-            error = clean(code, 40) if isinstance(code, str) and code else f"http_{r.status_code}"
-            if error == "already_recorded":
-                return True, error
-            if r.status_code < 500:
-                break
-        log.warning("cancel %s: the reason is not recorded (%s)", tx, error)
-        return False, error
-
 
 def _logs_of(receipt: Any) -> list:
     logs = receipt.get("logs") if isinstance(receipt, dict) else None
@@ -776,3 +816,53 @@ def _revert_selector(error: Any) -> bytes:
         return bytes.fromhex(data[2:10]) if isinstance(data, str) and len(data) >= 10 else b""
     except ValueError:
         return b""
+
+
+def _reason_answer(r: requests.Response) -> tuple[str | None, bool]:
+    """Read the portal's answer to a reason post: the code (None when recorded) and whether to post again."""
+    try:
+        body = r.json()
+    except ValueError:
+        body = None
+    if 200 <= r.status_code < 300:
+        if isinstance(body, dict) and body.get("recorded") is True:
+            return None, False
+        return "bad_answer", True
+    err = body.get("error") if isinstance(body, dict) else None
+    code = err.get("code") if isinstance(err, dict) else None
+    if not (isinstance(code, str) and code) and isinstance(body, dict):
+        code = body.get("code") or err
+    error = clean(code, 40) if isinstance(code, str) and code else f"http_{r.status_code}"
+    return error, r.status_code >= 500 or r.status_code == 429 or error in REASON_LAG_CODES
+
+
+def _rate_limited(error: Any) -> bool:
+    """True for a JSON-RPC error that refuses the call for the caller's rate."""
+    if not isinstance(error, dict):
+        return False
+    words = str(error.get("message", "")).lower()
+    return error.get("code") == 429 or "too many requests" in words or "rate limit" in words
+
+
+class _ReadRpc(Rpc):
+    """The Guardian's RPC. A read that the RPC refuses for the caller's rate, or answers with a 5xx or with no
+    JSON, goes again after each pause of ``READ_PAUSES_S``. A send goes once."""
+
+    def __init__(self, url: str, session: requests.Session, timeout: float, sleep: Callable[[float], None]) -> None:
+        super().__init__(url, session, timeout)
+        self._pause = sleep
+
+    def __call__(self, method: str, *params: Any) -> Any:
+        pauses = iter(() if method == "eth_sendRawTransaction" else READ_PAUSES_S)
+        while True:
+            try:
+                return super().__call__(method, *params)
+            except BadAnswer:
+                pause = next(pauses, None)
+                if pause is None:
+                    raise
+            except RpcError as e:
+                pause = next(pauses, None) if _rate_limited(e.error) else None
+                if pause is None:
+                    raise
+            self._pause(pause)

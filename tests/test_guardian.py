@@ -48,7 +48,8 @@ def topic_addr(a: str) -> str:
 
 
 class Node:
-    """A scripted Fuji node: the venue's logs and entries, the CRX print lens and the guardian role contract."""
+    """A scripted test network node: the venue's logs and entries, the CRX print lens and the guardian role
+    contract."""
 
     def __init__(self):
         self.logs: list[dict] = []
@@ -60,6 +61,9 @@ class Node:
         self.ranges: list[tuple[int, int]] = []
         self.calls: list[str] = []
         self.chain_id = 43113
+        self.throttle: dict[str, list[tuple]] = {}  # method -> HTTP answers served before the node answers
+        self.receipt_reads: dict[str, int] = {}
+        self.blind_reads: set[int] = set()  # receipt reads, by number per transaction, that answer null
 
     # Script
 
@@ -171,7 +175,8 @@ class Node:
         return h
 
     def rpc_eth_getTransactionReceipt(self, h):
-        return self.receipts.get(h)
+        self.receipt_reads[h] = n = self.receipt_reads.get(h, 0) + 1
+        return None if n in self.blind_reads else self.receipts.get(h)
 
 
 class Revert(Exception):
@@ -181,7 +186,8 @@ class Revert(Exception):
 
 
 class Session:
-    """Route RPC posts to the node, and portal or Hermes calls to ``routes[(METHOD, path)]``."""
+    """Route RPC posts to the node, and portal or Hermes calls to ``routes[(METHOD, path)]``. A route is a
+    ``(status, body)`` or a list of them, served in order; the last one repeats."""
 
     def __init__(self, node):
         self.node = node
@@ -191,12 +197,16 @@ class Session:
 
     def post(self, url, json=None, timeout=None, allow_redirects=True):
         if url in (RPC, LIVE_RPC):
+            if self.node.throttle.get(json["method"]):
+                return Resp(*self.node.throttle[json["method"]].pop(0))
             out = self.node(json["method"], json["params"])
             return Resp(200, {"jsonrpc": "2.0", "id": json["id"], **out})
         assert allow_redirects is False
         path = url[len(PORTAL):]
         self.posts.append({"path": path, "body": json})
         spec = self.routes.get(("POST", path), (404, {"code": "not_found"}))
+        if isinstance(spec, list):
+            spec = spec.pop(0) if len(spec) > 1 else spec[0]
         return Resp(*spec)
 
     def get(self, url, params=None, timeout=None, allow_redirects=True):
@@ -250,8 +260,15 @@ def test_proposals_keep_each_entry_the_chain_still_holds_at_its_logged_ready_tim
     trade = gd.TRADE_PRICE_TAG | E1
     t = node.propose(TERMS, trade, 6_100_000, NOW + 4000, block=3_200)
 
-    got = make(with_key=False).proposals()
+    limited = {"jsonrpc": "2.0", "id": 1, "error": {"code": -32090, "message": "Too many requests"}}
+    node.throttle = {"eth_getLogs": [(429, "Too Many Requests"), (200, limited)], "eth_call": [(502, "Bad Gateway")]}
+    g = make(with_key=False)
+    pauses = []
+    g._sleep = pauses.append
 
+    got = g.proposals()
+
+    assert pauses == [1.0, 3.0, 1.0]  # each rate refusal or answer with no JSON is read again after a pause
     assert [(p.tx, p.kind) for p in got] == [(a, "fixing"), (t, "trade_price")]
     p = got[0]
     assert (p.pair, p.feed_id, p.expiry, p.price, p.seconds_left) == ("USD/BRL", BRL["feedId"], E1,
@@ -260,6 +277,9 @@ def test_proposals_keep_each_entry_the_chain_still_holds_at_its_logged_ready_tim
     assert p.ready_at.timestamp() == NOW + 3600 and p.proposed_at.timestamp() == NOW + 3600 - 7200
     assert (got[1].pair, got[1].reference, got[1].diff_bp) == (None, None, None)
     assert all(hi - lo < MAX_RANGE for lo, hi in node.ranges) and node.ranges[0] == (0, 1_999)
+    node.throttle = {"eth_chainId": [(429, "Too Many Requests")] * 3}
+    with pytest.raises(crx.BadAnswer, match="not JSON"):
+        make(with_key=False).proposals()
 
 
 @pytest.mark.parametrize("expiry", [gd.TRADE_HOLD_TAG | E1, gd.TRADE_HOLD_TAG, gd.TRADE_PRICE_TAG - 1,
@@ -275,7 +295,7 @@ def test_cancel_refuses_a_hold_release_or_a_key_outside_the_role_before_any_chai
 def cancelled(make, node, session, key):
     node.members.add(key.address.lower())
     node.propose(BRL["feedId"], E1, 6_160_000, NOW + 3600, block=100)
-    session.routes[("POST", "/api/v1/reasons")] = (200, {"ok": True})
+    session.routes[("POST", "/api/v1/reasons")] = (200, {"recorded": True, "tx": "0x" + w(9), "firm": "Test firm"})
     return make().cancel(proposal(), reason="  3 % off Pyth spot ")
 
 
@@ -314,14 +334,38 @@ def test_the_posted_reason_is_the_spec_text_signed_by_the_guardian_key(cancelled
                     "reason": "3 % off Pyth spot", "signer": key.address.lower(), "sig": body["sig"]}
 
 
-def test_a_refused_reason_leaves_the_cancel_in_force(make, node, session, key):
+def test_a_lagging_rpc_or_portal_leaves_the_cancel_in_force_and_the_reason_can_be_sent_again(make, node, session,
+                                                                                            key):
     node.members.add(key.address.lower())
     node.propose(BRL["feedId"], E1, 6_160_000, NOW + 3600, block=100)
-    session.routes[("POST", "/api/v1/reasons")] = (409, {"code": "not_a_cancel"})
-    c = make().cancel(proposal(), reason="3 % off Pyth spot")
-    assert (c.reason_recorded, c.reason_error) == (False, "not_a_cancel")
-    assert (BRL["feedId"], E1) not in node.pending and len(session.posts) == 1
-    assert str(c).endswith("The reason is not recorded (not_a_cancel); the cancel stands.")
+    node.propose(MXN["feedId"], E1, 18_100_000, NOW + 3700, block=200)
+    route = ("POST", "/api/v1/reasons")
+    session.routes[route] = [(503, {"error": {"code": "not_seen_yet", "message": "The chain read is behind."}}),
+                             (409, {"error": {"code": "not_a_cancel", "message": "Not a guardian cancel."}}),
+                             (200, "<html>OK</html>")]
+    node.blind_reads = {2}  # the read after the mined cancel reaches a node that has not seen it yet
+    g = make()
+    pauses = []
+    g._sleep = pauses.append
+
+    c = g.cancel(proposal(), reason="3 % off Pyth spot")
+
+    assert (c.reason_recorded, c.reason_error, len(session.posts)) == (False, "bad_answer", 3)
+    assert pauses == [2.0, 5.0, 15.0] and (BRL["feedId"], E1) not in node.pending
+    assert str(c).endswith("The reason is not recorded (bad_answer); the cancel stands.")
+    first = session.posts[0]["body"]
+    for answer, want in [((401, {"code": "bad_signature"}), (False, "bad_signature")),
+                         ((409, {"error": {"code": "already_recorded", "message": "On record."}}),
+                          (True, "already_recorded")),
+                         ((200, {"recorded": True, "tx": c.tx, "firm": "Test firm"}), (True, None))]:
+        session.routes[route], session.posts[:] = [answer], []
+        assert g.record_reason(c.tx, BRL["feedId"], E1, "3 % off Pyth spot") == want
+        assert [p["body"] for p in session.posts] == [first]
+    session.posts.clear()
+    node.blind_reads = set(range(2, 99))
+    c2 = g.cancel(proposal(feed=MXN["feedId"]), reason="3 % off Pyth spot")
+    assert (c2.reason_recorded, c2.reason_error, session.posts) == (False, "no_receipt", [])
+    assert (MXN["feedId"], E1) not in node.pending
 
 
 def test_a_wallet_with_no_guardian_role_is_refused_with_nothing_sent(make, node, session):
@@ -380,7 +424,11 @@ def test_watch_yields_each_new_proposal_once(make, node):
     assert pauses == [5.0]
 
 
-def test_the_live_pins_name_the_chain_1_core_and_lens():
-    live = gd.CONFIG["live"]
+def test_only_a_bool_picks_the_mode_and_the_pins_name_each_chain():
+    live, test = gd.CONFIG["live"], gd.CONFIG["test"]
     assert to_checksum_address(live["core"]) == crx.client.MAINNET_CORE
     assert (live["chainId"], live["roles"], live["roleKey"]) == (1, None, VETO)
+    assert (test["chainId"], test["rpc"]) == (43113, "https://avalanche-fuji-c-chain-rpc.publicnode.com")
+    for bad in (1, "true", None):
+        with pytest.raises(crx.ConfigError, match=r"^test must be True or False\.$"):
+            crx.Guardian(test=bad, rpc_url=LIVE_RPC)

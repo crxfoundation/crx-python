@@ -23,7 +23,7 @@ CONFIG = {
         "roles": "0xd4C2D9Fb37D6B3330633Cc53c429d5aC13DbBE53",
         "roleKey": VETO,
         "startBlock": 61406607,
-        "rpc": "https://api.avax-test.network/ext/bc/C/rpc",
+        "rpc": "https://avalanche-fuji-c-chain-rpc.publicnode.com",
     },
     "live": {
         "chainId": 1,

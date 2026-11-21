@@ -232,6 +232,7 @@ Live: drop `test=True` and pass `rpc_url=` or set `CRX_RPC`. Live reads work now
 |---|---|
 | `proposals()` | Each `Proposal` that waits for its write: `pair`, `kind`, `price`, `reference`, `diff_bp`, `ready_at` (UTC), `seconds_left`, `proposer`, `tx`. |
 | `cancel(p, reason)` | A `Cancel`: `tx`, `reason_recorded`, `reason_error`. One transaction from the wallet; the network fee is in the chain's coin. |
+| `record_reason(tx, feed_id, expiry, reason)` | `(recorded, error)`. Sends the reason of a mined cancel again. |
 | `history(days=30, pair=None)` | Each `Outcome` of the period, newest first: `cancelled`, `written`, `replaced` or `pending`, with `by`, `outcome_tx`, `outcome_at`. |
 | `watch(every=30)` | Yields each new proposal once. No end. |
 | `post_test_price(pair, off_bp=0, kind="fixing")` | Test only. A new `Proposal` on the Test venue. `kind`: `fixing`, `final_price` or `steward_mark`. At most 5 open per wallet. |
@@ -239,7 +240,7 @@ Live: drop `test=True` and pass `rpc_url=` or set `CRX_RPC`. Live reads work now
 - `kind` is `fixing`, `final_price`, `steward_mark` or `trade_price`. `pair` is `USD/BRL`, `USD/MXN` or `USDC/USDT`, and `None` for a trade price.
 - `reference` is Pyth spot from `hermes_url=` or `CRX_HERMES_URL` when set, else Pyth spot from the portal, else the latest CRX print on the chain. `reference_source` is `pyth` or `crx`. `diff_bp` is (price - reference) / reference x 10,000.
 - `cancel()` refuses a trade hold release and the listed mark of a pair with `not_cancellable`, before any send. The reason is 10 to 280 characters on one line.
-- The reason goes to `portal_url=` (default `https://safe.crxfx.com`, or `CRX_SAFE_URL`). A refused reason leaves the cancel in force: `reason_recorded` is `False` and `reason_error` holds the code.
+- The reason goes to `portal_url=` (default `https://safe.crxfx.com`, or `CRX_SAFE_URL`). A reason that is not recorded leaves the cancel in force: `reason_recorded` is `False` and `reason_error` holds the code. `record_reason(c.tx, p.feed_id, p.expiry, reason)` sends it again. A portal that has not read the cancel yet gets the same post again, 3 posts over about 20 seconds.
 - The Guardian takes its key from `key=` or `key_file=` only, never from `CRX_WALLET_PK`. Without a key, only the reads work.
 - Live and Test addresses are pinned in the SDK. Live (chain 1): core `0x0d716cA9Fc2BFD8c66D2AF2fB38b56D08809A8cc`. The RPC must serve the mode's chain, else `config`.
 
