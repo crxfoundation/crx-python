@@ -15,19 +15,23 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Callable, Iterator
 from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import requests
 from eth_abi import decode, encode
 from eth_abi.exceptions import DecodingError
-from eth_account.messages import encode_defunct
-from eth_utils import keccak, to_checksum_address
+from eth_account import Account
+from eth_account.messages import SignableMessage, encode_defunct
+from eth_account.typed_transactions import TypedTransaction
+from eth_utils import is_address, keccak, to_checksum_address
+from hexbytes import HexBytes
 
 from . import _env
 from ._chain import Rpc, RpcError, TxLog, send_tx
 from ._guardian_config import CONFIG, PAIRS, ZERO
 from ._keys import load_account
-from .errors import (BadAnswer, BadRequest, ConfigError, CrxError, MarkUnavailable, NotGuardian, SendUnknown,
-                     TxFailed, clean)
+from .errors import (BadAnswer, BadRequest, ConfigError, CrxError, MarkUnavailable, NotGuardian, RefusedToSign,
+                     SendUnknown, TxFailed, clean)
 
 log = logging.getLogger("crx")
 
@@ -45,9 +49,13 @@ DEFAULT_STATE_DIR = "~/.crx-quickstart"  # the Client's folder: one record of se
 REASON_MIN, REASON_MAX = 10, 280
 REASON_PAUSES_S = (5.0, 15.0)  # pauses between the 3 posts of one reason
 REASON_LAG_CODES = ("not_a_cancel", "not_seen_yet")  # the portal's chain read has not reached the cancel yet
+REASON_V1_CODES = ("bad_signature", "bad_proof")  # answers to a v2 reason text after which the v1 text goes
+NEW_YORK = "America/New_York"
 READ_PAUSES_S = (1.0, 3.0)  # pauses between the 3 tries of a chain read
 RECEIPT_READS = 5  # reads of a mined transaction's receipt
 REFERENCE_TIMEOUT_S = 5.0  # the portal and Hermes reads of a reference price
+REFERENCE_KEEP_S = 15.0  # a pair's reference serves each call of the next 15 seconds
+SECP256K1_N = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
 CONFIRMS = {"live": 12, "test": 1}  # blocks under the head after which a log read is kept for the next call
 CHUNK = {"live": 10_000, "test": 2_000}  # blocks per eth_getLogs call; halves on a refusal
 MIN_CHUNK = 10
@@ -134,9 +142,57 @@ def cancel_call(core: str, role_key: str, feed_id: str, expiry: int) -> str:
 
 
 def reason_message(mode: str, tx: str, feed_id: str, expiry: int, reason: str) -> str:
-    """Return the text the guardian wallet signs (EIP-191) for the reason of one cancel."""
+    """Return the v1 text the guardian wallet signs (EIP-191) for the reason of one cancel."""
     return "\n".join(["CRX-GUARDIAN-REASON", f"Mode: {mode}", f"Tx: {tx.lower()}", f"Feed: {feed_id.lower()}",
                       f"Expiry: {int(expiry)}", f"Reason: {reason}"])
+
+
+def reason_message_v2(mode: str, tx: str, feed_id: str, expiry: int, reason: str, domain: str,
+                      issued_at: str) -> str:
+    """Return the v2 text the guardian wallet signs (EIP-191) for the reason of one cancel.
+
+    Over the v1 text it names the price (``Pair: USD/BRL``, or ``Trade: 0x525e...a4fd`` for a trade price), its
+    fixing or end time in New York time (``Fixes: 2026-11-21 14:00 ET``, ``Ends:`` for a trade price), the portal
+    host (``Domain``) and the signing time (``Issued at``, ISO 8601 UTC). A final price or a steward mark has no
+    time line; a feed outside this SDK's pairs has no ``Pair`` line.
+
+    Raises:
+        ValueError: The fixing or end time cannot be shown in New York time.
+    """
+    feed, expiry = feed_id.lower(), int(expiry)
+    kind = kind_of(expiry)
+    lines = ["CRX-GUARDIAN-REASON", f"Mode: {mode}"]
+    if kind == "trade_price":
+        lines.append(f"Trade: {feed[:6]}...{feed[-4:]}")
+    else:
+        row = next((r for r in PAIRS if feed in (r["feedId"].lower(), r["pairId"].lower())), None)
+        if row is not None:
+            lines.append(f"Pair: {row['pair']}")
+    if kind == "fixing":
+        lines.append(f"Fixes: {_new_york(expiry)} ET")
+    elif kind == "trade_price":
+        lines.append(f"Ends: {_new_york(expiry - TRADE_PRICE_TAG)} ET")
+    lines += [f"Tx: {tx.lower()}", f"Feed: {feed}", f"Expiry: {expiry}", f"Reason: {reason}", f"Domain: {domain}",
+              f"Issued at: {issued_at}"]
+    return "\n".join(lines)
+
+
+def _new_york(seconds: int) -> str:
+    """``seconds`` as New York time, ``YYYY-MM-DD HH:MM``."""
+    try:
+        return datetime.fromtimestamp(seconds, ZoneInfo(NEW_YORK)).strftime("%Y-%m-%d %H:%M")
+    except (OverflowError, OSError, ValueError, ZoneInfoNotFoundError):
+        raise ValueError(f"{seconds} has no New York time on this system") from None
+
+
+def _issued_at(now: float) -> str:
+    """``now`` as ISO 8601 UTC to the millisecond: ``2026-11-21T06:00:00.000Z``."""
+    at = datetime.fromtimestamp(now, timezone.utc)
+    return at.strftime("%Y-%m-%dT%H:%M:%S.") + f"{at.microsecond // 1000:03d}Z"
+
+
+def _sign_text(account: Any, text: str) -> str:
+    return "0x" + bytes(account.sign_message(encode_defunct(text=text)).signature).hex()
 
 
 def _reason(reason: Any) -> str:
@@ -241,7 +297,8 @@ class Cancel:
             ``Guardian.record_reason`` sends a reason that is not recorded again.
         reason_error: The portal's error code when the reason is not recorded, else None. ``already_recorded``
             comes with ``reason_recorded`` True. ``no_receipt``: the RPC did not serve the receipt again after the
-            cancel was mined, and the reason was not sent.
+            cancel was mined, and the reason was not sent. ``not_signed``: the ``account=`` signer did not sign the
+            reason, and the reason was not sent.
         proposal: The proposal the cancel removed.
     """
 
@@ -280,6 +337,10 @@ class Guardian:
     Args:
         key: The guardian wallet's private key, hex or 32 bytes. None: reads only. Never read from the environment.
         key_file: A file that holds the key, owner-only (as for ``Client``), in place of ``key``.
+        account: A custody or hardware signer in place of a key: an object with ``address``,
+            ``sign_transaction(dict)`` and ``sign_message(SignableMessage)``, as an eth_account ``LocalAccount``.
+            The SDK checks each signature it returns before it sends. Set one of ``key``, ``key_file`` and
+            ``account``.
         test: True for the Test venue, False (default) for Live. Any other value raises ``ConfigError``. The Test
             venue's addresses are pinned in this SDK; its RPC is a public node of the test network unless
             ``rpc_url`` names another.
@@ -295,6 +356,7 @@ class Guardian:
         key: str | bytes | None = None,
         *,
         key_file: str | Path | None = None,
+        account: Any = None,
         test: bool = False,
         rpc_url: str | None = None,
         portal_url: str | None = None,
@@ -324,7 +386,12 @@ class Guardian:
             u = urlsplit(portal)
             if u.scheme != "https" and not (u.scheme == "http" and u.hostname in ("localhost", "127.0.0.1")):
                 raise ConfigError("portal_url must be an https URL")
-            self._account = load_account(key, key_file, lambda _name: None)
+            if account is None:
+                self._account = load_account(key, key_file, lambda _name: None)
+            elif key is not None or key_file is not None:
+                raise ConfigError("Set one of key, key_file and account.")
+            else:
+                self._account = _Signer(account)
         finally:
             key = None
         self._cfg = cfg
@@ -336,6 +403,7 @@ class Guardian:
         self._role_key = cfg["roleKey"]
         self._start = int(cfg.get("startBlock") or 0)
         self._portal = portal
+        self._domain = (u.hostname or "").lower()
         self._hermes = (hermes_url or env.get("CRX_HERMES_URL") or "").rstrip("/") or None
         self._session = session or requests.Session()
         self._timeout = float(timeout)
@@ -349,6 +417,7 @@ class Guardian:
         self._kept: list[dict] = []  # parsed logs up to self._scanned
         self._scanned = self._start - 1
         self._block_times: dict[int, int] = {}
+        self._kept_refs: dict[str, tuple[float, tuple[Decimal, str, datetime | None]]] = {}
 
     def __repr__(self) -> str:
         return f"crx.Guardian(mode={self.mode!r}, address={self.address!r})"
@@ -358,7 +427,7 @@ class Guardian:
 
     @property
     def address(self) -> str | None:
-        """The guardian wallet's address in lower case, or None without a key."""
+        """The guardian wallet's address in lower case, or None without a key or an account."""
         return self._account.address.lower() if self._account is not None else None
 
     # Reads
@@ -380,7 +449,7 @@ class Guardian:
             if kind_of(it.expiry) == "steward_mark" and now > it.ready + MARK_OPEN_S:
                 continue
             keep.append(it)
-        refs = self._references(keep)
+        refs = self._references([r for r in (self._pair_row(i.feed, i.expiry) for i in keep) if r is not None])
         out = []
         for it in keep:
             row = self._pair_row(it.feed, it.expiry)
@@ -434,6 +503,8 @@ class Guardian:
             NotGuardian: The wallet holds no guardian role in this mode, or Live takes no cancel yet.
             TxFailed: The price is no longer waiting, or the transaction failed.
             SendUnknown: The transaction was sent and has no receipt yet. Read ``proposals()`` before a new cancel.
+            RefusedToSign: The ``account=`` signer did not sign the cancel, or signed another transaction or from
+                another address. Nothing was sent.
         """
         expiry = check_cancellable(getattr(proposal, "expiry", None))
         feed = "0x" + _word(str(getattr(proposal, "feed_id", "")), "feed_id").hex()
@@ -454,7 +525,11 @@ class Guardian:
             return Cancel(tx=tx, reason_recorded=False, reason_error="no_receipt", proposal=proposal)
         if not self._has_cancel(receipt, feed, expiry):
             raise TxFailed(f"Transaction {tx} holds no cancel of this price.", details={"step": "cancel", "tx": tx})
-        recorded, error = self.record_reason(tx, feed, expiry, text)
+        try:
+            recorded, error = self.record_reason(tx, feed, expiry, text)
+        except RefusedToSign:
+            log.warning("cancel %s: the account did not sign the reason; the reason is not sent", tx)
+            recorded, error = False, "not_signed"
         return Cancel(tx=tx, reason_recorded=recorded, reason_error=error, proposal=proposal)
 
     def record_reason(self, tx: str, feed_id: str, expiry: int, reason: str) -> tuple[bool, str | None]:
@@ -465,6 +540,10 @@ class Guardian:
         ``not_a_cancel`` or ``not_seen_yet`` (the portal has not read the cancel yet), or a 2xx with no
         ``recorded`` answer goes again: 3 posts over about 20 seconds.
 
+        The wallet signs the v2 text (``reason_message_v2``): it names the pair, the fixing time, the portal host and
+        the signing time. A portal that answers ``bad_signature`` or ``bad_proof`` to it gets the v1 text
+        (``reason_message``) once, at once.
+
         Returns:
             ``(recorded, error)``. ``recorded`` is True when CRX holds the reason. ``error`` is the portal's code,
             else None; ``already_recorded`` comes with True.
@@ -473,16 +552,24 @@ class Guardian:
             BadRequest: ``tx`` or ``feed_id`` is not 32 bytes of hex, ``expiry`` names no price a guardian can
                 cancel, or the reason is outside 10 to 280 characters on one line. Nothing was sent.
             ConfigError: The Guardian holds no key.
+            RefusedToSign: The ``account=`` signer did not sign the reason, or its signature does not recover to
+                its address. Nothing was sent.
         """
         expiry = check_cancellable(expiry)
         feed = "0x" + _word(str(feed_id), "feed_id").hex()
         tx = "0x" + _word(str(tx), "tx").hex()
         text = _reason(reason)
         account = self._need_key()
-        msg = reason_message(self.mode, tx, feed, expiry, text)
-        sig = "0x" + bytes(account.sign_message(encode_defunct(text=msg)).signature).hex()
-        body = {"mode": self.mode, "tx": tx, "feedId": feed, "expiry": str(expiry), "reason": text,
-                "signer": account.address.lower(), "sig": sig}
+        v1 = {"mode": self.mode, "tx": tx, "feedId": feed, "expiry": str(expiry), "reason": text,
+              "signer": account.address.lower()}
+        v1_text = reason_message(self.mode, tx, feed, expiry, text)
+        issued = _issued_at(self._clock())
+        try:
+            msg = reason_message_v2(self.mode, tx, feed, expiry, text, self._domain, issued)
+        except ValueError:
+            body, v2 = {**v1, "sig": _sign_text(account, v1_text)}, False
+        else:
+            body, v2 = {**v1, "sig": _sign_text(account, msg), "issuedAt": issued, "domain": self._domain}, True
         pauses = iter(REASON_PAUSES_S)
         while True:
             try:
@@ -494,6 +581,10 @@ class Guardian:
                 error, again = _reason_answer(r)
                 if error is None or error == "already_recorded":
                     return True, error
+                if v2 and error in REASON_V1_CODES:
+                    log.info("cancel %s: the portal took no v2 reason text (%s); the v1 text goes", tx, error)
+                    body, v2 = {**v1, "sig": _sign_text(account, v1_text)}, False
+                    continue
             pause = next(pauses, None)
             if not again or pause is None:
                 break
@@ -505,8 +596,8 @@ class Guardian:
         """Test only: propose a price on the Test venue at the reference spot x (1 + off_bp / 10,000).
 
         ``kind`` is ``"fixing"`` (expiry: the current second), ``"final_price"`` or ``"steward_mark"``. The spot is
-        Pyth when ``hermes_url`` is set, else the latest CRX print. The venue takes at most 5 open proposals from
-        one wallet. Returns the new proposal.
+        the pair's reference, as ``proposals()`` reads it. The venue takes at most 5 open proposals from one wallet.
+        Returns the new proposal, with the reference and ``diff_bp`` that ``proposals()`` gives it.
         """
         if self.mode != "test":
             raise BadRequest("post_test_price runs in Test mode only; nothing was sent.", code="test_only")
@@ -521,7 +612,7 @@ class Guardian:
             raise BadRequest("kind is fixing, final_price or steward_mark")
         account = self._need_key()
         self._check_chain()
-        ref = self._spot(row)
+        ref = self._references([row]).get(row["pair"])
         if ref is None:
             raise MarkUnavailable(f"No reference price is available for {row['pair']}; nothing was sent.")
         spot, source, at = ref
@@ -739,30 +830,38 @@ class Guardian:
             seconds_left=max(0, it.ready - now), proposer=it.proposer, tx=it.tx, mode=self.mode,
         )
 
-    def _references(self, items: list[_Item]) -> dict[str, tuple[Decimal, str, datetime | None]]:
-        """Return the reference spot of each pair the items name: Hermes when set, the portal, the CRX print."""
-        rows = {r["pair"]: r for r in (self._pair_row(i.feed, i.expiry) for i in items) if r is not None}
+    def _references(self, rows: list[dict]) -> dict[str, tuple[Decimal, str, datetime | None]]:
+        """Return the reference of each pair in ``rows``: Pyth from Hermes when set, else the portal's reference,
+        else the latest CRX print. A pair's reference serves each call of the next ``REFERENCE_KEEP_S`` seconds,
+        so ``post_test_price`` and ``proposals`` compare with the same price."""
+        now = self._clock()
         refs: dict[str, tuple[Decimal, str, datetime | None]] = {}
-        if not rows:
+        need: dict[str, dict] = {}
+        for row in rows:
+            hit = self._kept_refs.get(row["pair"])
+            if hit is not None and 0 <= now - hit[0] < REFERENCE_KEEP_S:
+                refs[row["pair"]] = hit[1]
+            else:
+                need[row["pair"]] = row
+        if not need:
             return refs
+        got: dict[str, tuple[Decimal, str, datetime | None]] = {}
         if self._hermes:
-            refs.update(self._hermes_spots(list(rows.values())))
-        if len(refs) < len(rows):
-            for name, ref in self._portal_spots().items():
-                if name in rows and name not in refs:
-                    refs[name] = ref
-        for name, row in rows.items():
-            if name not in refs:
+            got.update(self._hermes_spots(list(need.values())))
+        rest = [row for name, row in need.items() if name not in got]
+        if rest:
+            got.update(self._portal_refs(rest))
+        for name, row in need.items():
+            if name not in got:
                 ref = self._latest_print(row["feedId"])
                 if ref is not None:
-                    refs[name] = ref
-        return refs
-
-    def _spot(self, row: dict) -> tuple[Decimal, str, datetime | None] | None:
-        ref = self._hermes_spots([row]).get(row["pair"]) if self._hermes else None
-        return ref or self._latest_print(row["feedId"])
+                    got[name] = ref
+        for name, ref in got.items():
+            self._kept_refs[name] = (now, ref)
+        return {**refs, **got}
 
     def _get_json(self, url: str, params: Any) -> Any:
+        """Return the JSON of a 200 answer, else None."""
         try:
             r = self._session.get(url, params=params, timeout=REFERENCE_TIMEOUT_S, allow_redirects=False)
             return r.json() if r.status_code == 200 else None
@@ -788,20 +887,66 @@ class Guardian:
                                                  else None))
         return out
 
+    def _portal_refs(self, rows: list[dict]) -> dict[str, tuple[Decimal, str, datetime | None]]:
+        """Return the portal's reference of each pair: ``/api/v1/reference``, one read per pair. When a read gets
+        no answer (a portal without that route), the pairs left come from the portal's ``/api/v1/proposals``."""
+        out = {}
+        answered = True
+        for row in rows:
+            body = self._get_json(f"{self._portal}/api/v1/reference", {"mode": self.mode, "pair": row["pair"]})
+            if not isinstance(body, dict):
+                answered = False
+                continue
+            ref = _portal_ref(body, body.get("base", _NO_BASE)) if body.get("pair") == row["pair"] else None
+            if ref is not None:
+                out[row["pair"]] = ref
+        if not answered:
+            names = {row["pair"] for row in rows}
+            for name, ref in self._portal_spots().items():
+                if name in names:
+                    out.setdefault(name, ref)
+        return out
+
     def _portal_spots(self) -> dict[str, tuple[Decimal, str, datetime | None]]:
         body = self._get_json(f"{self._portal}/api/v1/proposals", {"mode": self.mode})
         out = {}
         for row in body if isinstance(body, list) else []:
             try:
-                ref = row["reference"]
-                value = Decimal(str(ref["pyth"]))
-                at = ref.get("pythAt")
-            except (KeyError, TypeError, InvalidOperation, ValueError, AttributeError):
+                ref = _portal_ref(row["reference"], row.get("diffBase", _NO_BASE))
+            except (KeyError, TypeError, AttributeError):
                 continue
-            if isinstance(row.get("pair"), str) and value.is_finite() and value > 0:
-                when = _utc(int(at)) if isinstance(at, (int, float)) and not isinstance(at, bool) else None
-                out.setdefault(row["pair"], (value, "pyth", when))
+            if isinstance(row.get("pair"), str) and ref is not None:
+                out.setdefault(row["pair"], ref)
         return out
+
+
+_NO_BASE = object()  # a portal answer that names no base: Pyth is the reference
+
+
+def _tidy(d: Decimal) -> Decimal:
+    """``d`` with no trailing zeros after the point: a JSON number to 15 digits reads 5.98059, not 5.980589999999999."""
+    if not d.is_finite():
+        return d
+    return d.quantize(Decimal(1)) if d == d.to_integral_value() else d.normalize()
+
+
+def _portal_ref(ref: Any, base: Any) -> tuple[Decimal, str, datetime | None] | None:
+    """Return the price the portal compares a proposal with: the price its ``base`` names (``"pyth"`` or
+    ``"crx"``), or Pyth when the answer names no base. None for a base of null or a price that is not above 0."""
+    source = base if base in ("pyth", "crx") else "pyth" if base is _NO_BASE else None
+    if source is None or not isinstance(ref, dict):
+        return None
+    value, at = ref.get(source), ref.get(source + "At")
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        return None
+    try:
+        price = _tidy(Decimal(format(value, ".15g"))) if isinstance(value, float) else Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return None
+    if not price.is_finite() or price <= 0:
+        return None
+    when = _utc(int(at)) if isinstance(at, (int, float)) and not isinstance(at, bool) else None
+    return price, source, when
 
 
 def _logs_of(receipt: Any) -> list:
@@ -866,3 +1011,117 @@ class _ReadRpc(Rpc):
                 if pause is None:
                     raise
             self._pause(pause)
+
+
+@dataclass(frozen=True)
+class _SignedTx:
+    raw_transaction: bytes
+    hash: bytes
+
+
+@dataclass(frozen=True)
+class _SignedText:
+    signature: bytes
+
+
+class _Signer:
+    """An ``account=`` signer in the shape of an eth_account ``LocalAccount``. Each signature it returns is checked
+    before use: a transaction must be the one asked and recover to ``address``; a text signature must recover to
+    ``address``. A signer that raises, or returns another signature, raises ``RefusedToSign``."""
+
+    def __init__(self, account: Any) -> None:
+        address = getattr(account, "address", None)
+        signs = all(callable(getattr(account, name, None)) for name in ("sign_transaction", "sign_message"))
+        if not (isinstance(address, str) and is_address(address) and signs):
+            raise ConfigError("account needs an address, sign_transaction and sign_message.")
+        self._inner = account
+        self.address = to_checksum_address(address)
+
+    def __repr__(self) -> str:
+        return f"account({self.address})"
+
+    def sign_transaction(self, tx: dict) -> _SignedTx:
+        try:
+            raw = _raw_of(self._inner.sign_transaction(dict(tx)))
+        except Exception:  # noqa: BLE001 - the signer's own error; nothing is sent
+            raw = None
+        if raw is None:
+            raise RefusedToSign("The account did not sign the transaction; nothing was sent.")
+        if not _same_tx(raw, tx, self.address):
+            raise RefusedToSign("The account signed another transaction or from another address; nothing was sent.")
+        return _SignedTx(raw_transaction=raw, hash=keccak(raw))
+
+    def sign_message(self, message: SignableMessage) -> _SignedText:
+        try:
+            out = self._inner.sign_message(message)
+            sig = _low_s(_bytes_of(getattr(out, "signature", out)))
+        except Exception:  # noqa: BLE001 - the signer's own error; nothing is sent
+            sig = None
+        if sig is None:
+            raise RefusedToSign("The account did not sign the reason; nothing was sent.")
+        try:
+            ok = Account.recover_message(message, signature=sig) == self.address
+        except Exception:  # noqa: BLE001 - a signature that does not recover
+            ok = False
+        if not ok:
+            raise RefusedToSign("The account's signature does not recover to its address; nothing was sent.")
+        return _SignedText(signature=sig)
+
+
+def _bytes_of(value: Any) -> bytes | None:
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value)
+    if isinstance(value, str):
+        try:
+            return bytes(HexBytes(value))
+        except ValueError:
+            return None
+    return None
+
+
+def _raw_of(signed: Any) -> bytes | None:
+    """The raw bytes of a signed transaction: ``raw_transaction`` (eth_account 0.13), ``rawTransaction`` (older),
+    or the bytes themselves."""
+    for name in ("raw_transaction", "rawTransaction"):
+        raw = getattr(signed, name, None)
+        if raw is not None:
+            return _bytes_of(raw)
+    return _bytes_of(signed)
+
+
+def _low_s(sig: bytes | None) -> bytes | None:
+    """A 65-byte signature with ``v`` 27 or 28 and low ``s``, or None."""
+    if sig is None or len(sig) != 65:
+        return None
+    r, s, v = sig[:32], int.from_bytes(sig[32:64], "big"), sig[64]
+    v = v + 27 if v in (0, 1) else v
+    if v not in (27, 28) or not 0 < s < SECP256K1_N:
+        return None
+    if s > SECP256K1_N // 2:
+        s, v = SECP256K1_N - s, 55 - v
+    return r + s.to_bytes(32, "big") + bytes([v])
+
+
+def _same_tx(raw: bytes, want: dict, address: str) -> bool:
+    """True when ``raw`` is ``want`` signed by ``address``."""
+    try:
+        if Account.recover_transaction(raw) != address:
+            return False
+        if raw[:1] and raw[0] < 0x80:
+            got = TypedTransaction.from_bytes(HexBytes(raw)).as_dict()
+        else:
+            import rlp  # eth_account's own encoder
+
+            nonce, price, gas, to, value, data, v, _r, _s = rlp.decode(raw)
+            v = int.from_bytes(v, "big")
+            got = {"nonce": int.from_bytes(nonce, "big"), "gasPrice": int.from_bytes(price, "big"),
+                   "gas": int.from_bytes(gas, "big"), "to": to, "value": int.from_bytes(value, "big"), "data": data,
+                   "chainId": (v - 35) // 2 if v >= 35 else None}
+    except Exception:  # noqa: BLE001 - bytes that are no signed transaction
+        return False
+    if bytes(got.get("to") or b"").hex() != str(want["to"]).lower().removeprefix("0x"):
+        return False
+    if bytes(got.get("data") or b"") != bytes(HexBytes(want.get("data") or "0x")):
+        return False
+    names = ("chainId", "nonce", "value", "gas", "gasPrice", "maxFeePerGas", "maxPriorityFeePerGas")
+    return all(got.get(n) == want.get(n) for n in names if n in want) and got.get("chainId") == want.get("chainId")

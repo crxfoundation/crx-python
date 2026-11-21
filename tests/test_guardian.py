@@ -211,7 +211,9 @@ class Session:
 
     def get(self, url, params=None, timeout=None, allow_redirects=True):
         self.gets.append(url)
-        return Resp(*self.routes.get(("GET", url[len(PORTAL):]), (404, {"code": "not_found"})))
+        path = url[len(PORTAL):]
+        spec = self.routes.get(("GET", path, (params or {}).get("pair")), self.routes.get(("GET", path)))
+        return Resp(*(spec or (404, {"code": "not_found"})))
 
 
 @pytest.fixture
@@ -323,15 +325,39 @@ def test_cancel_sends_exactly_the_role_call_from_the_guardian_wallet(cancelled, 
     assert str(cancelled) == f"Cancelled. Transaction {cancelled.tx}."
 
 
-def test_the_posted_reason_is_the_spec_text_signed_by_the_guardian_key(cancelled, session, key):
+# The example of the portal's reason text v2, word for word.
+V2_EXAMPLE = """CRX-GUARDIAN-REASON
+Mode: test
+Pair: USD/BRL
+Fixes: 2026-11-21 14:00 ET
+Tx: 0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+Feed: 0xd2db4dbf1aea74e0f666b0e8f73b9580d407f5e5cf931940b06dc633d7a95906
+Expiry: 1795287600
+Reason: 300 bp above the reference
+Domain: safe.dev.crxfx.com
+Issued at: 2026-11-21T06:00:00.000Z"""
+
+
+def test_the_posted_reason_is_the_v2_spec_text_signed_by_the_guardian_key(cancelled, session, key):
     [post] = session.posts
     body = post["body"]
     assert post["path"] == "/api/v1/reasons"
-    text = (f"CRX-GUARDIAN-REASON\nMode: test\nTx: {cancelled.tx}\nFeed: {BRL['feedId']}\nExpiry: {E1}\n"
-            "Reason: 3 % off Pyth spot")
+    text = (f"CRX-GUARDIAN-REASON\nMode: test\nPair: USD/BRL\nFixes: 2026-11-19 09:53 ET\nTx: {cancelled.tx}\n"
+            f"Feed: {BRL['feedId']}\nExpiry: {E1}\nReason: 3 % off Pyth spot\nDomain: safe.test\n"
+            "Issued at: 2026-11-20T18:40:00.000Z")
     assert Account.recover_message(encode_defunct(text=text), signature=body["sig"]) == key.address
     assert body == {"mode": "test", "tx": cancelled.tx, "feedId": BRL["feedId"], "expiry": str(E1),
-                    "reason": "3 % off Pyth spot", "signer": key.address.lower(), "sig": body["sig"]}
+                    "reason": "3 % off Pyth spot", "signer": key.address.lower(), "sig": body["sig"],
+                    "issuedAt": "2026-11-20T18:40:00.000Z", "domain": "safe.test"}
+    assert gd.reason_message_v2("test", "0x" + "a1" * 32, BRL["feedId"].upper().replace("0X", "0x"), 1795287600,
+                                "300 bp above the reference", "safe.dev.crxfx.com",
+                                "2026-11-21T06:00:00.000Z") == V2_EXAMPLE
+    trade = gd.reason_message_v2("live", "0x" + "a1" * 32, TERMS, gd.TRADE_PRICE_TAG | 1795287600, "the trade is off",
+                                 "safe.crxfx.com", "2026-11-21T06:00:00Z").split("\n")
+    assert trade[2:4] == ["Trade: 0x7e7e...7e7e", "Ends: 2026-11-21 14:00 ET"]
+    final = gd.reason_message_v2("test", "0x" + "a1" * 32, MXN["pairId"], gd.FINAL_FIX_MARK, "the final is off",
+                                 "safe.test", "2026-11-21T06:00:00Z").split("\n")
+    assert final[2:4] == ["Pair: USD/MXN", "Tx: 0x" + "a1" * 32]
 
 
 def test_a_lagging_rpc_or_portal_leaves_the_cancel_in_force_and_the_reason_can_be_sent_again(make, node, session,
@@ -354,8 +380,7 @@ def test_a_lagging_rpc_or_portal_leaves_the_cancel_in_force_and_the_reason_can_b
     assert pauses == [2.0, 5.0, 15.0] and (BRL["feedId"], E1) not in node.pending
     assert str(c).endswith("The reason is not recorded (bad_answer); the cancel stands.")
     first = session.posts[0]["body"]
-    for answer, want in [((401, {"code": "bad_signature"}), (False, "bad_signature")),
-                         ((409, {"error": {"code": "already_recorded", "message": "On record."}}),
+    for answer, want in [((409, {"error": {"code": "already_recorded", "message": "On record."}}),
                           (True, "already_recorded")),
                          ((200, {"recorded": True, "tx": c.tx, "firm": "Test firm"}), (True, None))]:
         session.routes[route], session.posts[:] = [answer], []
@@ -432,3 +457,112 @@ def test_only_a_bool_picks_the_mode_and_the_pins_name_each_chain():
     for bad in (1, "true", None):
         with pytest.raises(crx.ConfigError, match=r"^test must be True or False\.$"):
             crx.Guardian(test=bad, rpc_url=LIVE_RPC)
+
+
+def test_a_portal_that_refuses_the_v2_text_gets_the_v1_text_once(make, session, key):
+    route = ("POST", "/api/v1/reasons")
+    tx = "0x" + "a1" * 32
+    session.routes[route] = [(401, {"error": {"code": "bad_signature", "message": "No match."}}),
+                             (200, {"recorded": True, "tx": tx, "firm": "Test firm"})]
+    g = make()
+    pauses = []
+    g._sleep = pauses.append
+
+    assert g.record_reason(tx, BRL["feedId"], E1, "3 % off Pyth spot") == (True, None)
+
+    v2, v1 = [p["body"] for p in session.posts]
+    assert (v2["issuedAt"], v2["domain"], pauses) == ("2026-11-20T18:40:00.000Z", "safe.test", [])
+    assert v1 == {"mode": "test", "tx": tx, "feedId": BRL["feedId"], "expiry": str(E1), "reason": "3 % off Pyth spot",
+                  "signer": key.address.lower(), "sig": v1["sig"]}
+    text = gd.reason_message("test", tx, BRL["feedId"], E1, "3 % off Pyth spot")
+    assert Account.recover_message(encode_defunct(text=text), signature=v1["sig"]) == key.address
+    session.routes[route], session.posts[:] = [(401, {"error": {"code": "bad_proof", "message": "Too old."}}),
+                                               (401, {"error": {"code": "bad_signature", "message": "No match."}})], []
+    assert g.record_reason(tx, BRL["feedId"], E1, "3 % off Pyth spot") == (False, "bad_signature")
+    assert ["issuedAt" in p["body"] for p in session.posts] == [True, False]
+
+
+class Custody:
+    """A custody or hardware signer: an address and the two sign calls of an eth_account LocalAccount."""
+
+    def __init__(self, inner, tx_key=None, nonce_shift=0, text_fails=False):
+        self.address = inner.address
+        self._inner, self._tx_key, self._shift, self._text_fails = inner, tx_key or inner, nonce_shift, text_fails
+        self.asked: list[dict] = []
+
+    def sign_transaction(self, tx):
+        self.asked.append(tx)
+        return self._tx_key.sign_transaction({**tx, "nonce": tx["nonce"] + self._shift})
+
+    def sign_message(self, message):
+        if self._text_fails:
+            raise TimeoutError("the device did not answer")
+        return self._inner.sign_message(message)
+
+
+def test_an_account_signer_cancels_and_signs_the_reason_as_a_key_does(make, node, session, key, tmp_path):
+    node.members.add(key.address.lower())
+    node.propose(BRL["feedId"], E1, 6_160_000, NOW + 3600, block=100)
+    session.routes[("POST", "/api/v1/reasons")] = (200, {"recorded": True, "tx": "0x" + w(9), "firm": "Test firm"})
+    signer = Custody(key)
+    g = make(with_key=False, account=signer)
+
+    c = g.cancel(proposal(), reason="3 % off Pyth spot")
+
+    assert g.address == key.address.lower() and c.reason_recorded is True
+    assert node.sent == [{"from": key.address.lower(), "to": ROLES, "data": PINNED}] and len(signer.asked) == 1
+    [post] = session.posts
+    assert post["body"]["signer"] == key.address.lower()
+    for extra in ({"key": key.key.hex()}, {"key_file": tmp_path / "k"}):
+        with pytest.raises(crx.ConfigError, match=r"^Set one of key, key_file and account\.$"):
+            crx.Guardian(test=True, account=signer, **extra)
+    with pytest.raises(crx.ConfigError, match="account needs an address"):
+        crx.Guardian(test=True, account=object())
+
+
+def test_an_account_signature_of_another_transaction_or_wallet_is_refused_and_a_failed_text_leaves_the_cancel(
+        make, node, session, key):
+    node.members.add(key.address.lower())
+    node.propose(BRL["feedId"], E1, 6_160_000, NOW + 3600, block=100)
+    other = Account.from_key(hashlib.sha256(b"crx-python tests: another key").digest())
+    for signer in (Custody(key, nonce_shift=1), Custody(key, tx_key=other)):
+        with pytest.raises(crx.RefusedToSign, match="nothing was sent"):
+            make(with_key=False, account=signer).cancel(proposal(), reason="3 % off Pyth spot")
+    assert node.sent == [] and session.posts == []
+
+    c = make(with_key=False, account=Custody(key, text_fails=True)).cancel(proposal(), reason="3 % off Pyth spot")
+
+    assert (c.reason_recorded, c.reason_error, session.posts) == (False, "not_signed", [])
+    assert (BRL["feedId"], E1) not in node.pending
+    assert str(c).endswith("The reason is not recorded (not_signed); the cancel stands.")
+
+
+def test_post_test_price_and_proposals_compare_with_one_reference(make, node, session):
+    ref = ("GET", "/api/v1/reference", "USD/BRL")
+    session.routes[ref] = (200, {"pair": "USD/BRL", "pyth": 5.980589999999999, "pythAt": NOW - 2, "crx": 5.98064,
+                                 "crxAt": NOW - 600, "base": "pyth"})
+    g = make()
+    clock = [NOW]
+    g._clock = lambda: clock[0]
+
+    p = g.post_test_price("USD/BRL", off_bp=300)
+    session.routes[ref] = (200, {"pair": "USD/BRL", "pyth": 5.99, "pythAt": NOW + 5, "crx": 5.98064,
+                                 "crxAt": NOW - 600, "base": "pyth"})
+    clock[0] = NOW + 10
+    [q] = g.proposals()
+
+    assert (p.reference, p.reference_source, p.price, p.diff_bp) == (Decimal("5.98059"), "pyth", Decimal("6.160008"),
+                                                                     Decimal("300.0"))
+    assert (q.tx, q.reference, q.reference_source, q.reference_at, q.diff_bp) == (
+        p.tx, p.reference, p.reference_source, p.reference_at, p.diff_bp)
+    clock[0] = NOW + 20  # the kept reference lapses; the portal's base names the CRX print
+    session.routes[ref] = (200, {"pair": "USD/BRL", "pyth": 5.99, "pythAt": NOW - 900, "crx": 5.98064,
+                                 "crxAt": NOW - 600, "base": "crx"})
+    [q] = g.proposals()
+    assert (q.reference, q.reference_source) == (Decimal("5.98064"), "crx")
+    clock[0] = NOW + 40  # a portal without /reference: its proposal rows carry the reference
+    del session.routes[ref]
+    session.routes[("GET", "/api/v1/proposals")] = (200, [{"pair": "USD/BRL", "reference": {
+        "pyth": 5.985, "pythAt": NOW + 30, "crx": None, "crxAt": None}}])
+    [q] = g.proposals()
+    assert (q.reference, q.reference_source) == (Decimal("5.985"), "pyth")

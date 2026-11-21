@@ -5,7 +5,7 @@ Trade FX forwards on CRX from Python.
 ## Install
 
 ```bash
-pip install "git+https://github.com/crxfoundation/crx-python@v0.5.0"
+pip install "git+https://github.com/crxfoundation/crx-python@v0.5.1"
 ```
 
 Python 3.10 or newer.
@@ -205,7 +205,7 @@ Quick Start, in Test mode:
 2. Install the SDK:
 
    ```bash
-   pip install "git+https://github.com/crxfoundation/crx-python@v0.5.0"
+   pip install "git+https://github.com/crxfoundation/crx-python@v0.5.1"
    ```
 
 3. Load the guardian wallet:
@@ -238,10 +238,11 @@ Live: drop `test=True` and pass `rpc_url=` or set `CRX_RPC`. Live reads work now
 | `post_test_price(pair, off_bp=0, kind="fixing")` | Test only. A new `Proposal` on the Test venue. `kind`: `fixing`, `final_price` or `steward_mark`. At most 5 open per wallet. |
 
 - `kind` is `fixing`, `final_price`, `steward_mark` or `trade_price`. `pair` is `USD/BRL`, `USD/MXN` or `USDC/USDT`, and `None` for a trade price.
-- `reference` is Pyth spot from `hermes_url=` or `CRX_HERMES_URL` when set, else Pyth spot from the portal, else the latest CRX print on the chain. `reference_source` is `pyth` or `crx`. `diff_bp` is (price - reference) / reference x 10,000.
+- `reference` is Pyth spot from `hermes_url=` or `CRX_HERMES_URL` when set, else the portal's reference (Pyth spot under 5 minutes old, else the latest CRX print), else the latest CRX print on the chain. `reference_source` is `pyth` or `crx`. `diff_bp` is (price - reference) / reference x 10,000. `post_test_price()` uses the same reference as `proposals()`.
 - `cancel()` refuses a trade hold release and the listed mark of a pair with `not_cancellable`, before any send. The reason is 10 to 280 characters on one line.
 - The reason goes to `portal_url=` (default `https://safe.crxfx.com`, or `CRX_SAFE_URL`). A reason that is not recorded leaves the cancel in force: `reason_recorded` is `False` and `reason_error` holds the code. `record_reason(c.tx, p.feed_id, p.expiry, reason)` sends it again. A portal that has not read the cancel yet gets the same post again, 3 posts over about 20 seconds.
 - The Guardian takes its key from `key=` or `key_file=` only, never from `CRX_WALLET_PK`. Without a key, only the reads work.
+- `account=` takes a custody or hardware signer in place of a key: an object with `address`, `sign_transaction(dict)` and `sign_message(SignableMessage)`, as an eth_account `LocalAccount`. The SDK checks each signature before it sends.
 - Live and Test addresses are pinned in the SDK. Live (chain 1): core `0x0d716cA9Fc2BFD8c66D2AF2fB38b56D08809A8cc`. The RPC must serve the mode's chain, else `config`.
 
 ## Errors

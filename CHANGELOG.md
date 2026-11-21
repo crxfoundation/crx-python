@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.1
+
+- `Guardian(account=...)` takes a custody or hardware signer in place of a key: an object with `address`, `sign_transaction(dict)` and `sign_message(SignableMessage)`, as an eth_account `LocalAccount`. Set one of `key`, `key_file` and `account`. The SDK checks each signature before it sends: a transaction other than the one asked, or from another address, raises `refused_to_sign` with nothing sent.
+- A reason the `account=` signer does not sign leaves the cancel in force: `reason_recorded` is `False` and `reason_error` is `not_signed`.
+- `post_test_price()` and `proposals()` compare with one reference: Pyth from `hermes_url` when set, else the portal's reference, else the latest CRX print. One read of a pair's reference serves both calls for 15 seconds. The portal's reference follows its own base: Pyth spot under 5 minutes old, else the latest CRX print.
+- The wallet signs the v2 reason text: it adds the pair (or the trade id), the fixing time in New York time, the portal host and the signing time. The post adds `issuedAt` and `domain`. A portal that answers `bad_signature` or `bad_proof` to the v2 text gets the v1 text once. `crx.guardian.reason_message_v2` builds the v2 text.
+- No existing call, field, error code or argument default changes. A 0.5.0 client keeps working: the portal takes the v1 text.
+- The install line names `@v0.5.1`.
+
 ## 0.5.0
 
 - `crx.Guardian` is new. A guardian wallet reads the manual prices that wait for their write (`proposals()`), cancels one with a signed reason (`cancel()`), sends a reason that is not recorded again (`record_reason()`), reads the outcomes of the last days (`history()`) and follows new proposals (`watch()`). `Guardian(test=True)` works on the Test venue, where `post_test_price()` proposes a test price.
