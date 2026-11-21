@@ -318,6 +318,11 @@ class EarlierOutcome(CrxError):
     code = "earlier_outcome"
 
 
+class NotGuardian(CrxError):
+    """The wallet holds no guardian role in this mode, or the mode takes no cancel yet. Nothing was sent."""
+    code = "not_guardian"
+
+
 _BY_GATEWAY_CODE: dict[str, type[CrxError]] = {
     "market_paused": MarketPaused,
     "notional_below_minimum": BelowMin,

@@ -1,4 +1,4 @@
-"""CRX Python SDK: quote, trade, deposit and withdraw on the CRX FX forwards venue."""
+"""CRX Python SDK: quote, trade, deposit and withdraw on the CRX FX forwards venue; cancel a price as a guardian."""
 
 from .client import NETWORKS, Client
 from .errors import (
@@ -8,15 +8,17 @@ from .errors import (
     QuoteFillsFull, QuoteFormatOutdated, QuoteLost, QuoteNotYours, QuoteRejected, RateLimited, RateOutOfBand,
     RefusedToSign, Rejected, RfqCancelled, SeatCannotSign, SeatNotReady, SendUnknown, ServerError,
     ServiceUnavailable, TradeInFlight, TradeUnknown, TxFailed, UnknownOrEnded, WithdrawInProgress, WithdrawUnknown,
+    NotGuardian,
 )
+from .guardian import Guardian
 from .models import (
     Ask, Balance, Close, Deposit, Drop, Event, MakerQuote, Market, Position, Quote, Rfq, Trade, Viewer, Withdraw,
 )
 
-__version__ = "0.4.1"
+__version__ = "0.5.0"
 
 __all__ = [
-    "Client", "NETWORKS", "__version__",
+    "Client", "Guardian", "NETWORKS", "__version__",
     "Ask", "Balance", "Close", "Deposit", "Drop", "Event", "MakerQuote", "Market", "Position", "Quote", "Rfq",
     "Trade", "Viewer", "Withdraw",
     "CrxError", "AboveMax", "DepositFailed", "EarlierOutcome", "AlreadyAccepted", "AuthError", "BadAnswer",
@@ -26,4 +28,5 @@ __all__ = [
     "QuoteLost", "QuoteNotYours", "QuoteRejected", "RateLimited", "RefusedToSign", "Rejected", "RfqCancelled",
     "SeatCannotSign", "SeatNotReady", "SendUnknown", "ServerError", "ServiceUnavailable",
     "TradeInFlight", "TradeUnknown", "TxFailed", "UnknownOrEnded", "WithdrawInProgress", "WithdrawUnknown",
+    "NotGuardian",
 ]
