@@ -275,8 +275,8 @@ class Confirmation:
     leg: str | None
     status: str
     voided_at: int | None
-    suspended_text: str | None
-    void_text: str | None
+    status_text: str | None
+    fixing_election: dict | None
     revision: int | None
     content_hash: str | None
     template_version: str | None
@@ -360,7 +360,7 @@ class Confirmation:
         opening_final = raw.get("opening_final") if isinstance(raw.get("opening_final"), bool) else None
         return cls(
             confirmation_id=cid, trade_id=tid, rfq_id=text("rfq_id"), leg=text("leg"), status=status,
-            voided_at=integer("voided_at"), suspended_text=text("suspended_text"), void_text=text("void_text"),
+            voided_at=integer("voided_at"), status_text=text("status_text"), fixing_election=raw.get("fixing_election") if isinstance(raw.get("fixing_election"), dict) else None,
             revision=revision, content_hash=text("content_hash"),
             template_version=text("template_version"), issued_at=integer("issued_at"), issued_at_iso=text("issued_at_iso"),
             party=raw.get("party") if isinstance(raw.get("party"), dict) else {},

@@ -2,7 +2,7 @@
 
 ## 0.5.4
 
-- Type the per-leg Confirmation fields, including the dealer counterparty and opening finality. Unknown fields remain available in `raw`.
+- Type per-leg Confirmation status text and fixing elections. Unknown fields remain available in `raw`.
 - No existing call, field, error or argument default changes.
 
 ## 0.5.3

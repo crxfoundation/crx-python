@@ -305,7 +305,7 @@ Every error is a `crx.CrxError`. Branch on `.code`. Show `str(e)`: on a gateway 
 
 ## Trade confirmations
 
-`client.confirmation(trade_id)` reads the caller's leg. `client.confirmations(after=0, limit=100)` returns a page; pass its `cursor` as the next `after`. A `trade.confirmation` stream event exposes the typed record as `event.confirmation`. Each `Confirmation` has typed fields for its leg, parties, opening status, economics, settlement terms, reporting fields and delivery. Unknown fields remain in `confirmation.raw`.
+`client.confirmation(trade_id)` reads the caller's leg. `client.confirmations(after=0, limit=100)` returns a page; pass its `cursor` as the next `after`. A `trade.confirmation` stream event exposes the typed record as `event.confirmation`. Each `Confirmation` has typed fields for its leg, parties, status text, fixing election, opening status, economics, settlement terms, reporting fields and delivery. Unknown fields remain in `confirmation.raw`.
 
 ## Tests
 
