@@ -5,7 +5,7 @@ Trade FX forwards on CRX from Python.
 ## Install
 
 ```bash
-pip install "git+https://github.com/crxfoundation/crx-python@v0.5.4"
+pip install "git+https://github.com/crxfoundation/crx-python@v0.5.2"
 ```
 
 Python 3.10 or newer.

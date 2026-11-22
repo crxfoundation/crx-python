@@ -16,7 +16,7 @@ from .models import (
     Rfq, Trade, Viewer, Withdraw,
 )
 
-__version__ = "0.5.4"
+__version__ = "0.5.3"
 
 __all__ = [
     "Client", "Guardian", "NETWORKS", "__version__",

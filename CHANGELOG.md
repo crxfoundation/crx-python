@@ -1,13 +1,8 @@
 # Changelog
 
-## 0.5.4
-
-- Type per-leg Confirmation status text and fixing elections. Unknown fields remain available in `raw`.
-- No existing call, field, error or argument default changes.
-
 ## 0.5.3
 
-- Add typed `confirmation()` and cursor-paged `confirmations()` reads, plus typed parsing for `trade.confirmation` event frames.
+- Add typed `confirmation()` and cursor-paged `confirmations()` reads, plus typed parsing for `trade.confirmation` event frames, with per-leg status text and fixing elections. Unknown fields remain available in `raw`.
 - No existing call, field, error or argument default changes.
 
 ## 0.5.2
