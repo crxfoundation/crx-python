@@ -34,7 +34,8 @@ from .errors import (
     WithdrawInProgress, WithdrawUnknown, clean,
 )
 from .models import (
-    Ask, Balance, Close, Deposit, Drop, Event, MakerQuote, Market, Position, Quote, Rfq, Trade, Viewer, Withdraw,
+    Ask, Balance, Close, Confirmation, ConfirmationPage, Deposit, Drop, Event, MakerQuote, Market, Position, Quote,
+    Rfq, Trade, Viewer, Withdraw,
     dec, _final, _provisional, ms_to_dt, side_word,
 )
 
@@ -751,12 +752,38 @@ class Client:
                 cid = d.get("client_rfq_id") if isinstance(d, dict) else None
                 return isinstance(cid, str) and cid != ""
             rows = [r for r in rows if r.get("type") != "rfq.opened" or own_rfq(r)]
-        return [
-            Event(type=str(r.get("type")), seq=r.get("seq") if isinstance(r.get("seq"), int) else None,
-                  ts=ms_to_dt(r.get("ts")),
-                  data=r.get("data") if isinstance(r.get("data"), dict) else {}, raw=r)
-            for r in rows
-        ]
+        return [Event.from_wire(r) for r in rows]
+
+    def confirmation(self, trade_id: str) -> Confirmation:
+        """Read this account's confirmation for ``trade_id``."""
+        self._need_key()
+        tid = _word(trade_id)
+        if tid is None:
+            raise BadRequest("trade_id is not a 32-byte hex value")
+        body = self._gw.request("GET", f"/confirmations/{tid}", query={"chain": self.chain_key})
+        try:
+            return Confirmation.from_wire(body)
+        except ValueError as e:
+            raise BadAnswer("/confirmations answered no confirmation") from e
+
+    def confirmations(self, after: int = 0, limit: int = 100) -> ConfirmationPage:
+        """Read one page of this account's confirmations, oldest first."""
+        self._need_key()
+        if type(after) is not int or after < 0:
+            raise BadRequest("after must be a non-negative integer")
+        if type(limit) is not int or not 1 <= limit <= 1000:
+            raise BadRequest("limit must be 1 to 1000")
+        body = self._gw.request(
+            "GET", "/confirmations", query={"after": after, "limit": limit, "chain": self.chain_key},
+        )
+        rows, cursor = body.get("confirmations"), body.get("cursor")
+        if not isinstance(rows, list) or type(cursor) is not int or cursor < 0:
+            raise BadAnswer("/confirmations answered no page or cursor")
+        try:
+            parsed = [Confirmation.from_wire(row) for row in rows]
+        except ValueError as e:
+            raise BadAnswer("/confirmations answered an invalid confirmation") from e
+        return ConfirmationPage(parsed, cursor)
 
     def quote(
         self,

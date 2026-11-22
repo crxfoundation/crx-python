@@ -246,6 +246,79 @@ class Event:
     ts: datetime | None
     data: dict
     raw: dict = field(repr=False, compare=False)
+    confirmation: Confirmation | None = None
+
+    @classmethod
+    def from_wire(cls, raw: dict) -> Event:
+        """Parse an event frame and its typed confirmation, when present."""
+        data = raw.get("data") if isinstance(raw.get("data"), dict) else {}
+        confirmation = None
+        if raw.get("type") == "trade.confirmation":
+            try:
+                confirmation = Confirmation.from_wire(data)
+            except ValueError:
+                pass
+        seq = raw.get("seq")
+        return cls(
+            type=str(raw.get("type")), seq=seq if isinstance(seq, int) else None,
+            ts=ms_to_dt(raw.get("ts")), data=data, raw=raw, confirmation=confirmation,
+        )
+
+
+@dataclass(frozen=True)
+class Confirmation:
+    """One party's trade confirmation. ``raw`` keeps every field from the gateway."""
+
+    confirmation_id: str
+    trade_id: str
+    rfq_id: str | None
+    status: str
+    revision: int | None
+    content_hash: str | None
+    issued_at: int | None
+    party: dict
+    counterparty: dict
+    delivery: dict
+    raw: dict = field(repr=False, compare=False)
+
+    @classmethod
+    def from_wire(cls, raw: dict) -> Confirmation:
+        """Parse a confirmation while retaining unknown fields in ``raw``."""
+        if not isinstance(raw, dict):
+            raise ValueError("confirmation is not an object")
+        cid, tid, status = raw.get("confirmation_id"), raw.get("trade_id"), raw.get("status")
+        if not isinstance(cid, str) or not isinstance(tid, str) or not isinstance(status, str):
+            raise ValueError("confirmation is missing its id, trade id or status")
+        issued = raw.get("issued_at")
+        if issued is not None and (not isinstance(issued, int) or isinstance(issued, bool)):
+            issued = None
+        revision = raw.get("revision")
+        if revision is not None and (not isinstance(revision, int) or isinstance(revision, bool)):
+            revision = None
+        return cls(
+            confirmation_id=cid, trade_id=tid,
+            rfq_id=raw.get("rfq_id") if isinstance(raw.get("rfq_id"), str) else None,
+            status=status, revision=revision,
+            content_hash=raw.get("content_hash") if isinstance(raw.get("content_hash"), str) else None,
+            issued_at=issued,
+            party=raw.get("party") if isinstance(raw.get("party"), dict) else {},
+            counterparty=raw.get("counterparty") if isinstance(raw.get("counterparty"), dict) else {},
+            delivery=raw.get("delivery") if isinstance(raw.get("delivery"), dict) else {}, raw=raw,
+        )
+
+
+@dataclass(frozen=True)
+class ConfirmationPage:
+    """One page of confirmations. Pass ``cursor`` as ``after`` for the next page."""
+
+    confirmations: list[Confirmation]
+    cursor: int
+
+    def __iter__(self):
+        return iter(self.confirmations)
+
+    def __len__(self) -> int:
+        return len(self.confirmations)
 
 
 @dataclass(frozen=True)

@@ -12,14 +12,16 @@ from .errors import (
 )
 from .guardian import Guardian
 from .models import (
-    Ask, Balance, Close, Deposit, Drop, Event, MakerQuote, Market, Position, Quote, Rfq, Trade, Viewer, Withdraw,
+    Ask, Balance, Close, Confirmation, ConfirmationPage, Deposit, Drop, Event, MakerQuote, Market, Position, Quote,
+    Rfq, Trade, Viewer, Withdraw,
 )
 
-__version__ = "0.5.2"
+__version__ = "0.5.3"
 
 __all__ = [
     "Client", "Guardian", "NETWORKS", "__version__",
-    "Ask", "Balance", "Close", "Deposit", "Drop", "Event", "MakerQuote", "Market", "Position", "Quote", "Rfq",
+    "Ask", "Balance", "Close", "Confirmation", "ConfirmationPage", "Deposit", "Drop", "Event", "MakerQuote",
+    "Market", "Position", "Quote", "Rfq",
     "Trade", "Viewer", "Withdraw",
     "CrxError", "AboveMax", "DepositFailed", "EarlierOutcome", "AlreadyAccepted", "AuthError", "BadAnswer",
     "BadRequest", "BelowMin", "ConfigError", "Declined", "MarkUnavailable", "PositionMatured", "RateOutOfBand",

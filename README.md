@@ -5,7 +5,7 @@ Trade FX forwards on CRX from Python.
 ## Install
 
 ```bash
-pip install "git+https://github.com/crxfoundation/crx-python@v0.5.2"
+pip install "git+https://github.com/crxfoundation/crx-python@v0.5.3"
 ```
 
 Python 3.10 or newer.
@@ -95,6 +95,8 @@ print(w.amount, w.status)
 | `balance()` | Returns collateral, free collateral, margin and withdraw state. |
 | `positions()` | Lists open positions with entry price, mark price, mark time and unrealized P&L. The mark and the P&L are `None` with no mark. |
 | `trades(after=0, market=False, recover_restore=False)` | Returns the event tape of the seat, oldest first. With `recover_restore=True`, a cursor that the gateway refuses after a service restore reads the tape again from the start, once per call; a second refusal raises `conflict`. |
+| `confirmation(trade_id)` | Reads this seat's confirmation for one trade. |
+| `confirmations(after=0, limit=100)` | Reads one page of this seat's confirmations. Pass `page.cursor` as `after` for the next page. |
 | `add_viewer(addr)`, `remove_viewer(addr)`, `viewers()` | Grants, takes back and lists read access to the seat, for up to 5 wallets. |
 
 `quote()` and `ask()` take the same terms:
@@ -120,6 +122,8 @@ print(w.amount, w.status)
 A chain reorg can still take back an `open` trade. `Trade.provisional` is true while CRX marks the open provisional. `final` on a `Trade` or `Position` turns true once CRX marks the trade final, and no `trade.retracted` follows.
 
 `trades()` returns `trade.opened`, `trade.refused`, `trade.settled`, `trade.closed`, `trade.closed_out`, `trade.novated`, `trade.retracted`, `trade.final`, `margin.called`, `margin.cured` and the seat's RFQ events. Key trades on `trade_id`. A later `trade.opened` with no `provisional` key replaces a provisional one. `trade.final`, or a `trade.opened` with `final: true`, marks the trade final. `after=` takes the last `Event.seq` read and returns newer events only. `market=True` adds every open RFQ a maker seat receives, with no owner named.
+
+`Event.from_wire()` parses a `trade.confirmation` frame into `Event.confirmation`. The typed confirmation keeps the full response in `.raw`, including fields added by later gateway versions.
 
 ## Maker
 

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.3
+
+- Add typed `confirmation()` and cursor-paged `confirmations()` reads, plus typed parsing for `trade.confirmation` event frames.
+- No existing call, field, error or argument default changes.
+
 ## 0.5.2
 
 - `history()`: a cancel's `by` is the wallet that sent the cancel transaction (the guardian wallet, or CRX), read with `eth_getTransactionByHash`. 0.5.1 gave the venue Safe that the cancel log names. A write's `by` does not change.
