@@ -272,12 +272,72 @@ class Confirmation:
     confirmation_id: str
     trade_id: str
     rfq_id: str | None
+    leg: str | None
     status: str
+    voided_at: int | None
+    suspended_text: str | None
+    void_text: str | None
     revision: int | None
     content_hash: str | None
+    template_version: str | None
     issued_at: int | None
+    issued_at_iso: str | None
     party: dict
     counterparty: dict
+    dealer_text: str | None
+    opening_final: bool | None
+    opening_text: str | None
+    trade_date: str | None
+    execution_time: int | None
+    execution_time_iso: str | None
+    product: str | None
+    settlement_type: str | None
+    product_note_text: str | None
+    pair: str | None
+    base_currency: str | None
+    quote_currency: str | None
+    reference_currency: str | None
+    reference_currency_text: str | None
+    notional: dict
+    reference_notional: dict | None
+    usd_notional: str | None
+    usd_notional_text: str | None
+    forward_rate: str | None
+    premium_bps: int | None
+    premium_text: str | None
+    buyer: str | None
+    seller: str | None
+    buyer_seller_text: str | None
+    settlement_currency: str | None
+    settlement_currency_text: str | None
+    settlement_time: int | None
+    settlement_time_iso: str | None
+    settlement_time_text: str | None
+    valuation_date: str | None
+    valuation_date_text: str | None
+    settlement_date: str | None
+    settlement_date_text: str | None
+    settlement_rate: dict
+    business_days: dict
+    settlement_amount: Any
+    settlement_amount_direction: str | None
+    settlement_payment_text: str | None
+    settlement_shortfall_text: str | None
+    fallback: str | None
+    delisting_text: str | None
+    early_end_text: str | None
+    calculation_agent: str | None
+    governing_terms: str | None
+    rules_version_text: str | None
+    confirmation_statement: str | None
+    not_provided: str | None
+    open_inputs: list
+    open_input_labels: dict
+    uti: str | None
+    uti_text: str | None
+    reporting_status: str | None
+    reporting_counterparty: str | None
+    clearing_status: str | None
     delivery: dict
     raw: dict = field(repr=False, compare=False)
 
@@ -289,20 +349,47 @@ class Confirmation:
         cid, tid, status = raw.get("confirmation_id"), raw.get("trade_id"), raw.get("status")
         if not isinstance(cid, str) or not isinstance(tid, str) or not isinstance(status, str):
             raise ValueError("confirmation is missing its id, trade id or status")
-        issued = raw.get("issued_at")
-        if issued is not None and (not isinstance(issued, int) or isinstance(issued, bool)):
-            issued = None
-        revision = raw.get("revision")
-        if revision is not None and (not isinstance(revision, int) or isinstance(revision, bool)):
-            revision = None
+        def text(name: str) -> str | None:
+            value = raw.get(name)
+            return value if isinstance(value, str) else None
+        def integer(name: str) -> int | None:
+            value = raw.get(name)
+            return value if isinstance(value, int) and not isinstance(value, bool) else None
+        revision = integer("revision")
+        premium = integer("premium_bps")
+        opening_final = raw.get("opening_final") if isinstance(raw.get("opening_final"), bool) else None
         return cls(
-            confirmation_id=cid, trade_id=tid,
-            rfq_id=raw.get("rfq_id") if isinstance(raw.get("rfq_id"), str) else None,
-            status=status, revision=revision,
-            content_hash=raw.get("content_hash") if isinstance(raw.get("content_hash"), str) else None,
-            issued_at=issued,
+            confirmation_id=cid, trade_id=tid, rfq_id=text("rfq_id"), leg=text("leg"), status=status,
+            voided_at=integer("voided_at"), suspended_text=text("suspended_text"), void_text=text("void_text"),
+            revision=revision, content_hash=text("content_hash"),
+            template_version=text("template_version"), issued_at=integer("issued_at"), issued_at_iso=text("issued_at_iso"),
             party=raw.get("party") if isinstance(raw.get("party"), dict) else {},
             counterparty=raw.get("counterparty") if isinstance(raw.get("counterparty"), dict) else {},
+            dealer_text=text("dealer_text"), opening_final=opening_final, opening_text=text("opening_text"),
+            trade_date=text("trade_date"), execution_time=integer("execution_time"), execution_time_iso=text("execution_time_iso"),
+            product=text("product"), settlement_type=text("settlement_type"), product_note_text=text("product_note_text"), pair=text("pair"),
+            base_currency=text("base_currency"), quote_currency=text("quote_currency"), reference_currency=text("reference_currency"),
+            reference_currency_text=text("reference_currency_text"), notional=raw.get("notional") if isinstance(raw.get("notional"), dict) else {},
+            reference_notional=raw.get("reference_notional") if isinstance(raw.get("reference_notional"), dict) else None,
+            usd_notional=text("usd_notional"), usd_notional_text=text("usd_notional_text"), forward_rate=text("forward_rate"),
+            premium_bps=premium, premium_text=text("premium_text"), buyer=text("buyer"), seller=text("seller"),
+            buyer_seller_text=text("buyer_seller_text"), settlement_currency=text("settlement_currency"),
+            settlement_currency_text=text("settlement_currency_text"), settlement_time=integer("settlement_time"),
+            settlement_time_iso=text("settlement_time_iso"), settlement_time_text=text("settlement_time_text"),
+            valuation_date=text("valuation_date"), valuation_date_text=text("valuation_date_text"),
+            settlement_date=text("settlement_date"), settlement_date_text=text("settlement_date_text"),
+            settlement_rate=raw.get("settlement_rate") if isinstance(raw.get("settlement_rate"), dict) else {},
+            business_days=raw.get("business_days") if isinstance(raw.get("business_days"), dict) else {},
+            settlement_amount=raw.get("settlement_amount"), settlement_amount_direction=text("settlement_amount_direction"),
+            settlement_payment_text=text("settlement_payment_text"), settlement_shortfall_text=text("settlement_shortfall_text"),
+            fallback=text("fallback"), delisting_text=text("delisting_text"), early_end_text=text("early_end_text"),
+            calculation_agent=text("calculation_agent"),
+            governing_terms=text("governing_terms"), rules_version_text=text("rules_version_text"),
+            confirmation_statement=text("confirmation_statement"), not_provided=text("not_provided"),
+            open_inputs=raw.get("open_inputs") if isinstance(raw.get("open_inputs"), list) else [],
+            open_input_labels=raw.get("open_input_labels") if isinstance(raw.get("open_input_labels"), dict) else {},
+            uti=text("uti"), uti_text=text("uti_text"), reporting_status=text("reporting_status"),
+            reporting_counterparty=text("reporting_counterparty"), clearing_status=text("clearing_status"),
             delivery=raw.get("delivery") if isinstance(raw.get("delivery"), dict) else {}, raw=raw,
         )
 

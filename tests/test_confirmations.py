@@ -9,10 +9,10 @@ TRADE_ID = "0x" + "12" * 32
 def record(**extra):
     return {
         "confirmation_id": f"{TRADE_ID}-taker", "trade_id": TRADE_ID, "rfq_id": "0x" + "34" * 32,
-        "status": "issued", "revision": 1, "content_hash": "sha256:" + "ab" * 32,
+        "leg": "T", "status": "issued", "revision": 1, "content_hash": "sha256:" + "ab" * 32,
         "issued_at": 1795300000000,
         "party": {"role": "taker", "account": "0x" + "56" * 20},
-        "counterparty": {"role": "maker", "account": "0x" + "78" * 20},
+        "counterparty": {"role": "dealer", "legal_name": "CRX Markets and Trading LLC", "lei": None},
         "delivery": {"delivered_at": None, "delivered_via": None}, **extra,
     }
 
@@ -24,6 +24,7 @@ def test_confirmation_reads_typed_record_and_preserves_unknown_fields(make_clien
     assert isinstance(got, crx.Confirmation)
     assert (got.confirmation_id, got.trade_id, got.party["role"]) == (f"{TRADE_ID}-taker", TRADE_ID, "taker")
     assert got.revision == 1 and got.content_hash == "sha256:" + "ab" * 32
+    assert got.leg == "T" and got.counterparty["role"] == "dealer"
     assert got.raw["future_field"] == {"x": 1}
     assert session.calls[0]["query"] == {"chain": ["avax-fuji"]}
 

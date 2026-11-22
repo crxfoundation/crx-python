@@ -5,7 +5,7 @@ Trade FX forwards on CRX from Python.
 ## Install
 
 ```bash
-pip install "git+https://github.com/crxfoundation/crx-python@v0.5.3"
+pip install "git+https://github.com/crxfoundation/crx-python@v0.5.4"
 ```
 
 Python 3.10 or newer.
@@ -302,6 +302,10 @@ Every error is a `crx.CrxError`. Branch on `.code`. Show `str(e)`: on a gateway 
 | `rpc_url=` | `CRX_RPC` | Optional. Testnet: a public RPC. Mainnet: the gateway's `/rpc` route at the base URL, authenticated like the other gateway calls. An RPC set here gets no authentication. |
 | `base_url=` | `CRX_BASE` | Testnet: `https://api.sandbox.crxfx.com`. Mainnet: `https://api.crxfx.com`. |
 | `state_dir=` | `CRX_STATE_DIR` | `~/.crx-quickstart/`, which holds the nonce floor and is shared with the quickstart scripts. |
+
+## Trade confirmations
+
+`client.confirmation(trade_id)` reads the caller's leg. `client.confirmations(after=0, limit=100)` returns a page; pass its `cursor` as the next `after`. A `trade.confirmation` stream event exposes the typed record as `event.confirmation`. Each `Confirmation` has typed fields for its leg, parties, opening status, economics, settlement terms, reporting fields and delivery. Unknown fields remain in `confirmation.raw`.
 
 ## Tests
 
