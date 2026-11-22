@@ -332,7 +332,6 @@ class Confirmation:
     confirmation_statement: str | None
     not_provided: str | None
     open_inputs: list
-    open_input_labels: dict
     uti: str | None
     uti_text: str | None
     reporting_status: str | None
@@ -387,7 +386,6 @@ class Confirmation:
             governing_terms=text("governing_terms"), rules_version_text=text("rules_version_text"),
             confirmation_statement=text("confirmation_statement"), not_provided=text("not_provided"),
             open_inputs=raw.get("open_inputs") if isinstance(raw.get("open_inputs"), list) else [],
-            open_input_labels=raw.get("open_input_labels") if isinstance(raw.get("open_input_labels"), dict) else {},
             uti=text("uti"), uti_text=text("uti_text"), reporting_status=text("reporting_status"),
             reporting_counterparty=text("reporting_counterparty"), clearing_status=text("clearing_status"),
             delivery=raw.get("delivery") if isinstance(raw.get("delivery"), dict) else {}, raw=raw,

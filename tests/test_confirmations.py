@@ -18,7 +18,7 @@ def record(**extra):
 
 
 def test_confirmation_reads_typed_record_and_preserves_unknown_fields(make_client, session):
-    session.routes[("GET", f"/confirmations/{TRADE_ID}")] = record(status="suspended", status_text="Suspended", future_field={"x": 1})
+    session.routes[("GET", f"/confirmations/{TRADE_ID}")] = record(status="suspended", status_text="Suspended", future_field={"x": 1}, open_input_labels={"stale": "field"})
     c = make_client()
     got = c.confirmation(TRADE_ID)
     assert isinstance(got, crx.Confirmation)
@@ -26,9 +26,11 @@ def test_confirmation_reads_typed_record_and_preserves_unknown_fields(make_clien
     assert got.revision == 1 and got.content_hash == "sha256:" + "ab" * 32
     assert got.leg == "T" and got.counterparty["role"] == "dealer"
     assert got.raw["future_field"] == {"x": 1}
+    assert got.raw["open_input_labels"] == {"stale": "field"}
     assert got.status_text == "Suspended"
     assert got.fixing_election == {"fixing": "BRL_PTAX", "name": "PTAX", "text": "Fixing terms"}
     assert not hasattr(got, "suspended_text") and not hasattr(got, "void_text")
+    assert not hasattr(got, "open_input_labels")
     assert session.calls[0]["query"] == {"chain": ["avax-fuji"]}
 
 
