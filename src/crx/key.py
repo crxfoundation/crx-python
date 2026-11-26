@@ -20,6 +20,11 @@ from eth_utils import to_checksum_address
 from ._keys import ENV_KEY_FILE, load_account
 from .errors import ConfigError
 
+try:
+    import fcntl
+except ImportError:  # Windows
+    fcntl = None
+
 DEFAULT_KEY_FILE = "~/.crx/seat.key"
 
 
@@ -28,14 +33,23 @@ def new_key_file(path: str | os.PathLike = DEFAULT_KEY_FILE) -> str:
 
     The key comes from the operating system's random source. ``path`` must not exist: an existing path
     raises ``config`` and stays unchanged. On POSIX the file is owner-only (0600), and a missing folder
-    is made owner-only (0700). The file loads with ``key_file=`` or ``CRX_WALLET_PK_FILE``.
+    is made owner-only (0700) at each level. The file loads with ``key_file=`` or ``CRX_WALLET_PK_FILE``.
     """
     p = Path(path).expanduser()
-    if not p.parent.exists():
+    missing = []
+    folder = p.parent
+    while not folder.exists() and folder != folder.parent:
+        missing.append(folder)
+        folder = folder.parent
+    for folder in reversed(missing):
         try:
-            p.parent.mkdir(mode=0o700, parents=True)
+            folder.mkdir(mode=0o700)
+            if os.name == "posix":
+                os.chmod(folder, 0o700)
+        except FileExistsError:
+            pass
         except OSError:
-            raise ConfigError(f"the folder {p.parent} cannot be made") from None
+            raise ConfigError(f"the folder {folder} cannot be made") from None
     flags = (os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
              | getattr(os, "O_BINARY", 0))
     try:
@@ -53,16 +67,18 @@ def new_key_file(path: str | os.PathLike = DEFAULT_KEY_FILE) -> str:
         view = memoryview(data)
         while view:
             view = view[os.write(fd, view):]
-        os.fsync(fd)
+        _sync(fd)
         written = True
     except OSError:
         pass
     finally:
         os.close(fd)
         data = None
+        if not written:
+            _remove(p)
     if not written:
-        _remove(p)
         raise ConfigError(f"{p} cannot be written")
+    _sync_folder(p.parent)
     address = account.address
     account = None
     try:
@@ -83,6 +99,34 @@ def key_address(path: str | os.PathLike = DEFAULT_KEY_FILE) -> str:
     return to_checksum_address(account.address)
 
 
+def _sync(fd: int) -> None:
+    """Write the file to disk. macOS needs F_FULLFSYNC for that; fsync is the fallback."""
+    full = getattr(fcntl, "F_FULLFSYNC", None) if fcntl is not None else None
+    if full is not None:
+        try:
+            fcntl.fcntl(fd, full)
+            return
+        except OSError:
+            pass
+    os.fsync(fd)
+
+
+def _sync_folder(folder: Path) -> None:
+    """Write the folder entry of the new file to disk (POSIX). A folder that cannot sync is left as it is."""
+    if os.name != "posix":
+        return
+    try:
+        fd = os.open(folder, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        _sync(fd)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
+
+
 def _remove(p: Path) -> None:
     try:
         p.unlink()
@@ -91,7 +135,7 @@ def _remove(p: Path) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Run ``crx-key``. Return 0 on success and 2 on a refusal."""
+    """Run ``crx-key``. Return 0 on success and 2 on a refusal. A usage error exits 2 through argparse."""
     parser = argparse.ArgumentParser(
         prog="crx-key",
         description="Make the seat key on this machine. Only its address goes to CRX.",
@@ -118,7 +162,7 @@ def main(argv: list[str] | None = None) -> int:
     print("Next:     enter the address in Discover (Trading wallet > Use your own wallet) or send it to CRX.")
     print("The key stays on this machine: CRX never asks for it and cannot recover it. Keep an offline backup.")
     use = (f"export {ENV_KEY_FILE}={shlex.quote(str(path))}" if os.name == "posix"
-           else f'set "{ENV_KEY_FILE}={path}"')
+           else f'$env:{ENV_KEY_FILE}="{path}"')
     print(f"Use it:   {use}")
     return 0
 

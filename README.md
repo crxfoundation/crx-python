@@ -18,7 +18,7 @@ Make the seat key on your own machine. Only its address goes to CRX:
 crx-key new
 ```
 
-It writes a new key to `~/.crx/seat.key` (owner-only) and prints the address. Enter the address in Discover under Settings › Company details › Trading wallet › Use your own wallet, or send it to CRX. CRX approves the seat for that address. The key never leaves your machine: CRX never asks for it and cannot recover it, so keep an offline backup. `crx-key new PATH` writes elsewhere and refuses a path that exists. `crx-key address [PATH]` prints the address of a key file. In Python: `crx.key.new_key_file(path)` and `crx.key.key_address(path)` return the address.
+It writes a new key to `~/.crx/seat.key` (owner-only on macOS and Linux; on Windows the file takes its folder's access) and prints the address. Enter the address in Discover under Settings › Company details › Trading wallet › Use your own wallet, or send it to CRX. CRX approves the seat for that address. The key never leaves your machine: CRX never asks for it and cannot recover it, so keep an offline backup. `crx-key new PATH` writes elsewhere and refuses a path that exists. `crx-key address [PATH]` prints the address of a key file. In Python: `crx.key.new_key_file(path)` and `crx.key.key_address(path)` return the address.
 
 Set `CRX_WALLET_PK` to the private key of an onboarded seat wallet. To read the key from a file, pass `key_file="seat.key"` or set `CRX_WALLET_PK_FILE`. When other users can open the file and it is yours, the SDK sets it to owner-only (0600) and prints `set seat.key to owner-only (0600)`. It refuses a key file of another user, or one whose mode does not change. The SDK never prints or logs the key. On mainnet, the wallet needs ETH for the network fee of a deposit.
 

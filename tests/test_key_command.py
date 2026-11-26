@@ -17,12 +17,13 @@ pytestmark = pytest.mark.skipif(os.name != "posix", reason="POSIX file modes")
 
 def test_new_key_file_is_owner_only_loads_to_the_printed_address_and_never_prints_the_key(
         tmp_path, capsys):
-    f = tmp_path / "new-folder" / "seat.key"
+    f = tmp_path / "new-folder" / "inner" / "seat.key"
     assert crx_key.main(["new", str(f)]) == 0
     out, err = capsys.readouterr()
     address = re.search(r"^Address:\s+(0x[0-9a-fA-F]{40})$", out, re.M).group(1)
     assert stat.S_IMODE(os.stat(f).st_mode) == 0o600
-    assert stat.S_IMODE(os.stat(f.parent).st_mode) & 0o077 == 0
+    assert stat.S_IMODE(os.stat(f.parent).st_mode) == 0o700
+    assert stat.S_IMODE(os.stat(f.parent.parent).st_mode) == 0o700
     key = f.read_text().strip().removeprefix("0x").lower()
     assert len(key) == 64
     assert key not in (out + err).lower()
@@ -31,7 +32,7 @@ def test_new_key_file_is_owner_only_loads_to_the_printed_address_and_never_print
     assert capsys.readouterr().out == address + "\n"
 
 
-def test_new_refuses_an_existing_path_and_leaves_it_unchanged(tmp_path, capsys):
+def test_new_never_overwrites_a_path_and_leaves_no_partial_key_file(tmp_path, capsys, monkeypatch):
     f = tmp_path / "seat.key"
     f.write_text("funded key\n")
     os.chmod(f, 0o600)
@@ -42,3 +43,11 @@ def test_new_refuses_an_existing_path_and_leaves_it_unchanged(tmp_path, capsys):
     link.symlink_to(tmp_path / "elsewhere.key")
     assert crx_key.main(["new", str(link)]) == 2
     assert not (tmp_path / "elsewhere.key").exists()
+    cut = tmp_path / "cut.key"
+
+    def interrupted(fd, data):
+        raise KeyboardInterrupt
+    monkeypatch.setattr(crx_key.os, "write", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        crx_key.main(["new", str(cut)])
+    assert not cut.exists()
