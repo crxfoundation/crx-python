@@ -10,6 +10,16 @@ pip install "git+https://github.com/crxfoundation/crx-python@v0.5.2"
 
 Python 3.10 or newer.
 
+## Seat key
+
+Make the seat key on your own machine. Only its address goes to CRX:
+
+```bash
+crx-key new
+```
+
+It writes a new key to `~/.crx/seat.key` (owner-only) and prints the address. Send the address to CRX; the seat opens for that address. The key never leaves your machine: CRX never asks for it and cannot recover it, so keep an offline backup. `crx-key new PATH` writes elsewhere and refuses a path that exists. `crx-key address [PATH]` prints the address of a key file. In Python: `crx.key.new_key_file(path)` and `crx.key.key_address(path)` return the address.
+
 Set `CRX_WALLET_PK` to the private key of an onboarded seat wallet. To read the key from a file, pass `key_file="seat.key"` or set `CRX_WALLET_PK_FILE`. When other users can open the file and it is yours, the SDK sets it to owner-only (0600) and prints `set seat.key to owner-only (0600)`. It refuses a key file of another user, or one whose mode does not change. The SDK never prints or logs the key. On mainnet, the wallet needs ETH for the network fee of a deposit.
 
 Mainnet needs no RPC of your own: the client sends its chain calls to the gateway's `/rpc` route, authenticated like its other gateway calls. `CRX_RPC` is optional and replaces that route with your own node. A `CRX_RPC` that holds `<` or `>` is ignored.

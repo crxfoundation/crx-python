@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "crx-python"
-version = "0.5.3"
+version = "0.5.4"
 description = "Python SDK for the CRX FX forwards venue"
 readme = "README.md"
 license = { text = "LicenseRef-CRX-Proprietary" }
@@ -21,6 +21,9 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
 ]
+
+[project.scripts]
+crx-key = "crx.key:main"
 
 [project.optional-dependencies]
 test = ["pytest>=7"]
