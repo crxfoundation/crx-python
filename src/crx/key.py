@@ -115,8 +115,8 @@ def main(argv: list[str] | None = None) -> int:
     mode = " (owner-only)" if os.name == "posix" else ""
     print(f"Address:  {address}")
     print(f"Key file: {path}{mode}")
-    print("Send the address to CRX to open the seat. The key stays on this machine: "
-          "CRX never asks for it and cannot recover it. Keep an offline backup.")
+    print("Next:     enter the address in Discover (Trading wallet > Use your own wallet) or send it to CRX.")
+    print("The key stays on this machine: CRX never asks for it and cannot recover it. Keep an offline backup.")
     use = (f"export {ENV_KEY_FILE}={shlex.quote(str(path))}" if os.name == "posix"
            else f'set "{ENV_KEY_FILE}={path}"')
     print(f"Use it:   {use}")

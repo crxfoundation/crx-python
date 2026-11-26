@@ -5,6 +5,7 @@
 - `crx-key new [PATH]` is new: it writes a new seat key to a new owner-only file (default `~/.crx/seat.key`) and prints its address. The firm sends CRX the address; the key stays on its machine. An existing path is refused and stays unchanged. `crx-key address [PATH]` prints the address of a key file. `python -m crx.key` runs the same command.
 - `crx.key.new_key_file()` and `crx.key.key_address()` are the same steps in Python.
 - No existing call, field, error code or argument default changes.
+- The install line names `@v0.5.4`. 0.5.4 carries the 0.5.3 changes.
 
 ## 0.5.3
 
